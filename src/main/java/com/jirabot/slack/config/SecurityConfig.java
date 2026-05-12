@@ -44,6 +44,9 @@ public class SecurityConfig {
                         // STUDY: /api/slack/** 는 SlackSignatureFilter 에서 HMAC 검증으로 이미 신원을 확인했으므로
                         // Spring Security 의 authorization 단계에서는 permitAll. 실패 시 필터에서 403 으로 이미 차단됨.
                         .requestMatchers("/api/slack/**").permitAll()
+                        // STUDY: /api/jira/** 는 JiraWebhookController 안에서 ?token=... 검증으로 신원 확인.
+                        // SlackSignatureFilter 는 "/api/slack/" 프리픽스에서만 동작하므로 간섭 없음.
+                        .requestMatchers("/api/jira/**").permitAll()
                         .anyRequest().denyAll()
                 )
                 // STUDY: addFilterBefore(A, B.class) 는 체인에서 A 를 B 보다 앞에 둔다.
