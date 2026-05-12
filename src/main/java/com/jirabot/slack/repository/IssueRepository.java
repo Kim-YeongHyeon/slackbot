@@ -69,4 +69,34 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
            "AND i.storyPoint IS NOT NULL AND i.storyPoint > 0 " +
            "ORDER BY i.storyPoint DESC")
     List<IssueEntity> findTopUncompletedBySp(@Param("doneStatus") String doneStatus, Pageable pageable);
+
+    // --- 스프린트 필터 버전 ---
+
+    // STUDY: 스프린트별 통계를 위한 집계 쿼리. sprintId로 필터링하여 해당 스프린트 이슈만 집계.
+    @Query("SELECT i.statusCategory, COUNT(i), COALESCE(SUM(i.storyPoint), 0) " +
+           "FROM IssueEntity i WHERE i.sprintId = :sprintId GROUP BY i.statusCategory")
+    List<Object[]> countAndSumGroupByStatusAndSprint(@Param("sprintId") int sprintId);
+
+    List<IssueEntity> findByStatusCategoryAndSprintId(String statusCategory, int sprintId);
+
+    @Query("SELECT i FROM IssueEntity i WHERE i.sprintId = :sprintId AND i.statusCategory = :status " +
+           "AND (i.completedAt >= :since OR (i.completedAt IS NULL AND i.jiraUpdated >= :since)) " +
+           "ORDER BY COALESCE(i.completedAt, i.jiraUpdated) DESC")
+    List<IssueEntity> findCompletedSinceInSprint(@Param("status") String status,
+                                                  @Param("since") Instant since,
+                                                  @Param("sprintId") int sprintId);
+
+    @Query("SELECT i FROM IssueEntity i WHERE i.sprintId = :sprintId " +
+           "AND i.statusCategory <> :doneStatus " +
+           "AND i.storyPoint IS NOT NULL AND i.storyPoint > 0 " +
+           "ORDER BY i.storyPoint DESC")
+    List<IssueEntity> findTopUncompletedBySpInSprint(@Param("doneStatus") String doneStatus,
+                                                      @Param("sprintId") int sprintId,
+                                                      Pageable pageable);
+
+    // STUDY: 가장 최근에 동기화된 스프린트의 정보를 가져온다. 통계 요청 시 활성 스프린트를 식별.
+    @Query("SELECT i.sprintId, i.sprintName FROM IssueEntity i " +
+           "WHERE i.sprintId IS NOT NULL GROUP BY i.sprintId, i.sprintName " +
+           "ORDER BY MAX(i.syncedAt) DESC")
+    List<Object[]> findLatestSprintInfo(Pageable pageable);
 }

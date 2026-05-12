@@ -52,6 +52,11 @@ public class IssueEntity {
     //        완료 후 설명 수정 등으로 jiraUpdated가 갱신되어도 완료 시점이 유지된다.
     private Instant completedAt;
 
+    // STUDY: 이슈가 속한 Jira 스프린트 정보. 동기화 시 활성 스프린트의 ID/이름을 함께 저장한다.
+    //        통계 기능에서 현재 스프린트 이슈만 필터링하는 데 사용.
+    private Integer sprintId;
+    private String sprintName;
+
     // STUDY: 동기화 시점을 기록해서 마지막 동기화 이후 변경분만 가져올 수 있다.
     private Instant syncedAt;
 
@@ -114,5 +119,11 @@ public class IssueEntity {
     }
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
+    public Integer getSprintId() { return sprintId; }
+    public String getSprintName() { return sprintName; }
+    public void setSprint(int sprintId, String sprintName) {
+        this.sprintId = sprintId;
+        this.sprintName = sprintName;
+    }
     public Instant getSyncedAt() { return syncedAt; }
 }

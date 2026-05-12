@@ -127,14 +127,26 @@ public class ScrumReportServiceImpl implements ScrumReportService {
     @Override
     public CompletableFuture<String> generateStatisticsReport() {
         try {
-            // STUDY: findAll() 대신 DB 집계 쿼리로 상태별 건수/SP 합계를 가져온다.
-            //        전체 이슈를 메모리에 로드하지 않으므로 이슈 수천 건이어도 안전.
-            List<Object[]> statusStats = issueRepository.countAndSumGroupByStatus();
-            if (statusStats.isEmpty()) {
-                return CompletableFuture.completedFuture("DB에 이슈가 없습니다. `@지라 sync`로 동기화해주세요.");
+            // STUDY: 가장 최근에 동기화된 스프린트를 찾아 해당 스프린트의 이슈만 통계에 포함.
+            //        스프린트 정보가 없으면 (동기화 전) 안내 메시지 반환.
+            List<Object[]> sprintInfoList = issueRepository.findLatestSprintInfo(PageRequest.of(0, 1));
+            if (sprintInfoList.isEmpty()) {
+                return CompletableFuture.completedFuture(
+                        "스프린트 정보가 없습니다. `@지라 sync`로 동기화해주세요.");
             }
-            String report = formatStatisticsReport(statusStats);
-            log.info("Statistics report generated from DB (aggregate queries)");
+
+            Object[] sprintRow = sprintInfoList.get(0);
+            int sprintId = (Integer) sprintRow[0];
+            String sprintName = (String) sprintRow[1];
+
+            List<Object[]> statusStats = issueRepository.countAndSumGroupByStatusAndSprint(sprintId);
+            if (statusStats.isEmpty()) {
+                return CompletableFuture.completedFuture(
+                        String.format("스프린트 '%s'에 이슈가 없습니다.", sprintName));
+            }
+
+            String report = formatStatisticsReport(statusStats, sprintId, sprintName);
+            log.info("Statistics report generated for sprint='{}' (id={})", sprintName, sprintId);
             return CompletableFuture.completedFuture(report);
         } catch (Exception e) {
             log.error("Statistics report generation failed: {}", e.toString());
@@ -148,7 +160,7 @@ public class ScrumReportServiceImpl implements ScrumReportService {
         return issue.getCompletedAt() != null ? issue.getCompletedAt() : issue.getJiraUpdated();
     }
 
-    private String formatStatisticsReport(List<Object[]> statusStats) {
+    private String formatStatisticsReport(List<Object[]> statusStats, int sprintId, String sprintName) {
         ZoneId kst = ZoneId.of("Asia/Seoul");
         LocalDate today = LocalDate.now(kst);
         Instant todayStart = today.atStartOfDay(kst).toInstant();
@@ -178,7 +190,7 @@ public class ScrumReportServiceImpl implements ScrumReportService {
         int percent = (int) (ratio * 100);
 
         StringBuilder sb = new StringBuilder();
-        sb.append(":bar_chart: *프로젝트 통계 요약*\n\n");
+        sb.append(String.format(":bar_chart: *스프린트 '%s' 통계 요약*\n\n", sprintName));
 
         // 진척률 섹션
         sb.append(":fire: *진척률*\n");
@@ -198,8 +210,9 @@ public class ScrumReportServiceImpl implements ScrumReportService {
         appendStatusCountFromStats(sb, statsMap.get(StatusCategory.TODO), ":clipboard: 해야 할 일");
         sb.append("\n");
 
-        // 오늘 해결된 이슈 — DB 쿼리로 해당 이슈만 조회
-        List<IssueEntity> todayCompleted = issueRepository.findCompletedSince(StatusCategory.DONE, todayStart);
+        // 오늘 해결된 이슈 — 스프린트 내에서만 조회
+        List<IssueEntity> todayCompleted = issueRepository.findCompletedSinceInSprint(
+                StatusCategory.DONE, todayStart, sprintId);
         sb.append(":trophy: *오늘 해결된 이슈*\n");
         if (todayCompleted.isEmpty()) {
             sb.append("  (없음)\n");
@@ -221,8 +234,9 @@ public class ScrumReportServiceImpl implements ScrumReportService {
         }
         sb.append("\n");
 
-        // 현재 진행 중 — DB 쿼리로 해당 이슈만 조회
-        List<IssueEntity> inProgress = issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS);
+        // 현재 진행 중 — 스프린트 내에서만 조회
+        List<IssueEntity> inProgress = issueRepository.findByStatusCategoryAndSprintId(
+                StatusCategory.IN_PROGRESS, sprintId);
         if (!inProgress.isEmpty()) {
             sb.append(":hammer: *현재 진행 중*\n");
             for (IssueEntity i : inProgress) {
@@ -234,9 +248,9 @@ public class ScrumReportServiceImpl implements ScrumReportService {
             sb.append("\n");
         }
 
-        // 가장 큰 이슈 (미완료 중 최대 SP) — DB 쿼리로 TOP 1만 조회
-        List<IssueEntity> biggest = issueRepository.findTopUncompletedBySp(
-                StatusCategory.DONE, PageRequest.of(0, 1));
+        // 가장 큰 이슈 (미완료 중 최대 SP) — 스프린트 내에서만 조회
+        List<IssueEntity> biggest = issueRepository.findTopUncompletedBySpInSprint(
+                StatusCategory.DONE, sprintId, PageRequest.of(0, 1));
         if (!biggest.isEmpty()) {
             IssueEntity i = biggest.get(0);
             String assignee = i.getAssignee() != null ? i.getAssignee() : "미배정";
@@ -245,9 +259,9 @@ public class ScrumReportServiceImpl implements ScrumReportService {
                     i.getStoryPoint(), i.getStatusCategory(), assignee));
         }
 
-        // STUDY: 번업 차트 — 완료 이슈만 로드하여 O(N) 한 번 정렬 후 누적 합산.
-        //        기존 7*N 반복(7일 × 전체 이슈 스트림)에서 O(N log N) 정렬 + O(N) 순회로 개선.
-        List<IssueEntity> completedIssues = issueRepository.findByStatusCategory(StatusCategory.DONE);
+        // STUDY: 번업 차트 — 스프린트 내 완료 이슈만 로드하여 O(N log N) 정렬 + O(N) 순회.
+        List<IssueEntity> completedIssues = issueRepository.findByStatusCategoryAndSprintId(
+                StatusCategory.DONE, sprintId);
         sb.append(":chart_with_upwards_trend: *번업 (최근 7일)*\n");
         double totalForBurnup = useCounts ? totalCount : totalSp;
         appendBurnupChart(sb, completedIssues, today, kst, totalForBurnup, useCounts);
