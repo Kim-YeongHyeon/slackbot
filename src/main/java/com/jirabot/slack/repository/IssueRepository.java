@@ -48,4 +48,25 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
            "ORDER BY COALESCE(i.completedAt, i.jiraUpdated) DESC")
     List<IssueEntity> findResolvedBugsSince(@Param("issueType") String issueType,
                                             @Param("since") Instant since, Pageable pageable);
+
+    // STUDY: GROUP BY로 상태별 건수/SP 합계를 DB에서 집계. findAll() → Java 스트림 집계 대비
+    //        네트워크 전송량, 메모리, CPU 모두 절감. Object[]의 인덱스: [0]=statusCategory, [1]=count, [2]=sumSp.
+    @Query("SELECT i.statusCategory, COUNT(i), COALESCE(SUM(i.storyPoint), 0) " +
+           "FROM IssueEntity i GROUP BY i.statusCategory")
+    List<Object[]> countAndSumGroupByStatus();
+
+    List<IssueEntity> findByStatusCategory(String statusCategory);
+
+    // STUDY: 완료 이슈 중 특정 시점 이후 완료된 것만 조회. completedAt 우선, null이면 jiraUpdated fallback.
+    //        COALESCE로 정렬까지 동일 로직 적용.
+    @Query("SELECT i FROM IssueEntity i WHERE i.statusCategory = :status " +
+           "AND (i.completedAt >= :since OR (i.completedAt IS NULL AND i.jiraUpdated >= :since)) " +
+           "ORDER BY COALESCE(i.completedAt, i.jiraUpdated) DESC")
+    List<IssueEntity> findCompletedSince(@Param("status") String status, @Param("since") Instant since);
+
+    // STUDY: 미완료 이슈 중 SP가 가장 큰 것. Pageable로 TOP 1만 가져온다.
+    @Query("SELECT i FROM IssueEntity i WHERE i.statusCategory <> :doneStatus " +
+           "AND i.storyPoint IS NOT NULL AND i.storyPoint > 0 " +
+           "ORDER BY i.storyPoint DESC")
+    List<IssueEntity> findTopUncompletedBySp(@Param("doneStatus") String doneStatus, Pageable pageable);
 }

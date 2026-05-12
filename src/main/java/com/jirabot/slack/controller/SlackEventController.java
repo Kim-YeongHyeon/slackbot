@@ -13,6 +13,7 @@ import com.jirabot.slack.dto.SlackEventEnvelope;
 import com.jirabot.slack.dto.SlackEventInner;
 import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.entity.IntentFailureEntity;
+import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
@@ -63,7 +64,7 @@ public class SlackEventController {
               `@지라 버그` — 최근 7일간 해결된 버그 조회
               `@지라 버그 2026.03.11` — 특정 날짜 이후 해결된 버그 조회
               `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
-              `@지라 통계` — 스프린트 SP 통계 요약
+              `@지라 통계` — 프로젝트 SP 통계 요약
               `@지라 완료` — 이슈 스레드에서 → Jira 완료 처리
 
             *스레드 액션 (이슈 스레드에서 댓글로 사용):*
@@ -479,15 +480,16 @@ public class SlackEventController {
             }
 
             IssueEntity issue = found.get();
-            if ("완료".equals(issue.getStatusCategory())) {
+            if (StatusCategory.DONE.equals(issue.getStatusCategory())) {
                 slackNotifier.postThreadReply(event.channel(), event.thread_ts(),
                         String.format("*%s*은 이미 완료 상태입니다.", issue.getIssueKey()));
                 return;
             }
 
-            boolean success = jiraApiClient.transitionIssue(issue.getIssueKey(), "완료");
+            boolean success = jiraApiClient.transitionIssue(issue.getIssueKey(), StatusCategory.DONE);
             if (success) {
-                issue.updateFrom(issue.getSummary(), issue.getIssueType(), "완료", "완료",
+                issue.updateFrom(issue.getSummary(), issue.getIssueType(),
+                        StatusCategory.DONE, StatusCategory.DONE,
                         issue.getAssignee(), issue.getStoryPoint(), java.time.Instant.now());
                 issueRepository.save(issue);
                 slackNotifier.postThreadReply(event.channel(), event.thread_ts(),
@@ -551,14 +553,11 @@ public class SlackEventController {
                 });
     }
 
+    // STUDY: 다른 핸들러와 동일하게 replyThread()로 스레드 응답. 채널에 긴 리포트가 올라가면 대화 흐름 방해.
     private void handleStatistics(SlackEventInner event) {
         log.info("Statistics report requested by user={}", event.user());
         scrumReportService.generateStatisticsReport()
-                .thenAccept(report -> {
-                    if (event.channel() != null) {
-                        slackNotifier.postMessage(event.channel(), report);
-                    }
-                })
+                .thenAccept(report -> replyThread(event, report))
                 .exceptionally(ex -> {
                     log.warn("Statistics report failed: {}", ex.toString());
                     replyThread(event, ":x: 통계 리포트 생성 중 오류가 발생했어요.");

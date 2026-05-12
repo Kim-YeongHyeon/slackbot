@@ -72,12 +72,12 @@ public class IssueEntity {
         this.jiraCreated = jiraCreated;
         this.jiraUpdated = jiraUpdated;
         this.syncedAt = Instant.now();
-        this.completedAt = "완료".equals(statusCategory) ? Instant.now() : null;
+        this.completedAt = StatusCategory.DONE.equals(statusCategory) ? Instant.now() : null;
     }
 
     public void updateFrom(String summary, String issueType, String status, String statusCategory,
                            String assignee, Double storyPoint, Instant jiraUpdated) {
-        boolean wasNotComplete = !"완료".equals(this.statusCategory);
+        boolean wasNotComplete = !StatusCategory.DONE.equals(this.statusCategory);
         this.summary = summary;
         this.issueType = issueType;
         this.status = status;
@@ -87,9 +87,9 @@ public class IssueEntity {
         this.jiraUpdated = jiraUpdated;
         this.syncedAt = Instant.now();
         // 완료로 전환된 시점만 기록. 이미 완료였으면 유지.
-        if ("완료".equals(statusCategory) && wasNotComplete) {
+        if (StatusCategory.DONE.equals(statusCategory) && wasNotComplete) {
             this.completedAt = Instant.now();
-        } else if (!"완료".equals(statusCategory)) {
+        } else if (!StatusCategory.DONE.equals(statusCategory)) {
             this.completedAt = null;
         }
     }
@@ -113,5 +113,6 @@ public class IssueEntity {
         this.slackThreadTs = threadTs;
     }
     public Instant getCompletedAt() { return completedAt; }
+    public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
     public Instant getSyncedAt() { return syncedAt; }
 }

@@ -1,18 +1,20 @@
 package com.jirabot.slack.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.entity.IssueEntity;
+import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
 import java.time.Instant;
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
 import org.junit.jupiter.api.Test;
@@ -66,7 +68,7 @@ class ScrumReportStatisticsTest {
 
     @Test
     void emptyDb_returnsMessage() throws ExecutionException, InterruptedException {
-        when(issueRepository.findAll()).thenReturn(List.of());
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(List.of());
 
         String result = service.generateStatisticsReport().get();
 
@@ -80,17 +82,37 @@ class ScrumReportStatisticsTest {
         Instant yesterday = now.minus(1, ChronoUnit.DAYS);
         Instant twoDaysAgo = now.minus(2, ChronoUnit.DAYS);
 
-        List<IssueEntity> issues = List.of(
-                createIssue("PROJ-1", "Complete task", "완료", 5.0, "김영현", now, now),
-                createIssue("PROJ-2", "In progress task", "진행 중", 3.0, "김영현", yesterday, null),
-                createIssue("PROJ-3", "Todo task", "해야 할 일", 8.0, "최아록", twoDaysAgo, null)
+        // DB aggregate query results: [statusCategory, count, sumSp]
+        List<Object[]> statusStats = Arrays.<Object[]>asList(
+                new Object[]{StatusCategory.DONE, 1L, 5.0},
+                new Object[]{StatusCategory.IN_PROGRESS, 1L, 3.0},
+                new Object[]{StatusCategory.TODO, 1L, 8.0}
         );
-        when(issueRepository.findAll()).thenReturn(issues);
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(statusStats);
+
+        // Today completed issues
+        IssueEntity completedIssue = createIssue("PROJ-1", "Complete task", StatusCategory.DONE, 5.0, "김영현", now, now);
+        when(issueRepository.findCompletedSince(eq(StatusCategory.DONE), any(Instant.class)))
+                .thenReturn(List.of(completedIssue));
+
+        // In-progress issues
+        IssueEntity inProgressIssue = createIssue("PROJ-2", "In progress task", StatusCategory.IN_PROGRESS, 3.0, "김영현", yesterday, null);
+        when(issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS))
+                .thenReturn(List.of(inProgressIssue));
+
+        // Biggest uncompleted issue
+        IssueEntity bigIssue = createIssue("PROJ-3", "Todo task", StatusCategory.TODO, 8.0, "최아록", twoDaysAgo, null);
+        when(issueRepository.findTopUncompletedBySp(eq(StatusCategory.DONE), any()))
+                .thenReturn(List.of(bigIssue));
+
+        // Completed issues for burnup
+        when(issueRepository.findByStatusCategory(StatusCategory.DONE))
+                .thenReturn(List.of(completedIssue));
 
         String result = service.generateStatisticsReport().get();
 
-        // Header
-        assertThat(result).contains("스프린트 통계 요약");
+        // Header — renamed from 스프린트 to 프로젝트
+        assertThat(result).contains("프로젝트 통계 요약");
         // Progress section
         assertThat(result).contains("진척률");
         assertThat(result).contains("전체: 16 SP");
@@ -118,12 +140,19 @@ class ScrumReportStatisticsTest {
 
     @Test
     void allSpZero_usesCountBased() throws ExecutionException, InterruptedException {
-        Instant now = Instant.now();
-        List<IssueEntity> issues = List.of(
-                createIssue("PROJ-1", "Done", "완료", 0.0, "A", now, now),
-                createIssue("PROJ-2", "Todo", "해야 할 일", 0.0, "B", now, null)
+        List<Object[]> statusStats = Arrays.<Object[]>asList(
+                new Object[]{StatusCategory.DONE, 1L, 0.0},
+                new Object[]{StatusCategory.TODO, 1L, 0.0}
         );
-        when(issueRepository.findAll()).thenReturn(issues);
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(statusStats);
+        when(issueRepository.findCompletedSince(eq(StatusCategory.DONE), any(Instant.class)))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS))
+                .thenReturn(List.of());
+        when(issueRepository.findTopUncompletedBySp(eq(StatusCategory.DONE), any()))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.DONE))
+                .thenReturn(List.of());
 
         String result = service.generateStatisticsReport().get();
 
@@ -136,11 +165,20 @@ class ScrumReportStatisticsTest {
     @Test
     void noInProgressIssues_sectionSkipped() throws ExecutionException, InterruptedException {
         Instant twoDaysAgo = Instant.now().minus(2, ChronoUnit.DAYS);
-        List<IssueEntity> issues = List.of(
-                createIssue("PROJ-1", "Done", "완료", 3.0, "A", twoDaysAgo, twoDaysAgo),
-                createIssue("PROJ-2", "Todo", "해야 할 일", 5.0, "B", twoDaysAgo, null)
+
+        List<Object[]> statusStats = Arrays.<Object[]>asList(
+                new Object[]{StatusCategory.DONE, 1L, 3.0},
+                new Object[]{StatusCategory.TODO, 1L, 5.0}
         );
-        when(issueRepository.findAll()).thenReturn(issues);
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(statusStats);
+        when(issueRepository.findCompletedSince(eq(StatusCategory.DONE), any(Instant.class)))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS))
+                .thenReturn(List.of());
+        when(issueRepository.findTopUncompletedBySp(eq(StatusCategory.DONE), any()))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.DONE))
+                .thenReturn(List.of(createIssue("PROJ-1", "Done", StatusCategory.DONE, 3.0, "A", twoDaysAgo, twoDaysAgo)));
 
         String result = service.generateStatisticsReport().get();
 
@@ -149,11 +187,19 @@ class ScrumReportStatisticsTest {
 
     @Test
     void noTodayCompleted_showsNone() throws ExecutionException, InterruptedException {
-        Instant threeDaysAgo = Instant.now().minus(3, ChronoUnit.DAYS);
-        List<IssueEntity> issues = List.of(
-                createIssue("PROJ-1", "Old done", "완료", 3.0, "A", threeDaysAgo, threeDaysAgo)
+        List<Object[]> statusStats = Arrays.<Object[]>asList(
+                new Object[]{StatusCategory.DONE, 1L, 3.0}
         );
-        when(issueRepository.findAll()).thenReturn(issues);
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(statusStats);
+        when(issueRepository.findCompletedSince(eq(StatusCategory.DONE), any(Instant.class)))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS))
+                .thenReturn(List.of());
+        when(issueRepository.findTopUncompletedBySp(eq(StatusCategory.DONE), any()))
+                .thenReturn(List.of());
+        Instant threeDaysAgo = Instant.now().minus(3, ChronoUnit.DAYS);
+        when(issueRepository.findByStatusCategory(StatusCategory.DONE))
+                .thenReturn(List.of(createIssue("PROJ-1", "Old done", StatusCategory.DONE, 3.0, "A", threeDaysAgo, threeDaysAgo)));
 
         String result = service.generateStatisticsReport().get();
 
@@ -163,11 +209,19 @@ class ScrumReportStatisticsTest {
 
     @Test
     void nullSpIssues_treatedAsZeroSp() throws ExecutionException, InterruptedException {
-        Instant now = Instant.now();
-        List<IssueEntity> issues = List.of(
-                createIssueNullSp("PROJ-1", "No SP", "진행 중", "A", now)
+        List<Object[]> statusStats = Arrays.<Object[]>asList(
+                new Object[]{StatusCategory.IN_PROGRESS, 1L, 0.0}
         );
-        when(issueRepository.findAll()).thenReturn(issues);
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(statusStats);
+        when(issueRepository.findCompletedSince(eq(StatusCategory.DONE), any(Instant.class)))
+                .thenReturn(List.of());
+        IssueEntity issue = createIssueNullSp("PROJ-1", "No SP", StatusCategory.IN_PROGRESS, "A", Instant.now());
+        when(issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS))
+                .thenReturn(List.of(issue));
+        when(issueRepository.findTopUncompletedBySp(eq(StatusCategory.DONE), any()))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.DONE))
+                .thenReturn(List.of());
 
         String result = service.generateStatisticsReport().get();
 
@@ -178,10 +232,20 @@ class ScrumReportStatisticsTest {
     @Test
     void burnupChart_showsSevenDays() throws ExecutionException, InterruptedException {
         Instant now = Instant.now();
-        List<IssueEntity> issues = List.of(
-                createIssue("PROJ-1", "Done", "완료", 5.0, "A", now, now)
+        IssueEntity doneIssue = createIssue("PROJ-1", "Done", StatusCategory.DONE, 5.0, "A", now, now);
+
+        List<Object[]> statusStats = Arrays.<Object[]>asList(
+                new Object[]{StatusCategory.DONE, 1L, 5.0}
         );
-        when(issueRepository.findAll()).thenReturn(issues);
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(statusStats);
+        when(issueRepository.findCompletedSince(eq(StatusCategory.DONE), any(Instant.class)))
+                .thenReturn(List.of(doneIssue));
+        when(issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS))
+                .thenReturn(List.of());
+        when(issueRepository.findTopUncompletedBySp(eq(StatusCategory.DONE), any()))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.DONE))
+                .thenReturn(List.of(doneIssue));
 
         String result = service.generateStatisticsReport().get();
 
@@ -194,19 +258,56 @@ class ScrumReportStatisticsTest {
     }
 
     @Test
-    void completedAtNull_fallsBackToJiraUpdated() throws ExecutionException, InterruptedException {
-        // Issue with completedAt=null but jiraUpdated=today and status=완료
+    void completedAtNull_fallsBackToJiraUpdated_showsApproxMarker() throws ExecutionException, InterruptedException {
         Instant now = Instant.now();
-        IssueEntity issue = createIssue("PROJ-1", "Done no completedAt", "완료", 3.0, "A", now, null);
-        // completedAt is null, jiraUpdated is today → should show in "오늘 해결된 이슈"
-        when(issueRepository.findAll()).thenReturn(List.of(issue));
+        // Issue with completedAt=null but jiraUpdated=today and status=완료
+        IssueEntity issue = createIssue("PROJ-1", "Done no completedAt", StatusCategory.DONE, 3.0, "A", now, null);
+
+        List<Object[]> statusStats = Arrays.<Object[]>asList(
+                new Object[]{StatusCategory.DONE, 1L, 3.0}
+        );
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(statusStats);
+        // DB query already handles fallback — return the issue as "today completed"
+        when(issueRepository.findCompletedSince(eq(StatusCategory.DONE), any(Instant.class)))
+                .thenReturn(List.of(issue));
+        when(issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS))
+                .thenReturn(List.of());
+        when(issueRepository.findTopUncompletedBySp(eq(StatusCategory.DONE), any()))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.DONE))
+                .thenReturn(List.of(issue));
 
         String result = service.generateStatisticsReport().get();
 
         assertThat(result).contains("PROJ-1");
         assertThat(result).contains("오늘 해결된 이슈");
-        // Should NOT show "(없음)" since jiraUpdated is today
-        // The fallback should pick up jiraUpdated
+        // completedAt is null → should show (추정) marker
+        assertThat(result).contains("(추정)");
+    }
+
+    @Test
+    void completedAtPresent_noApproxMarker() throws ExecutionException, InterruptedException {
+        Instant now = Instant.now();
+        IssueEntity issue = createIssue("PROJ-1", "Done with completedAt", StatusCategory.DONE, 3.0, "A", now, now);
+
+        List<Object[]> statusStats = Arrays.<Object[]>asList(
+                new Object[]{StatusCategory.DONE, 1L, 3.0}
+        );
+        when(issueRepository.countAndSumGroupByStatus()).thenReturn(statusStats);
+        when(issueRepository.findCompletedSince(eq(StatusCategory.DONE), any(Instant.class)))
+                .thenReturn(List.of(issue));
+        when(issueRepository.findByStatusCategory(StatusCategory.IN_PROGRESS))
+                .thenReturn(List.of());
+        when(issueRepository.findTopUncompletedBySp(eq(StatusCategory.DONE), any()))
+                .thenReturn(List.of());
+        when(issueRepository.findByStatusCategory(StatusCategory.DONE))
+                .thenReturn(List.of(issue));
+
+        String result = service.generateStatisticsReport().get();
+
+        assertThat(result).contains("PROJ-1");
+        // completedAt is present → no (추정) marker
+        assertThat(result).doesNotContain("(추정)");
     }
 
     // --- Helper methods ---
@@ -217,22 +318,16 @@ class ScrumReportStatisticsTest {
         IssueEntity issue = new IssueEntity(
                 key, summary, "Story", statusCategory, statusCategory,
                 assignee, sp, null, null, Instant.now().minus(10, ChronoUnit.DAYS), jiraUpdated);
-        // Use reflection to set completedAt since the constructor sets it automatically for 완료
-        try {
-            java.lang.reflect.Field completedField = IssueEntity.class.getDeclaredField("completedAt");
-            completedField.setAccessible(true);
-            completedField.set(issue, completedAt);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        // STUDY: setCompletedAt()으로 테스트 데이터의 completedAt을 직접 설정.
+        //        생성자가 "완료" 상태일 때 자동으로 Instant.now()를 설정하므로 테스트에서 재설정 필요.
+        issue.setCompletedAt(completedAt);
         return issue;
     }
 
     private IssueEntity createIssueNullSp(String key, String summary, String statusCategory,
                                            String assignee, Instant jiraUpdated) {
-        IssueEntity issue = new IssueEntity(
+        return new IssueEntity(
                 key, summary, "Story", statusCategory, statusCategory,
                 assignee, null, null, null, Instant.now().minus(10, ChronoUnit.DAYS), jiraUpdated);
-        return issue;
     }
 }
