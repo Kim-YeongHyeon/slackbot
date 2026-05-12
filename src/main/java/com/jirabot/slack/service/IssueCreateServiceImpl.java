@@ -65,6 +65,15 @@ public class IssueCreateServiceImpl implements IssueCreateService {
     @Override
     public CompletableFuture<IssueCreateResult> createFromSlackText(IssueCreateCommand command, IntentResult intentHint) {
         try {
+            // STUDY: Guard clause 패턴 — 사전 조건(Slack-Jira 매핑)이 충족되지 않으면 빠르게 실패.
+            //        이전에는 매핑 없을 때 Slack displayName으로 auto-map했으나,
+            //        Slack 이름 ≠ Jira 이름인 경우 잘못된 reporter로 이슈가 생성되는 문제가 있었다.
+            var mapping = userMappingRepository.findBySlackUserId(command.slackUserId());
+            if (mapping.isEmpty()) {
+                notifyRegistrationRequired(command);
+                return CompletableFuture.completedFuture(IssueCreateResult.failure("unregistered"));
+            }
+
             log.info("Classify request user={} textLen={} intentHint={}", command.slackUserId(),
                     command.rawText() == null ? 0 : command.rawText().length(),
                     intentHint != null ? intentHint.intent() : "none");
@@ -123,6 +132,9 @@ public class IssueCreateServiceImpl implements IssueCreateService {
         slackNotifier.postBlockMessage(command.channel(), command.eventTs(), fallbackText, blocksJson);
     }
 
+    // STUDY: 이제 createFromSlackText 진입 시점에 매핑 존재가 보장되므로,
+    //        auto-mapping 로직(Slack API 조회 + 자동 저장)을 제거해도 안전하다.
+    //        단일 책임 원칙: resolveReporterName은 "조회"만 담당, "등록"은 UserMappingController에 위임.
     private String resolveReporterName(String slackUserId) {
         if (slackUserId == null) return "unknown";
         try {
@@ -130,18 +142,20 @@ public class IssueCreateServiceImpl implements IssueCreateService {
             if (mapping.isPresent()) {
                 return mapping.get().getJiraDisplayName();
             }
-            // 매핑 없으면 Slack API로 실명 조회 + 자동 매핑 저장
-            String realName = slackNotifier.getUserRealName(slackUserId);
-            if (realName != null && !realName.isBlank()) {
-                userMappingRepository.save(
-                        new com.jirabot.slack.entity.UserMappingEntity(slackUserId, realName, realName));
-                log.info("Auto-mapped reporter: {} → {}", slackUserId, realName);
-                return realName;
-            }
         } catch (Exception e) {
             log.warn("Failed to resolve reporter name for {}: {}", slackUserId, e.toString());
         }
         return slackUserId;
+    }
+
+    private void notifyRegistrationRequired(IssueCreateCommand command) {
+        if (command.channel() == null || command.eventTs() == null) return;
+        String message = ":warning: Jira 계정이 연결되지 않았습니다.\n"
+                + "먼저 아래 명령으로 등록해주세요:\n"
+                + "`@지라 등록 <Jira에 표시되는 이름>`\n"
+                + "예: `@지라 등록 홍길동`\n"
+                + "등록 후 다시 시도해주세요!";
+        slackNotifier.postThreadReply(command.channel(), command.eventTs(), message);
     }
 
     private String resolveJiraAccountId(String slackUserId, String displayName) {
