@@ -5,10 +5,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
@@ -19,6 +19,7 @@ import java.util.Optional;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.http.ResponseEntity;
 
 class SlackInteractionControllerTest {
@@ -45,7 +46,11 @@ class SlackInteractionControllerTest {
                   "type": "block_actions",
                   "user": {"id": "U123", "name": "testuser"},
                   "channel": {"id": "C456"},
-                  "message": {"ts": "1234567890.123456"},
+                  "message": {"ts": "1234567890.123456", "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": "Original info"}},
+                    {"type": "divider"},
+                    {"type": "actions", "elements": []}
+                  ]},
                   "actions": [{"action_id": "jira_transition_in_progress", "value": "PROJ-1"}]
                 }
                 """;
@@ -70,7 +75,11 @@ class SlackInteractionControllerTest {
                   "type": "block_actions",
                   "user": {"id": "U123", "name": "testuser"},
                   "channel": {"id": "C456"},
-                  "message": {"ts": "1234567890.123456"},
+                  "message": {"ts": "1234567890.123456", "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": "Original info"}},
+                    {"type": "divider"},
+                    {"type": "actions", "elements": []}
+                  ]},
                   "actions": [{"action_id": "jira_transition_done", "value": "PROJ-2"}]
                 }
                 """;
@@ -85,6 +94,54 @@ class SlackInteractionControllerTest {
         assertThat(response.getStatusCode().value()).isEqualTo(200);
         verify(jiraApiClient).transitionIssue("PROJ-2", "완료");
         verify(slackNotifier).updateMessage(eq("C456"), eq("1234567890.123456"), anyString(), anyString());
+    }
+
+    @Test
+    void doneTransition_preservesOriginalBlocksAndRemovesActions() throws Exception {
+        String payload = """
+                {
+                  "type": "block_actions",
+                  "user": {"id": "U123", "name": "testuser"},
+                  "channel": {"id": "C456"},
+                  "message": {"ts": "1234567890.123456", "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": "Issue info here"}},
+                    {"type": "divider"},
+                    {"type": "actions", "elements": [{"type": "button"}]}
+                  ]},
+                  "actions": [{"action_id": "jira_transition_done", "value": "PROJ-5"}]
+                }
+                """;
+
+        when(jiraApiClient.transitionIssue("PROJ-5", "완료")).thenReturn(true);
+        IssueEntity issue = new IssueEntity("PROJ-5", "Test", "작업", "진행 중", "진행 중",
+                null, 2.0, "reporter", "desc", Instant.now(), Instant.now());
+        when(issueRepository.findByIssueKey("PROJ-5")).thenReturn(Optional.of(issue));
+
+        controller.onInteraction(payload);
+
+        // STUDY: ArgumentCaptor로 실제 전달된 blocks JSON을 캡처하여 구조를 검증.
+        ArgumentCaptor<String> blocksCaptor = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).updateMessage(eq("C456"), eq("1234567890.123456"),
+                anyString(), blocksCaptor.capture());
+
+        JsonNode updatedBlocks = objectMapper.readTree(blocksCaptor.getValue());
+        assertThat(updatedBlocks.isArray()).isTrue();
+
+        // Original section + divider (actions removed) + result section = 3 blocks
+        assertThat(updatedBlocks.size()).isEqualTo(3);
+        assertThat(updatedBlocks.get(0).path("type").asText()).isEqualTo("section");
+        assertThat(updatedBlocks.get(0).path("text").path("text").asText()).isEqualTo("Issue info here");
+        assertThat(updatedBlocks.get(1).path("type").asText()).isEqualTo("divider");
+        assertThat(updatedBlocks.get(2).path("type").asText()).isEqualTo("section");
+        String resultText = updatedBlocks.get(2).path("text").path("text").asText();
+        assertThat(resultText).contains("PROJ-5");
+        assertThat(resultText).contains("완료");
+        assertThat(resultText).contains("testuser");
+
+        // Verify no actions block remains
+        for (JsonNode block : updatedBlocks) {
+            assertThat(block.path("type").asText()).isNotEqualTo("actions");
+        }
     }
 
     @Test
@@ -143,20 +200,5 @@ class SlackInteractionControllerTest {
         ResponseEntity<String> response = controller.onInteraction(payload);
 
         assertThat(response.getStatusCode().value()).isEqualTo(200);
-    }
-
-    @Test
-    void buildCompletedBlocks_generatesValidJson() throws Exception {
-        String json = SlackInteractionController.buildCompletedBlocks(
-                "PROJ-1", ":white_check_mark:", "완료", "testuser");
-
-        // Verify it's valid JSON
-        var node = objectMapper.readTree(json);
-        assertThat(node.isArray()).isTrue();
-        assertThat(node.get(0).path("type").asText()).isEqualTo("section");
-        assertThat(node.get(0).path("text").path("text").asText())
-                .contains("PROJ-1")
-                .contains("완료")
-                .contains("testuser");
     }
 }

@@ -1,5 +1,7 @@
 package com.jirabot.slack.client;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -16,9 +18,13 @@ public class SlackNotifierImpl implements SlackNotifier {
 
     private static final Logger log = LoggerFactory.getLogger(SlackNotifierImpl.class);
 
+    // STUDY: ObjectMapper를 필드로 보유하여 JSON body 생성 시 수동 escape 없이
+    //        구조적으로 안전하게 JSON을 조립한다.
+    private final ObjectMapper objectMapper;
     private final WebClient slackWebClient;
 
     public SlackNotifierImpl(@Value("${slack.bot-token:}") String botToken) {
+        this.objectMapper = new ObjectMapper();
         // STUDY: WebClient를 빈으로 분리하지 않고 로컬 생성 — Slack API 호출은 이 클래스만 사용.
         this.slackWebClient = WebClient.builder()
                 .baseUrl("https://slack.com/api")
@@ -111,11 +117,14 @@ public class SlackNotifierImpl implements SlackNotifier {
     @Override
     public void postBlockMessage(String channel, String threadTs, String text, String blocksJson) {
         try {
-            // STUDY: chat.postMessage에 blocks(Block Kit JSON 배열)를 함께 보내면
-            //        리치 메시지가 표시된다. text는 Block Kit 미지원 클라이언트용 fallback.
-            String bodyJson = String.format(
-                    "{\"channel\":\"%s\",\"thread_ts\":\"%s\",\"text\":\"%s\",\"blocks\":%s}",
-                    escapeJson(channel), escapeJson(threadTs), escapeJson(text), blocksJson);
+            // STUDY: ObjectMapper.createObjectNode()로 JSON body를 구조적으로 생성.
+            //        readTree(blocksJson)으로 이미 직렬화된 blocks 문자열을 JsonNode로 파싱 후 set.
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("channel", channel);
+            body.put("thread_ts", threadTs);
+            body.put("text", text);
+            body.set("blocks", objectMapper.readTree(blocksJson));
+            String bodyJson = objectMapper.writeValueAsString(body);
             String response = slackWebClient.post()
                     .uri("/chat.postMessage")
                     .bodyValue(bodyJson)
@@ -133,17 +142,17 @@ public class SlackNotifierImpl implements SlackNotifier {
         try {
             // STUDY: chat.update API로 기존 메시지를 수정한다.
             //        인터랙션 후 버튼을 제거하고 결과 텍스트로 교체할 때 사용.
-            StringBuilder bodyBuilder = new StringBuilder();
-            bodyBuilder.append(String.format(
-                    "{\"channel\":\"%s\",\"ts\":\"%s\",\"text\":\"%s\"",
-                    escapeJson(channel), escapeJson(messageTs), escapeJson(text)));
+            ObjectNode body = objectMapper.createObjectNode();
+            body.put("channel", channel);
+            body.put("ts", messageTs);
+            body.put("text", text);
             if (blocksJson != null) {
-                bodyBuilder.append(",\"blocks\":").append(blocksJson);
+                body.set("blocks", objectMapper.readTree(blocksJson));
             }
-            bodyBuilder.append("}");
+            String bodyJson = objectMapper.writeValueAsString(body);
             String response = slackWebClient.post()
                     .uri("/chat.update")
-                    .bodyValue(bodyBuilder.toString())
+                    .bodyValue(bodyJson)
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
@@ -151,18 +160,6 @@ public class SlackNotifierImpl implements SlackNotifier {
         } catch (Exception e) {
             log.warn("Failed to update Slack message: {}", e.toString());
         }
-    }
-
-    /**
-     * Escape special JSON characters in a string value.
-     */
-    private static String escapeJson(String value) {
-        if (value == null) return "";
-        return value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
     }
 
     @Override

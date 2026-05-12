@@ -5,9 +5,8 @@ import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.config.AsyncConfig;
 import com.jirabot.slack.dto.SlackInteractionPayload;
-import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.repository.IssueRepository;
-import java.time.Instant;
+import com.jirabot.slack.util.BlockKitBuilder;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,16 +66,13 @@ public class SlackInteractionController {
             SlackInteractionPayload.SlackAction action = payload.actions().get(0);
             String actionId = action.actionId();
             String issueKey = action.value();
-            String channelId = payload.channel() != null ? payload.channel().id() : null;
-            String messageTs = payload.message() != null ? payload.message().ts() : null;
             String userName = payload.user() != null ? payload.user().name() : "unknown";
 
             log.info("Interaction received: action={} issueKey={} user={}", actionId, issueKey, userName);
 
             // STUDY: Slack requires a response within 3 seconds. Immediately acknowledge,
             //        then perform Jira transition + message update asynchronously.
-            slackExecutor.execute(() ->
-                    handleTransition(actionId, issueKey, channelId, messageTs, userName));
+            slackExecutor.execute(() -> handleTransition(actionId, issueKey, userName, payload));
 
             return ResponseEntity.ok("");
         } catch (Exception e) {
@@ -85,8 +81,11 @@ public class SlackInteractionController {
         }
     }
 
-    private void handleTransition(String actionId, String issueKey, String channelId,
-                                  String messageTs, String userName) {
+    private void handleTransition(String actionId, String issueKey, String userName,
+                                  SlackInteractionPayload payload) {
+        String channelId = payload.channel() != null ? payload.channel().id() : null;
+        String messageTs = payload.message() != null ? payload.message().ts() : null;
+
         String targetStatus;
         String statusEmoji;
         String statusLabel;
@@ -113,51 +112,38 @@ public class SlackInteractionController {
             if (success) {
                 // DB 업데이트
                 issueRepository.findByIssueKey(issueKey).ifPresent(issue -> {
-                    issue.updateFrom(issue.getSummary(), issue.getIssueType(),
-                            targetStatus, targetStatus,
-                            issue.getAssignee(), issue.getStoryPoint(), Instant.now());
+                    issue.updateStatus(targetStatus);
                     issueRepository.save(issue);
-                    log.info("DB updated: {} → {}", issueKey, targetStatus);
+                    log.info("DB updated: {} \u2192 {}", issueKey, targetStatus);
                 });
 
                 // 원본 메시지 업데이트: 버튼 제거 + 결과 표시
                 if (channelId != null && messageTs != null) {
                     String resultText = String.format(
-                            "%s *%s* → %s (by %s)", statusEmoji, issueKey, statusLabel, userName);
-                    String updatedBlocks = buildCompletedBlocks(issueKey, statusEmoji, statusLabel, userName);
+                            "%s *%s* \u2192 %s (by %s)", statusEmoji, issueKey, statusLabel, userName);
+                    // STUDY: 원본 메시지의 blocks를 payload에서 가져와 보존하면서
+                    //        actions 블록만 제거하고 결과 section을 추가한다.
+                    com.fasterxml.jackson.databind.JsonNode originalBlocks =
+                            payload.message() != null ? payload.message().blocks() : null;
+                    String updatedBlocks = BlockKitBuilder.buildCompletedBlocks(
+                            issueKey, statusEmoji, statusLabel, userName, originalBlocks);
                     slackNotifier.updateMessage(channelId, messageTs, resultText, updatedBlocks);
                 }
             } else {
-                log.warn("Jira transition failed for {} → {}", issueKey, targetStatus);
+                log.warn("Jira transition failed for {} \u2192 {}", issueKey, targetStatus);
                 if (channelId != null && messageTs != null) {
                     // STUDY: 전환 실패 시 스레드 댓글로 에러 알림. 원본 메시지의 버튼은 유지하여 재시도 가능.
                     slackNotifier.postThreadReply(channelId, messageTs,
-                            String.format(":x: *%s* → %s 전환에 실패했습니다. Jira에서 직접 확인해주세요.",
+                            String.format(":x: *%s* \u2192 %s 전환에 실패했습니다. Jira에서 직접 확인해주세요.",
                                     issueKey, statusLabel));
                 }
             }
         } catch (Exception e) {
-            log.error("Transition error for {} → {}: {}", issueKey, targetStatus, e.toString(), e);
+            log.error("Transition error for {} \u2192 {}: {}", issueKey, targetStatus, e.toString(), e);
             if (channelId != null && messageTs != null) {
                 slackNotifier.postThreadReply(channelId, messageTs,
                         String.format(":x: *%s* 상태 변경 중 오류: %s", issueKey, e.getMessage()));
             }
         }
-    }
-
-    // STUDY: 전환 완료 후 원본 메시지의 버튼을 제거하고 결과 텍스트만 표시하는 Block Kit JSON 생성.
-    static String buildCompletedBlocks(String issueKey, String statusEmoji,
-                                               String statusLabel, String userName) {
-        return String.format(
-                "[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"%s *%s* → %s (by %s)\"}}]",
-                statusEmoji, escapeBlockJson(issueKey), escapeBlockJson(statusLabel),
-                escapeBlockJson(userName));
-    }
-
-    private static String escapeBlockJson(String value) {
-        if (value == null) return "";
-        return value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n");
     }
 }

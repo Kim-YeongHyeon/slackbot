@@ -99,6 +99,23 @@ public class IssueEntity {
         }
     }
 
+    /**
+     * 상태만 변경할 때 사용하는 간편 메서드.
+     * updateFrom()과 달리 summary, issueType 등 나머지 필드를 건드리지 않는다.
+     */
+    public void updateStatus(String statusCategory) {
+        boolean wasNotComplete = !StatusCategory.DONE.equals(this.statusCategory);
+        this.status = statusCategory;
+        this.statusCategory = statusCategory;
+        this.jiraUpdated = Instant.now();
+        this.syncedAt = Instant.now();
+        if (StatusCategory.DONE.equals(statusCategory) && wasNotComplete) {
+            this.completedAt = Instant.now();
+        } else if (!StatusCategory.DONE.equals(statusCategory)) {
+            this.completedAt = null;
+        }
+    }
+
     public Long getId() { return id; }
     public String getIssueKey() { return issueKey; }
     public String getSummary() { return summary; }

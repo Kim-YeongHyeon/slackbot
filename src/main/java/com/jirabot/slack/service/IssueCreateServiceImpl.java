@@ -10,6 +10,7 @@ import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.dto.IssueCreateCommand;
 import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.repository.IssueRepository;
+import com.jirabot.slack.util.BlockKitBuilder;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -117,66 +118,9 @@ public class IssueCreateServiceImpl implements IssueCreateService {
                 key, classification.title(), classification.type(),
                 classification.storyPoint(), url);
 
-        String blocksJson = buildIssueCreatedBlocks(key, url, classification, similar);
+        String blocksJson = BlockKitBuilder.buildIssueCreatedBlocks(key, url, classification, similar);
 
         slackNotifier.postBlockMessage(command.channel(), command.eventTs(), fallbackText, blocksJson);
-    }
-
-    // STUDY: Block Kit JSON을 문자열로 조합. Jackson ObjectMapper 대신 StringBuilder로 직접 구성하여
-    //        별도 DTO 없이 간결하게 유지. 구조가 복잡해지면 ObjectMapper 사용을 고려.
-    static String buildIssueCreatedBlocks(String key, String url,
-                                                  IssueClassification classification,
-                                                  List<IssueEntity> similar) {
-        StringBuilder blocks = new StringBuilder("[");
-        // Section: 이슈 정보
-        blocks.append("{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":")
-                .append("\"")
-                .append(escapeBlockJson(String.format(
-                        ":white_check_mark: Jira 이슈가 등록되었습니다!\\n*<%s|[%s] %s>*\\n분류: %s | Story Point: %d",
-                        url, key, classification.title(), classification.type(),
-                        classification.storyPoint())))
-                .append("\"}}");
-
-        // Similar issues warning
-        if (similar != null && !similar.isEmpty()) {
-            blocks.append(",{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"")
-                    .append(":warning: *유사한 이슈가 존재합니다:*");
-            for (IssueEntity s : similar) {
-                blocks.append("\\n  \\u2022 ")
-                        .append(escapeBlockJson(s.getIssueKey()))
-                        .append(" ")
-                        .append(escapeBlockJson(s.getSummary()))
-                        .append(" (")
-                        .append(escapeBlockJson(s.getStatus()))
-                        .append(")");
-            }
-            blocks.append("\\n중복이라면 새 이슈를 닫아주세요.\"}}");
-        }
-
-        // Divider
-        blocks.append(",{\"type\":\"divider\"}");
-
-        // Actions: 진행 중 / 완료 버튼
-        blocks.append(",{\"type\":\"actions\",\"elements\":[")
-                .append("{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"\\ud83d\\udd28 진행 중\"},")
-                .append("\"action_id\":\"jira_transition_in_progress\",\"value\":\"")
-                .append(escapeBlockJson(key)).append("\"},")
-                .append("{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"\\u2705 완료\"},")
-                .append("\"action_id\":\"jira_transition_done\",\"style\":\"primary\",\"value\":\"")
-                .append(escapeBlockJson(key)).append("\"}")
-                .append("]}");
-
-        blocks.append("]");
-        return blocks.toString();
-    }
-
-    private static String escapeBlockJson(String value) {
-        if (value == null) return "";
-        return value.replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
     }
 
     private String resolveReporterName(String slackUserId) {
