@@ -7,6 +7,7 @@ import com.jirabot.slack.client.ThreadActionClassifier;
 import com.jirabot.slack.client.dto.IntentResult;
 import com.jirabot.slack.client.dto.ThreadActionResult;
 import com.jirabot.slack.config.AsyncConfig;
+import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.dto.IssueCreateCommand;
 import com.jirabot.slack.dto.SlackEventEnvelope;
 import com.jirabot.slack.dto.SlackEventInner;
@@ -19,11 +20,17 @@ import com.jirabot.slack.service.IssueCreateService;
 import com.jirabot.slack.service.IssueSearchService;
 import com.jirabot.slack.service.JiraSyncService;
 import com.jirabot.slack.service.ScrumReportService;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
+import java.util.regex.Matcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -54,6 +61,8 @@ public class SlackEventController {
               `@지라 작업 김영현` — 특정 팀원의 작업 조회
               `@지라 등록 <Jira 사용자명>` — 내 Slack ↔ Jira 계정 연결
               `@지라 검색 <키워드>` — 이슈 제목/설명으로 검색 (예: `@지라 검색 preset`)
+              `@지라 버그` — 최근 7일간 해결된 버그 조회
+              `@지라 버그 2026.03.11` — 특정 날짜 이후 해결된 버그 조회
               `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
               `@지라 완료` — 이슈 스레드에서 → Jira 완료 처리
 
@@ -69,11 +78,19 @@ public class SlackEventController {
 
             이슈 등록 시 AI가 자동으로 분류(BUG/FEATURE/OTHER)하고 Story Point를 추정합니다.""";
 
+    // STUDY: 날짜 파싱용 정규식. yyyy.MM.dd, yyyy-MM-dd, yyyy/MM/dd 형식을 모두 지원.
+    private static final java.util.regex.Pattern DATE_PATTERN =
+            java.util.regex.Pattern.compile("(\\d{4})[.\\-/](\\d{1,2})[.\\-/](\\d{1,2})");
+    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final DateTimeFormatter COMPLETION_DATE_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd");
+    private static final int BUG_QUERY_MAX_RESULTS = 15;
+
     private final IssueCreateService issueCreateService;
     private final IssueSearchService issueSearchService;
     private final ScrumReportService scrumReportService;
     private final JiraSyncService jiraSyncService;
     private final JiraApiClient jiraApiClient;
+    private final JiraProperties jiraProps;
     private final IssueRepository issueRepository;
     private final IntentClassifier intentClassifier;
     private final ThreadActionClassifier threadActionClassifier;
@@ -89,6 +106,7 @@ public class SlackEventController {
                                 ScrumReportService scrumReportService,
                                 JiraSyncService jiraSyncService,
                                 JiraApiClient jiraApiClient,
+                                JiraProperties jiraProps,
                                 IssueRepository issueRepository,
                                 IntentClassifier intentClassifier,
                                 ThreadActionClassifier threadActionClassifier,
@@ -103,6 +121,7 @@ public class SlackEventController {
         this.scrumReportService = scrumReportService;
         this.jiraSyncService = jiraSyncService;
         this.jiraApiClient = jiraApiClient;
+        this.jiraProps = jiraProps;
         this.issueRepository = issueRepository;
         this.intentClassifier = intentClassifier;
         this.threadActionClassifier = threadActionClassifier;
@@ -148,6 +167,17 @@ public class SlackEventController {
             case "내작업", "my" -> { handleMyWork(event); return; }
             case "sync", "동기화" -> { handleSync(event); return; }
             case "완료", "done" -> { handleComplete(event); return; }
+            case "버그", "버그조회", "bug" -> { handleBugQuery(event, cleaned); return; }
+        }
+        // STUDY: "버그 2026.03.11" 패턴 — 버그/bug 뒤에 날짜가 오면 해결된 버그 조회.
+        //        "버그 발생했어요" 같은 서술문은 날짜가 아니므로 Haiku로 fall through.
+        if ((lower.startsWith("버그 ") || lower.startsWith("bug ")) && cleaned.length() > 2) {
+            String afterKeyword = cleaned.substring(cleaned.indexOf(' ') + 1).strip();
+            Matcher dateMatcher = DATE_PATTERN.matcher(afterKeyword);
+            if (dateMatcher.matches()) {
+                handleBugQuery(event, cleaned);
+                return;
+            }
         }
         if (lower.startsWith("작업 ") && cleaned.length() > 3) {
             handleMemberWork(event, cleaned.substring(3).strip());
@@ -349,6 +379,79 @@ public class SlackEventController {
         if (event.channel() != null && event.ts() != null) {
             slackNotifier.postThreadReply(event.channel(), event.ts(), message);
         }
+    }
+
+    // STUDY: 해결된 버그 조회. 텍스트에서 날짜를 파싱하고, 없으면 7일 전부터 조회.
+    //        결과를 Slack mrkdwn 형식으로 포맷하여 스레드에 응답한다.
+    private void handleBugQuery(SlackEventInner event, String cleaned) {
+        slackExecutor.execute(() -> {
+            // 날짜 파싱
+            LocalDate sinceDate;
+            boolean invalidDateWarning = false;
+            Matcher dateMatcher = DATE_PATTERN.matcher(cleaned);
+            if (dateMatcher.find()) {
+                try {
+                    sinceDate = LocalDate.of(
+                            Integer.parseInt(dateMatcher.group(1)),
+                            Integer.parseInt(dateMatcher.group(2)),
+                            Integer.parseInt(dateMatcher.group(3)));
+                } catch (Exception e) {
+                    // STUDY: 2026.13.40 같은 유효하지 않은 날짜 → 기본값 + 안내 메시지
+                    sinceDate = LocalDate.now(KST).minusDays(7);
+                    invalidDateWarning = true;
+                }
+            } else {
+                sinceDate = LocalDate.now(KST).minusDays(7);
+            }
+
+            Instant sinceInstant = sinceDate.atStartOfDay(KST).toInstant();
+            List<IssueEntity> bugs = issueRepository.findResolvedBugsSince(sinceInstant);
+
+            String sinceDateStr = sinceDate.format(COMPLETION_DATE_FMT);
+            StringBuilder sb = new StringBuilder();
+
+            if (invalidDateWarning) {
+                sb.append(":warning: 날짜 형식이 올바르지 않아 최근 7일로 조회합니다.\n\n");
+            }
+
+            if (bugs.isEmpty()) {
+                sb.append(String.format(":bug: %s 이후 해결된 버그가 없습니다.", sinceDateStr));
+                replyThread(event, sb.toString());
+                return;
+            }
+
+            int totalCount = bugs.size();
+            double totalSp = bugs.stream()
+                    .mapToDouble(b -> b.getStoryPoint() != null ? b.getStoryPoint() : 0)
+                    .sum();
+            int displayCount = Math.min(totalCount, BUG_QUERY_MAX_RESULTS);
+
+            sb.append(String.format(":bug: %s 이후 해결된 버그 (%d건)\n\n", sinceDateStr, totalCount));
+
+            for (int i = 0; i < displayCount; i++) {
+                IssueEntity bug = bugs.get(i);
+                // STUDY: completedAt이 null인 경우 jiraUpdated를 fallback으로 사용.
+                Instant completionInstant = bug.getCompletedAt() != null ? bug.getCompletedAt() : bug.getJiraUpdated();
+                String completionDate = completionInstant != null
+                        ? ZonedDateTime.ofInstant(completionInstant, KST).format(COMPLETION_DATE_FMT)
+                        : "N/A";
+                String jiraUrl = jiraProps.baseUrl() + "/browse/" + bug.getIssueKey();
+                int sp = bug.getStoryPoint() != null ? bug.getStoryPoint().intValue() : 0;
+                String assignee = bug.getAssignee() != null ? bug.getAssignee() : "미배정";
+
+                sb.append(String.format("  • <%s|%s> %s (완료 %s, SP %d, 담당: %s)\n",
+                        jiraUrl, bug.getIssueKey(), bug.getSummary(), completionDate, sp, assignee));
+            }
+
+            if (totalCount > BUG_QUERY_MAX_RESULTS) {
+                sb.append(String.format("  ... 외 %d건\n", totalCount - BUG_QUERY_MAX_RESULTS));
+            }
+
+            int spInt = (int) totalSp;
+            sb.append(String.format("\n:bar_chart: 총 %d건 해결 / %d SP 완료", totalCount, spInt));
+
+            replyThread(event, sb.toString());
+        });
     }
 
     private void handleHelp(SlackEventInner event) {

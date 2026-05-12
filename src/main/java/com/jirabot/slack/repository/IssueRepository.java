@@ -36,4 +36,12 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
     // STUDY: Pageable 파라미터로 DB 레벨에서 결과 수를 제한한다. Java에서 잘라내는 것보다 효율적.
     @Query("SELECT i FROM IssueEntity i WHERE (LOWER(i.summary) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '\\' OR LOWER(i.description) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '\\') ORDER BY i.jiraUpdated DESC")
     List<IssueEntity> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
+
+    // STUDY: completedAt이 null인 경우(이 필드 도입 이전에 동기화된 이슈)에는 jiraUpdated를 fallback으로 사용.
+    //        COALESCE로 정렬 시에도 동일한 fallback 로직을 적용한다.
+    @Query("SELECT i FROM IssueEntity i WHERE i.issueType = '버그' " +
+           "AND i.statusCategory = '완료' " +
+           "AND (i.completedAt >= :since OR (i.completedAt IS NULL AND i.jiraUpdated >= :since)) " +
+           "ORDER BY COALESCE(i.completedAt, i.jiraUpdated) DESC")
+    List<IssueEntity> findResolvedBugsSince(@Param("since") Instant since);
 }
