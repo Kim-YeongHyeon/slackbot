@@ -28,4 +28,8 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
     List<IssueEntity> findUpdatedSince(@Param("since") Instant since);
 
     Optional<IssueEntity> findBySlackChannelAndSlackThreadTs(String slackChannel, String slackThreadTs);
+
+    // STUDY: findBySummaryContaining은 완료 이슈를 제외하지만, 검색 기능은 모든 상태의 이슈를 포함한다.
+    @Query("SELECT i FROM IssueEntity i WHERE LOWER(i.summary) LIKE LOWER(CONCAT('%', :keyword, '%')) ORDER BY i.jiraUpdated DESC")
+    List<IssueEntity> searchByKeyword(@Param("keyword") String keyword);
 }

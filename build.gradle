@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'com.jirabot'
-version = '0.0.1-SNAPSHOT'
+version = '0.0.2-SNAPSHOT'
 description = 'Jira Slack Bot Server'
 
 java {

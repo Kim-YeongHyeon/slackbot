@@ -7,6 +7,7 @@ import com.jirabot.slack.client.ThreadActionClassifier;
 import com.jirabot.slack.client.dto.IntentResult;
 import com.jirabot.slack.client.dto.ThreadActionResult;
 import com.jirabot.slack.config.AsyncConfig;
+import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.dto.IssueCreateCommand;
 import com.jirabot.slack.dto.SlackEventEnvelope;
 import com.jirabot.slack.dto.SlackEventInner;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -52,6 +54,7 @@ public class SlackEventController {
               `@지라 내작업` — 내 진행 중인 작업 조회
               `@지라 작업 김영현` — 특정 팀원의 작업 조회
               `@지라 등록 <Jira 사용자명>` — 내 Slack ↔ Jira 계정 연결
+              `@지라 검색 <키워드>` — 이슈 제목으로 검색
               `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
               `@지라 완료` — 이슈 스레드에서 → Jira 완료 처리
 
@@ -67,10 +70,13 @@ public class SlackEventController {
 
             이슈 등록 시 AI가 자동으로 분류(BUG/FEATURE/OTHER)하고 Story Point를 추정합니다.""";
 
+    private static final int SEARCH_MAX_DISPLAY = 10;
+
     private final IssueCreateService issueCreateService;
     private final ScrumReportService scrumReportService;
     private final JiraSyncService jiraSyncService;
     private final JiraApiClient jiraApiClient;
+    private final JiraProperties jiraProps;
     private final IssueRepository issueRepository;
     private final IntentClassifier intentClassifier;
     private final ThreadActionClassifier threadActionClassifier;
@@ -85,6 +91,7 @@ public class SlackEventController {
                                 ScrumReportService scrumReportService,
                                 JiraSyncService jiraSyncService,
                                 JiraApiClient jiraApiClient,
+                                JiraProperties jiraProps,
                                 IssueRepository issueRepository,
                                 IntentClassifier intentClassifier,
                                 ThreadActionClassifier threadActionClassifier,
@@ -98,6 +105,7 @@ public class SlackEventController {
         this.scrumReportService = scrumReportService;
         this.jiraSyncService = jiraSyncService;
         this.jiraApiClient = jiraApiClient;
+        this.jiraProps = jiraProps;
         this.issueRepository = issueRepository;
         this.intentClassifier = intentClassifier;
         this.threadActionClassifier = threadActionClassifier;
@@ -151,6 +159,15 @@ public class SlackEventController {
         if (lower.startsWith("등록 ") || lower.startsWith("register ")) {
             String jiraUsername = cleaned.substring(cleaned.indexOf(' ') + 1).strip();
             handleRegisterUser(event, jiraUsername);
+            return;
+        }
+        if (lower.equals("검색") || lower.equals("search")) {
+            replyThread(event, ":mag: 검색어를 입력해주세요. 예: `@지라 검색 로그인`");
+            return;
+        }
+        if (lower.startsWith("검색 ") || lower.startsWith("search ")) {
+            String keyword = cleaned.substring(cleaned.indexOf(' ') + 1).strip();
+            handleSearch(event, keyword);
             return;
         }
 
@@ -299,8 +316,12 @@ public class SlackEventController {
                 case "register_bug", "register_story" ->
                         issueCreateService.createFromSlackText(
                                 IssueCreateCommand.from(event, cleaned), intent);
-                case "search" ->
-                        replyThread(event, ":mag: 검색 기능은 준비 중입니다. `@지라 help`를 확인해주세요.");
+                case "search" -> {
+                    // STUDY: Haiku가 검색 의도로 분류한 경우, extracted에서 keyword를 꺼내거나 rawText를 fallback으로 사용.
+                    String keyword = intent.extracted() != null
+                            ? intent.extracted().getOrDefault("keyword", cleaned) : cleaned;
+                    handleSearch(event, keyword);
+                }
                 case "statistics" ->
                         replyThread(event, ":bar_chart: 통계 기능은 준비 중입니다. `@지라 help`를 확인해주세요.");
                 case "my_tasks" ->
@@ -460,6 +481,50 @@ public class SlackEventController {
                     replyThread(event, ":x: 작업 조회 중 오류가 발생했어요.");
                     return null;
                 });
+    }
+
+    // STUDY: 검색은 단순 DB 조회 + 포매팅이므로 별도 서비스 없이 컨트롤러에서 직접 처리.
+    //        slackExecutor로 비동기 실행하여 Slack 3초 제한을 회피한다.
+    private void handleSearch(SlackEventInner event, String keyword) {
+        log.info("Search requested: keyword='{}' by user={}", keyword, event.user());
+        slackExecutor.execute(() -> {
+            try {
+                List<IssueEntity> results = issueRepository.searchByKeyword(keyword);
+                String message = formatSearchResults(keyword, results);
+                replyThread(event, message);
+            } catch (Exception e) {
+                log.error("Search failed for keyword='{}': {}", keyword, e.toString());
+                replyThread(event, ":x: 검색 중 오류가 발생했어요.");
+            }
+        });
+    }
+
+    // STUDY: 패키지-프라이빗으로 선언하여 테스트에서 직접 호출 가능.
+    String formatSearchResults(String keyword, List<IssueEntity> results) {
+        if (results.isEmpty()) {
+            return String.format(":mag: \"%s\" 검색 결과가 없습니다.", keyword);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format(":mag: \"%s\" 검색 결과 (%d건)\n", keyword, results.size()));
+
+        int displayCount = Math.min(results.size(), SEARCH_MAX_DISPLAY);
+        for (int i = 0; i < displayCount; i++) {
+            IssueEntity issue = results.get(i);
+            String url = jiraProps.baseUrl() + "/browse/" + issue.getIssueKey();
+            String assignee = issue.getAssignee() != null ? issue.getAssignee() : "미배정";
+            String sp = issue.getStoryPoint() != null
+                    ? String.valueOf(issue.getStoryPoint().intValue()) : "-";
+            sb.append(String.format("• <%s|%s> %s (%s, SP %s, 담당: %s)\n",
+                    url, issue.getIssueKey(), issue.getSummary(),
+                    issue.getStatusCategory(), sp, assignee));
+        }
+
+        if (results.size() > SEARCH_MAX_DISPLAY) {
+            sb.append(String.format("외 %d건이 더 있습니다.", results.size() - SEARCH_MAX_DISPLAY));
+        }
+
+        return sb.toString().stripTrailing();
     }
 
     @PostMapping(path = "/event", consumes = MediaType.APPLICATION_JSON_VALUE)
