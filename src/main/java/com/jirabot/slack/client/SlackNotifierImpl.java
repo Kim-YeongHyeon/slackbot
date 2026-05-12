@@ -109,6 +109,63 @@ public class SlackNotifierImpl implements SlackNotifier {
     }
 
     @Override
+    public void postBlockMessage(String channel, String threadTs, String text, String blocksJson) {
+        try {
+            // STUDY: chat.postMessage에 blocks(Block Kit JSON 배열)를 함께 보내면
+            //        리치 메시지가 표시된다. text는 Block Kit 미지원 클라이언트용 fallback.
+            String bodyJson = String.format(
+                    "{\"channel\":\"%s\",\"thread_ts\":\"%s\",\"text\":\"%s\",\"blocks\":%s}",
+                    escapeJson(channel), escapeJson(threadTs), escapeJson(text), blocksJson);
+            String response = slackWebClient.post()
+                    .uri("/chat.postMessage")
+                    .bodyValue(bodyJson)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+            log.debug("Slack block message sent channel={} threadTs={} response={}", channel, threadTs, response);
+        } catch (Exception e) {
+            log.warn("Failed to send Slack block message: {}", e.toString());
+        }
+    }
+
+    @Override
+    public void updateMessage(String channel, String messageTs, String text, String blocksJson) {
+        try {
+            // STUDY: chat.update API로 기존 메시지를 수정한다.
+            //        인터랙션 후 버튼을 제거하고 결과 텍스트로 교체할 때 사용.
+            StringBuilder bodyBuilder = new StringBuilder();
+            bodyBuilder.append(String.format(
+                    "{\"channel\":\"%s\",\"ts\":\"%s\",\"text\":\"%s\"",
+                    escapeJson(channel), escapeJson(messageTs), escapeJson(text)));
+            if (blocksJson != null) {
+                bodyBuilder.append(",\"blocks\":").append(blocksJson);
+            }
+            bodyBuilder.append("}");
+            String response = slackWebClient.post()
+                    .uri("/chat.update")
+                    .bodyValue(bodyBuilder.toString())
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+            log.debug("Slack message updated channel={} ts={} response={}", channel, messageTs, response);
+        } catch (Exception e) {
+            log.warn("Failed to update Slack message: {}", e.toString());
+        }
+    }
+
+    /**
+     * Escape special JSON characters in a string value.
+     */
+    private static String escapeJson(String value) {
+        if (value == null) return "";
+        return value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
+    }
+
+    @Override
     public void postMessage(String channel, String text) {
         try {
             slackWebClient.post()

@@ -110,23 +110,73 @@ public class IssueCreateServiceImpl implements IssueCreateService {
         if (command.channel() == null || command.eventTs() == null) {
             return;
         }
-        StringBuilder message = new StringBuilder();
-        message.append(String.format(
-                ":white_check_mark: Jira 이슈가 등록되었습니다!\n*[%s] %s*\n분류: %s | Story Point: %d\n%s",
+        // STUDY: Block Kit JSON으로 리치 메시지 + 액션 버튼을 전송한다.
+        //        text 필드는 Block Kit 미지원 클라이언트용 fallback.
+        String fallbackText = String.format(
+                ":white_check_mark: Jira 이슈가 등록되었습니다! [%s] %s 분류: %s | SP: %d %s",
                 key, classification.title(), classification.type(),
-                classification.storyPoint(), url));
+                classification.storyPoint(), url);
 
-        if (!similar.isEmpty()) {
-            message.append("\n\n:warning: *유사한 이슈가 존재합니다:*\n");
+        String blocksJson = buildIssueCreatedBlocks(key, url, classification, similar);
+
+        slackNotifier.postBlockMessage(command.channel(), command.eventTs(), fallbackText, blocksJson);
+    }
+
+    // STUDY: Block Kit JSON을 문자열로 조합. Jackson ObjectMapper 대신 StringBuilder로 직접 구성하여
+    //        별도 DTO 없이 간결하게 유지. 구조가 복잡해지면 ObjectMapper 사용을 고려.
+    static String buildIssueCreatedBlocks(String key, String url,
+                                                  IssueClassification classification,
+                                                  List<IssueEntity> similar) {
+        StringBuilder blocks = new StringBuilder("[");
+        // Section: 이슈 정보
+        blocks.append("{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":")
+                .append("\"")
+                .append(escapeBlockJson(String.format(
+                        ":white_check_mark: Jira 이슈가 등록되었습니다!\\n*<%s|[%s] %s>*\\n분류: %s | Story Point: %d",
+                        url, key, classification.title(), classification.type(),
+                        classification.storyPoint())))
+                .append("\"}}");
+
+        // Similar issues warning
+        if (similar != null && !similar.isEmpty()) {
+            blocks.append(",{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"")
+                    .append(":warning: *유사한 이슈가 존재합니다:*");
             for (IssueEntity s : similar) {
-                String issueUrl = buildIssueUrl(s.getIssueKey());
-                message.append(String.format("  • <%s|%s> %s (%s)\n",
-                        issueUrl, s.getIssueKey(), s.getSummary(), s.getStatus()));
+                blocks.append("\\n  \\u2022 ")
+                        .append(escapeBlockJson(s.getIssueKey()))
+                        .append(" ")
+                        .append(escapeBlockJson(s.getSummary()))
+                        .append(" (")
+                        .append(escapeBlockJson(s.getStatus()))
+                        .append(")");
             }
-            message.append("중복이라면 새 이슈를 닫아주세요.");
+            blocks.append("\\n중복이라면 새 이슈를 닫아주세요.\"}}");
         }
 
-        slackNotifier.postThreadReply(command.channel(), command.eventTs(), message.toString());
+        // Divider
+        blocks.append(",{\"type\":\"divider\"}");
+
+        // Actions: 진행 중 / 완료 버튼
+        blocks.append(",{\"type\":\"actions\",\"elements\":[")
+                .append("{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"\\ud83d\\udd28 진행 중\"},")
+                .append("\"action_id\":\"jira_transition_in_progress\",\"value\":\"")
+                .append(escapeBlockJson(key)).append("\"},")
+                .append("{\"type\":\"button\",\"text\":{\"type\":\"plain_text\",\"text\":\"\\u2705 완료\"},")
+                .append("\"action_id\":\"jira_transition_done\",\"style\":\"primary\",\"value\":\"")
+                .append(escapeBlockJson(key)).append("\"}")
+                .append("]}");
+
+        blocks.append("]");
+        return blocks.toString();
+    }
+
+    private static String escapeBlockJson(String value) {
+        if (value == null) return "";
+        return value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t");
     }
 
     private String resolveReporterName(String slackUserId) {

@@ -31,4 +31,24 @@ public interface SlackNotifier {
      * @return list of message texts (oldest first), empty list on failure
      */
     List<String> getThreadMessages(String channel, String threadTs);
+
+    /**
+     * Block Kit JSON 포함 스레드 메시지 전송.
+     *
+     * @param channel   채널 ID
+     * @param threadTs  스레드 부모 메시지의 ts
+     * @param text      Block Kit 미지원 클라이언트용 fallback 텍스트
+     * @param blocksJson Block Kit JSON 배열 문자열
+     */
+    void postBlockMessage(String channel, String threadTs, String text, String blocksJson);
+
+    /**
+     * 기존 메시지를 업데이트한다 (chat.update API).
+     *
+     * @param channel   채널 ID
+     * @param messageTs 업데이트할 메시지의 ts
+     * @param text      fallback 텍스트
+     * @param blocksJson Block Kit JSON 배열 문자열 (null이면 blocks 제거)
+     */
+    void updateMessage(String channel, String messageTs, String text, String blocksJson);
 }

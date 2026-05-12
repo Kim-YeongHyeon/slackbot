@@ -26,12 +26,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	forwarder := NewForwarder(cfg.SpringURL, &http.Client{Timeout: cfg.ForwardTimeout}, logger)
+	eventForwarder := NewForwarder(cfg.SpringURL, &http.Client{Timeout: cfg.ForwardTimeout}, logger)
+	interactionForwarder := NewForwarder(cfg.SpringInteractionURL, &http.Client{Timeout: cfg.ForwardTimeout}, logger)
 
-	handler := NewHandler(forwarder, logger)
+	handler := NewHandler(eventForwarder, logger)
+	interactionHandler := NewInteractionHandler(interactionForwarder, logger)
 
 	mux := http.NewServeMux()
 	mux.Handle("/slack/events", handler)
+	mux.Handle("/slack/interactions", interactionHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -48,7 +51,7 @@ func main() {
 
 	serverErr := make(chan error, 1)
 	go func() {
-		logger.Info("bot listening", "addr", server.Addr, "forward_to", cfg.SpringURL)
+		logger.Info("bot listening", "addr", server.Addr, "events_to", cfg.SpringURL, "interactions_to", cfg.SpringInteractionURL)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
 		}

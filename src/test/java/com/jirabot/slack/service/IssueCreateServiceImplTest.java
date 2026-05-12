@@ -54,7 +54,7 @@ class IssueCreateServiceImplTest {
         assertThat(result.issueUrl()).isEqualTo("https://example.atlassian.net/browse/PROJ-1");
         verify(claude).classify(eq("login broken"), any());
         verify(issueRepository).save(any());
-        verify(slackNotifier).postThreadReply(eq("C1"), eq("123.0"), any());
+        verify(slackNotifier).postBlockMessage(eq("C1"), eq("123.0"), any(), any());
     }
 
     @Test

@@ -8,20 +8,22 @@ import (
 )
 
 type Config struct {
-	Port           string
-	SpringURL      string
-	SigningSecret  string
-	BotToken       string
-	ForwardTimeout time.Duration
+	Port               string
+	SpringURL          string
+	SpringInteractionURL string
+	SigningSecret      string
+	BotToken           string
+	ForwardTimeout     time.Duration
 }
 
 func LoadConfig() (Config, error) {
 	cfg := Config{
-		Port:           envOr("PORT", "3000"),
-		SpringURL:      envOr("SPRING_EVENT_URL", "http://localhost:8080/api/slack/event"),
-		SigningSecret:  os.Getenv("SLACK_SIGNING_SECRET"),
-		BotToken:       os.Getenv("SLACK_BOT_TOKEN"),
-		ForwardTimeout: 5 * time.Second,
+		Port:               envOr("PORT", "3000"),
+		SpringURL:          envOr("SPRING_EVENT_URL", "http://localhost:8080/api/slack/event"),
+		SpringInteractionURL: envOr("SPRING_INTERACTION_URL", "http://localhost:8080/api/slack/interaction"),
+		SigningSecret:      os.Getenv("SLACK_SIGNING_SECRET"),
+		BotToken:           os.Getenv("SLACK_BOT_TOKEN"),
+		ForwardTimeout:     5 * time.Second,
 	}
 
 	// SLACK_SIGNING_SECRET is intentionally validated here even though this proxy
