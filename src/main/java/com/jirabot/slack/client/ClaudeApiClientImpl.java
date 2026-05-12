@@ -9,13 +9,13 @@ import com.jirabot.slack.client.dto.IssueSearchEntry;
 import com.jirabot.slack.client.process.ProcessRunner;
 import com.jirabot.slack.config.ClaudeProperties;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
 // STUDY: @Component로 스캔 대상 지정. 생성자 주입(단일 생성자는 @Autowired 생략 가능).
@@ -130,9 +130,8 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
     }
 
     // STUDY: Sonnet 기반 의미 검색. 전체 이슈 목록을 Sonnet에게 전달하여 사용자 질문과 관련도 높은 이슈를 선별한다.
-    //        프롬프트 파일(prompts/sonnet-issue-search.md)을 시스템 프롬프트로 사용하고,
-    //        이슈 목록을 stdin으로 전달한다.
-    static final String SEARCH_PROMPT_FILE = "prompts/sonnet-issue-search.md";
+    //        프롬프트를 classpath 리소스(src/main/resources/prompts/)에서 로드하여 JAR 패키징에 포함되도록 한다.
+    static final String SEARCH_PROMPT_RESOURCE = "prompts/sonnet-issue-search.md";
 
     @Override
     public List<String> searchIssues(String userQuery, List<IssueSearchEntry> issues) {
@@ -168,11 +167,13 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         }
     }
 
+    // STUDY: ClassPathResource로 JAR 내부 리소스를 로드. 파일시스템 경로 의존성 제거.
+    //        리소스 로드 실패 시 인라인 fallback 프롬프트를 사용하여 애플리케이션이 중단되지 않도록 한다.
     private String loadSearchPrompt() {
-        try {
-            return Files.readString(Path.of(SEARCH_PROMPT_FILE));
+        try (var is = new ClassPathResource(SEARCH_PROMPT_RESOURCE).getInputStream()) {
+            return new String(is.readAllBytes(), StandardCharsets.UTF_8).strip();
         } catch (IOException e) {
-            log.warn("Failed to load search prompt file, using inline prompt: {}", e.toString());
+            log.warn("Search prompt resource not found, using inline fallback: {}", e.toString());
             return "당신은 Jira 이슈 검색 어시스턴트입니다.\n"
                     + "사용자의 질문과 가장 관련 있는 이슈를 찾아 issueKey 목록을 JSON 배열로 반환하세요.\n"
                     + "최대 10개까지, 관련도 높은 순서로 반환합니다.\n"

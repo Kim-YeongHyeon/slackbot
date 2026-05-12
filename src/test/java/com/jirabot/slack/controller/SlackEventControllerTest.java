@@ -10,24 +10,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import com.jirabot.slack.client.ClaudeApiClient;
 import com.jirabot.slack.client.IntentClassifier;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.client.ThreadActionClassifier;
 import com.jirabot.slack.client.dto.IntentResult;
-import com.jirabot.slack.config.JiraProperties;
-import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
 import com.jirabot.slack.service.IssueCreateResult;
 import com.jirabot.slack.service.IssueCreateService;
+import com.jirabot.slack.service.IssueSearchService;
 import com.jirabot.slack.service.JiraSyncService;
 import com.jirabot.slack.service.ScrumReportService;
-import java.time.Instant;
-import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -40,39 +35,37 @@ import org.springframework.test.web.servlet.MockMvc;
 class SlackEventControllerTest {
 
     private IssueCreateService issueCreateService;
+    private IssueSearchService issueSearchService;
     private ScrumReportService scrumReportService;
     private JiraSyncService jiraSyncService;
     private JiraApiClient jiraApiClient;
-    private ClaudeApiClient claudeApiClient;
     private IssueRepository issueRepository;
     private IntentClassifier intentClassifier;
     private ThreadActionClassifier threadActionClassifier;
     private IntentFailureRepository intentFailureRepository;
     private UserMappingRepository userMappingRepository;
     private SlackNotifier slackNotifier;
-    private JiraProperties jiraProps;
     private SlackEventController controller;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         issueCreateService = mock(IssueCreateService.class);
+        issueSearchService = mock(IssueSearchService.class);
         scrumReportService = mock(ScrumReportService.class);
         jiraSyncService = mock(JiraSyncService.class);
         jiraApiClient = mock(JiraApiClient.class);
-        claudeApiClient = mock(ClaudeApiClient.class);
         issueRepository = mock(IssueRepository.class);
         intentClassifier = mock(IntentClassifier.class);
         threadActionClassifier = mock(ThreadActionClassifier.class);
         intentFailureRepository = mock(IntentFailureRepository.class);
         userMappingRepository = mock(UserMappingRepository.class);
         slackNotifier = mock(SlackNotifier.class);
-        jiraProps = new JiraProperties("https://jira.example.com", "test@example.com", "token", "SLAC");
         Executor directExecutor = Runnable::run;
         SlackEventDeduplicator deduplicator = new SlackEventDeduplicator();
         controller = new SlackEventController(
-                issueCreateService, scrumReportService, jiraSyncService,
-                jiraApiClient, claudeApiClient, jiraProps, issueRepository, intentClassifier,
+                issueCreateService, issueSearchService, scrumReportService, jiraSyncService,
+                jiraApiClient, issueRepository, intentClassifier,
                 threadActionClassifier, intentFailureRepository,
                 userMappingRepository, slackNotifier,
                 directExecutor, deduplicator, "C1,C2");
@@ -196,11 +189,9 @@ class SlackEventControllerTest {
     }
 
     @Test
-    void searchCommand_withKeyword_callsRepository() throws Exception {
-        when(issueRepository.searchByKeyword("로그인"))
-                .thenReturn(List.of(
-                        new IssueEntity("SLAC-7", "로그인 페이지 에러", "Bug", "진행 중", "진행 중",
-                                "김영현", 3.0, "reporter", null, Instant.now(), Instant.now())));
+    void searchCommand_withKeyword_callsSearchService() throws Exception {
+        when(issueSearchService.searchByKeyword("로그인"))
+                .thenReturn(CompletableFuture.completedFuture(":mag: \"로그인\" 검색 결과 (1건)"));
         String body = """
                 {"type":"event_callback","event":{
                     "type":"app_mention","user":"U1","text":"<@U0BOT> 검색 로그인","channel":"C1","ts":"1.0"}}
@@ -211,7 +202,7 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository).searchByKeyword("로그인");
+        verify(issueSearchService).searchByKeyword("로그인");
         verify(slackNotifier).postThreadReply(any(), any(), any());
     }
 
@@ -232,9 +223,9 @@ class SlackEventControllerTest {
     }
 
     @Test
-    void searchCommand_english_callsRepository() throws Exception {
-        when(issueRepository.searchByKeyword("login"))
-                .thenReturn(Collections.emptyList());
+    void searchCommand_english_callsSearchService() throws Exception {
+        when(issueSearchService.searchByKeyword("login"))
+                .thenReturn(CompletableFuture.completedFuture(":mag: \"login\" 검색 결과가 없습니다."));
         String body = """
                 {"type":"event_callback","event":{
                     "type":"app_mention","user":"U1","text":"<@U0BOT> search login","channel":"C1","ts":"1.0"}}
@@ -245,64 +236,15 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository).searchByKeyword("login");
+        verify(issueSearchService).searchByKeyword("login");
     }
 
     @Test
-    void formatSearchResults_noResults_showsEmptyMessage() {
-        String result = controller.formatSearchResults("테스트", Collections.emptyList());
-        org.assertj.core.api.Assertions.assertThat(result)
-                .isEqualTo(":mag: \"테스트\" 검색 결과가 없습니다.");
-    }
-
-    @Test
-    void formatSearchResults_withResults_showsFormattedList() {
-        List<IssueEntity> issues = List.of(
-                new IssueEntity("SLAC-7", "로그인 에러", "Bug", "진행 중", "진행 중",
-                        "김영현", 3.0, "reporter", null, Instant.now(), Instant.now()),
-                new IssueEntity("SLAC-8", "로그인 UI 개선", "Story", "할 일", "할 일",
-                        null, null, "reporter", null, Instant.now(), Instant.now()));
-
-        String result = controller.formatSearchResults("로그인", issues);
-        org.assertj.core.api.Assertions.assertThat(result)
-                .contains(":mag: \"로그인\" 검색 결과 (2건)")
-                .contains("<https://jira.example.com/browse/SLAC-7|SLAC-7>")
-                .contains("담당: 김영현")
-                .contains("SP 3")
-                .contains("<https://jira.example.com/browse/SLAC-8|SLAC-8>")
-                .contains("담당: 미배정")
-                .contains("SP -");
-    }
-
-    @Test
-    void formatSearchResults_moreThanMax_showsOverflowMessage() {
-        // Create 12 issues to test the "외 N건" overflow message
-        List<IssueEntity> issues = java.util.stream.IntStream.rangeClosed(1, 12)
-                .mapToObj(i -> new IssueEntity("SLAC-" + i, "이슈 " + i, "Bug", "진행 중", "진행 중",
-                        "담당자", 1.0, "reporter", null, Instant.now(), Instant.now()))
-                .toList();
-
-        String result = controller.formatSearchResults("이슈", issues);
-        org.assertj.core.api.Assertions.assertThat(result)
-                .contains(":mag: \"이슈\" 검색 결과 (12건)")
-                .contains("외 2건이 더 있습니다.")
-                .doesNotContain("SLAC-11")
-                .doesNotContain("SLAC-12");
-    }
-
-    @Test
-    void semanticSearch_haiku_classifiesAsSearch_callsSonnet() throws Exception {
-        // When Haiku classifies as "search", Sonnet semantic search should be invoked
+    void semanticSearch_haiku_classifiesAsSearch_callsSearchService() throws Exception {
         when(intentClassifier.classify(any()))
                 .thenReturn(new IntentResult("search", 0.90, Map.of("keyword", "로그인 에러"), "로그인 에러 관련 이슈 알려줘"));
-
-        IssueEntity issue1 = new IssueEntity("SLAC-7", "로그인 500 에러", "Bug", "진행 중", "진행 중",
-                "김영현", 3.0, "reporter", "로그인 페이지에서 500 에러 발생", Instant.now(), Instant.now());
-        IssueEntity issue2 = new IssueEntity("SLAC-8", "결제 금액 표시", "Bug", "완료", "완료",
-                "최아록", 2.0, "reporter", null, Instant.now(), Instant.now());
-
-        when(issueRepository.findAll()).thenReturn(List.of(issue1, issue2));
-        when(claudeApiClient.searchIssues(any(), any())).thenReturn(List.of("SLAC-7"));
+        when(issueSearchService.searchSemantic(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(":mag: \"로그인 에러 관련 이슈 알려줘\" 검색 결과 (1건)\n• SLAC-7"));
 
         String body = """
                 {"type":"event_callback","event":{
@@ -314,34 +256,8 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(claudeApiClient).searchIssues(any(), any());
-        verify(slackNotifier).postThreadReply(any(), any(), org.mockito.ArgumentMatchers.contains("SLAC-7"));
-    }
-
-    @Test
-    void semanticSearch_sonnetFails_fallsBackToKeywordSearch() throws Exception {
-        when(intentClassifier.classify(any()))
-                .thenReturn(new IntentResult("search", 0.90, Map.of("keyword", "로그인"), "로그인 관련"));
-
-        IssueEntity issue1 = new IssueEntity("SLAC-7", "로그인 500 에러", "Bug", "진행 중", "진행 중",
-                "김영현", 3.0, "reporter", null, Instant.now(), Instant.now());
-
-        when(issueRepository.findAll()).thenReturn(List.of(issue1));
-        // Sonnet returns empty → fallback to keyword search
-        when(claudeApiClient.searchIssues(any(), any())).thenReturn(Collections.emptyList());
-        when(issueRepository.searchByKeyword("로그인")).thenReturn(List.of(issue1));
-
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 로그인 관련","channel":"C1","ts":"1.0"}}
-                """;
-
-        mockMvc.perform(post("/api/slack/event")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isOk());
-
-        verify(issueRepository).searchByKeyword("로그인");
+        verify(issueSearchService).searchSemantic(any(), any());
+        verify(slackNotifier).postThreadReply(any(), any(), any());
     }
 
     @Test
