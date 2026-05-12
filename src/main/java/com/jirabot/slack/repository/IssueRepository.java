@@ -37,11 +37,12 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
     @Query("SELECT i FROM IssueEntity i WHERE (LOWER(i.summary) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '\\' OR LOWER(i.description) LIKE LOWER(CONCAT('%', :keyword, '%')) ESCAPE '\\') ORDER BY i.jiraUpdated DESC")
     List<IssueEntity> searchByKeyword(@Param("keyword") String keyword, Pageable pageable);
 
-    // STUDY: completedAt이 null인 경우(이 필드 도입 이전에 동기화된 이슈)에는 jiraUpdated를 fallback으로 사용.
+    // STUDY: completedAt이 null인 완료 이슈(sync 이전에 완료된 것)는 jiraUpdated를 fallback으로 사용한다.
+    //        jiraUpdated는 완료 후에도 댓글/수정으로 갱신될 수 있어 정확한 완료 시점이 아닐 수 있다 (근사치).
     //        COALESCE로 정렬 시에도 동일한 fallback 로직을 적용한다.
     @Query("SELECT i FROM IssueEntity i WHERE i.issueType = '버그' " +
            "AND i.statusCategory = '완료' " +
            "AND (i.completedAt >= :since OR (i.completedAt IS NULL AND i.jiraUpdated >= :since)) " +
            "ORDER BY COALESCE(i.completedAt, i.jiraUpdated) DESC")
-    List<IssueEntity> findResolvedBugsSince(@Param("since") Instant since);
+    List<IssueEntity> findResolvedBugsSince(@Param("since") Instant since, Pageable pageable);
 }

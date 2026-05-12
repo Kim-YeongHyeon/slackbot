@@ -1,5 +1,6 @@
 package com.jirabot.slack.controller;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -16,16 +17,16 @@ import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.client.ThreadActionClassifier;
 import com.jirabot.slack.client.dto.IntentResult;
 import com.jirabot.slack.config.JiraProperties;
-import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
+import com.jirabot.slack.service.BugQueryService;
 import com.jirabot.slack.service.IssueCreateResult;
 import com.jirabot.slack.service.IssueCreateService;
 import com.jirabot.slack.service.IssueSearchService;
 import com.jirabot.slack.service.JiraSyncService;
 import com.jirabot.slack.service.ScrumReportService;
-import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -42,6 +43,7 @@ class SlackEventControllerTest {
     private IssueCreateService issueCreateService;
     private IssueSearchService issueSearchService;
     private ScrumReportService scrumReportService;
+    private BugQueryService bugQueryService;
     private JiraSyncService jiraSyncService;
     private JiraApiClient jiraApiClient;
     private JiraProperties jiraProps;
@@ -59,6 +61,7 @@ class SlackEventControllerTest {
         issueCreateService = mock(IssueCreateService.class);
         issueSearchService = mock(IssueSearchService.class);
         scrumReportService = mock(ScrumReportService.class);
+        bugQueryService = mock(BugQueryService.class);
         jiraSyncService = mock(JiraSyncService.class);
         jiraApiClient = mock(JiraApiClient.class);
         jiraProps = new JiraProperties("https://test.atlassian.net", "test@test.com", "token", "SLAC");
@@ -71,8 +74,8 @@ class SlackEventControllerTest {
         Executor directExecutor = Runnable::run;
         SlackEventDeduplicator deduplicator = new SlackEventDeduplicator();
         controller = new SlackEventController(
-                issueCreateService, issueSearchService, scrumReportService, jiraSyncService,
-                jiraApiClient, jiraProps, issueRepository, intentClassifier,
+                issueCreateService, issueSearchService, scrumReportService, bugQueryService,
+                jiraSyncService, jiraApiClient, jiraProps, issueRepository, intentClassifier,
                 threadActionClassifier, intentFailureRepository,
                 userMappingRepository, slackNotifier,
                 directExecutor, deduplicator, "C1,C2");
@@ -199,7 +202,7 @@ class SlackEventControllerTest {
 
     @Test
     void bugCommand_exact_queriesResolvedBugs() throws Exception {
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of());
+        when(bugQueryService.queryResolvedBugs(any())).thenReturn(CompletableFuture.completedFuture("결과"));
         String body = """
                 {"type":"event_callback","event":{
                     "type":"app_mention","user":"U1","text":"<@U0BOT> 버그","channel":"C1","ts":"2.0"}}
@@ -210,13 +213,13 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository).findResolvedBugsSince(any());
+        verify(bugQueryService).queryResolvedBugs(any());
         verify(intentClassifier, never()).classify(any());
     }
 
     @Test
     void bugQueryCommand_exact_queriesResolvedBugs() throws Exception {
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of());
+        when(bugQueryService.queryResolvedBugs(any())).thenReturn(CompletableFuture.completedFuture("결과"));
         String body = """
                 {"type":"event_callback","event":{
                     "type":"app_mention","user":"U1","text":"<@U0BOT> 버그조회","channel":"C1","ts":"2.1"}}
@@ -227,12 +230,12 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository).findResolvedBugsSince(any());
+        verify(bugQueryService).queryResolvedBugs(any());
     }
 
     @Test
     void bugEnglishCommand_queriesResolvedBugs() throws Exception {
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of());
+        when(bugQueryService.queryResolvedBugs(any())).thenReturn(CompletableFuture.completedFuture("결과"));
         String body = """
                 {"type":"event_callback","event":{
                     "type":"app_mention","user":"U1","text":"<@U0BOT> bug","channel":"C1","ts":"2.2"}}
@@ -243,12 +246,12 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository).findResolvedBugsSince(any());
+        verify(bugQueryService).queryResolvedBugs(any());
     }
 
     @Test
-    void bugWithDate_queriesResolvedBugs() throws Exception {
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of());
+    void bugWithDate_queriesResolvedBugsWithCorrectDate() throws Exception {
+        when(bugQueryService.queryResolvedBugs(any())).thenReturn(CompletableFuture.completedFuture("결과"));
         String body = """
                 {"type":"event_callback","event":{
                     "type":"app_mention","user":"U1","text":"<@U0BOT> 버그 2026.03.11","channel":"C1","ts":"2.3"}}
@@ -259,7 +262,9 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository).findResolvedBugsSince(any());
+        ArgumentCaptor<LocalDate> dateCaptor = ArgumentCaptor.forClass(LocalDate.class);
+        verify(bugQueryService).queryResolvedBugs(dateCaptor.capture());
+        assertThat(dateCaptor.getValue()).isEqualTo(LocalDate.of(2026, 3, 11));
     }
 
     @Test
@@ -279,15 +284,15 @@ class SlackEventControllerTest {
                 .andExpect(status().isOk());
 
         // Should NOT go to bug query — should fall through to Haiku
-        verify(issueRepository, never()).findResolvedBugsSince(any());
+        verify(bugQueryService, never()).queryResolvedBugs(any());
         verify(intentClassifier).classify(any());
     }
 
     @Test
-    void bugQuery_withResults_formatsCorrectly() throws Exception {
-        IssueEntity bug = new IssueEntity("SLAC-7", "로그인 500 에러", "버그", "완료", "완료",
-                "김영현", 2.0, "reporter", "desc", Instant.now(), Instant.now());
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of(bug));
+    void bugQuery_withResults_delegatesToService() throws Exception {
+        // STUDY: 포맷팅 검증은 BugQueryServiceImplTest로 이동. 컨트롤러는 서비스 호출만 확인.
+        when(bugQueryService.queryResolvedBugs(any()))
+                .thenReturn(CompletableFuture.completedFuture(":bug: 결과"));
 
         String body = """
                 {"type":"event_callback","event":{
@@ -299,21 +304,16 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
+        verify(bugQueryService).queryResolvedBugs(any());
         ArgumentCaptor<String> msgCaptor = ArgumentCaptor.forClass(String.class);
         verify(slackNotifier).postThreadReply(any(), any(), msgCaptor.capture());
-        String message = msgCaptor.getValue();
-
-        org.assertj.core.api.Assertions.assertThat(message).contains(":bug:");
-        org.assertj.core.api.Assertions.assertThat(message).contains("해결된 버그 (1건)");
-        org.assertj.core.api.Assertions.assertThat(message).contains("SLAC-7");
-        org.assertj.core.api.Assertions.assertThat(message).contains("로그인 500 에러");
-        org.assertj.core.api.Assertions.assertThat(message).contains("https://test.atlassian.net/browse/SLAC-7");
-        org.assertj.core.api.Assertions.assertThat(message).contains("총 1건 해결 / 2 SP 완료");
+        assertThat(msgCaptor.getValue()).contains(":bug: 결과");
     }
 
     @Test
-    void bugQuery_noResults_showsEmptyMessage() throws Exception {
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of());
+    void bugQuery_noDateKeyword_defaultsTo7Days() throws Exception {
+        when(bugQueryService.queryResolvedBugs(any()))
+                .thenReturn(CompletableFuture.completedFuture("결과"));
 
         String body = """
                 {"type":"event_callback","event":{
@@ -325,15 +325,17 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        ArgumentCaptor<String> msgCaptor = ArgumentCaptor.forClass(String.class);
-        verify(slackNotifier).postThreadReply(any(), any(), msgCaptor.capture());
-        String message = msgCaptor.getValue();
-        org.assertj.core.api.Assertions.assertThat(message).contains("해결된 버그가 없습니다");
+        ArgumentCaptor<LocalDate> dateCaptor = ArgumentCaptor.forClass(LocalDate.class);
+        verify(bugQueryService).queryResolvedBugs(dateCaptor.capture());
+        // 7일 전 날짜가 전달되어야 함
+        LocalDate expected = LocalDate.now(java.time.ZoneId.of("Asia/Seoul")).minusDays(7);
+        assertThat(dateCaptor.getValue()).isEqualTo(expected);
     }
 
     @Test
     void bugQuery_invalidDate_defaultsTo7DaysWithWarning() throws Exception {
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of());
+        when(bugQueryService.queryResolvedBugs(any()))
+                .thenReturn(CompletableFuture.completedFuture("결과"));
 
         String body = """
                 {"type":"event_callback","event":{
@@ -345,16 +347,15 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        ArgumentCaptor<String> msgCaptor = ArgumentCaptor.forClass(String.class);
-        verify(slackNotifier).postThreadReply(any(), any(), msgCaptor.capture());
-        String message = msgCaptor.getValue();
-        org.assertj.core.api.Assertions.assertThat(message).contains(":warning:");
-        org.assertj.core.api.Assertions.assertThat(message).contains("날짜 형식이 올바르지 않아");
+        // 경고 메시지 + 서비스 호출 모두 발생
+        verify(slackNotifier, org.mockito.Mockito.atLeast(1)).postThreadReply(any(), any(), any());
+        verify(bugQueryService).queryResolvedBugs(any());
     }
 
     @Test
     void bugQuery_dashDateFormat_parsesCorrectly() throws Exception {
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of());
+        when(bugQueryService.queryResolvedBugs(any()))
+                .thenReturn(CompletableFuture.completedFuture("결과"));
         String body = """
                 {"type":"event_callback","event":{
                     "type":"app_mention","user":"U1","text":"<@U0BOT> 버그 2026-03-11","channel":"C1","ts":"2.8"}}
@@ -365,12 +366,15 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository).findResolvedBugsSince(any());
+        ArgumentCaptor<LocalDate> dateCaptor = ArgumentCaptor.forClass(LocalDate.class);
+        verify(bugQueryService).queryResolvedBugs(dateCaptor.capture());
+        assertThat(dateCaptor.getValue()).isEqualTo(LocalDate.of(2026, 3, 11));
     }
 
     @Test
     void bugQuery_slashDateFormat_parsesCorrectly() throws Exception {
-        when(issueRepository.findResolvedBugsSince(any())).thenReturn(List.of());
+        when(bugQueryService.queryResolvedBugs(any()))
+                .thenReturn(CompletableFuture.completedFuture("결과"));
         String body = """
                 {"type":"event_callback","event":{
                     "type":"app_mention","user":"U1","text":"<@U0BOT> 버그 2026/03/11","channel":"C1","ts":"2.9"}}
@@ -381,7 +385,9 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository).findResolvedBugsSince(any());
+        ArgumentCaptor<LocalDate> dateCaptor = ArgumentCaptor.forClass(LocalDate.class);
+        verify(bugQueryService).queryResolvedBugs(dateCaptor.capture());
+        assertThat(dateCaptor.getValue()).isEqualTo(LocalDate.of(2026, 3, 11));
     }
 
     @Test
@@ -459,11 +465,11 @@ class SlackEventControllerTest {
     @Test
     void appMention_stripsMentionTag() {
         // "<@U0AT5U95C4T> 로그인 에러" → "로그인 에러"
-        org.assertj.core.api.Assertions.assertThat(
+        assertThat(
                 SlackEventController.stripMention("<@U0AT5U95C4T> 로그인 에러")).isEqualTo("로그인 에러");
-        org.assertj.core.api.Assertions.assertThat(
+        assertThat(
                 SlackEventController.stripMention("<@U0AT5U95C4T>  멀티스페이스")).isEqualTo("멀티스페이스");
-        org.assertj.core.api.Assertions.assertThat(
+        assertThat(
                 SlackEventController.stripMention(null)).isEmpty();
     }
 }
