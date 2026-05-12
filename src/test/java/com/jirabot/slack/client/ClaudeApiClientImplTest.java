@@ -10,9 +10,11 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jirabot.slack.client.dto.IssueClassification;
+import com.jirabot.slack.client.dto.IssueSearchEntry;
 import com.jirabot.slack.client.process.ProcessRunner;
 import com.jirabot.slack.config.ClaudeProperties;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -125,5 +127,121 @@ class ClaudeApiClientImplTest {
 
         assertThat(result.type()).isEqualTo(IssueClassification.IssueType.OTHER);
         verify(runner, never()).run(any(List.class), anyString(), any(Duration.class));
+    }
+
+    // --- searchIssues tests ---
+
+    private static String searchEnvelope(String inner, boolean isError) {
+        String escaped = inner.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
+        return """
+                {"type":"result","subtype":"success","is_error":%s,"result":"%s"}
+                """.formatted(Boolean.toString(isError), escaped);
+    }
+
+    private List<IssueSearchEntry> sampleIssues() {
+        return List.of(
+                new IssueSearchEntry("SLAC-7", "로그인 500 에러", "로그인 페이지에서 500 에러", "진행 중", "김영현"),
+                new IssueSearchEntry("SLAC-15", "결제 금액 표시", "결제 완료 후 금액 문제", "완료", "최아록")
+        );
+    }
+
+    @Test
+    void searchIssues_parsesJsonArray() {
+        String inner = "[\"SLAC-7\", \"SLAC-15\"]";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, searchEnvelope(inner, false), "", false));
+
+        List<String> result = client.searchIssues("로그인 에러", sampleIssues());
+
+        assertThat(result).containsExactly("SLAC-7", "SLAC-15");
+    }
+
+    @Test
+    void searchIssues_emptyArray_returnsEmpty() {
+        String inner = "[]";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, searchEnvelope(inner, false), "", false));
+
+        List<String> result = client.searchIssues("존재하지 않는 이슈", sampleIssues());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void searchIssues_timeout_returnsEmpty() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(-1, "", "", true));
+
+        List<String> result = client.searchIssues("query", sampleIssues());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void searchIssues_nonZeroExit_returnsEmpty() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(1, "", "error", false));
+
+        List<String> result = client.searchIssues("query", sampleIssues());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void searchIssues_isError_returnsEmpty() {
+        String inner = "[\"SLAC-7\"]";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, searchEnvelope(inner, true), "", false));
+
+        List<String> result = client.searchIssues("query", sampleIssues());
+
+        assertThat(result).isEmpty();
+    }
+
+    @Test
+    void searchIssues_codeFencedArray_parsesCorrectly() {
+        String inner = "```json\\n[\"SLAC-7\"]\\n```";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, searchEnvelope(inner, false), "", false));
+
+        List<String> result = client.searchIssues("query", sampleIssues());
+
+        assertThat(result).containsExactly("SLAC-7");
+    }
+
+    @Test
+    void searchIssues_blankQuery_shortCircuits() {
+        List<String> result = client.searchIssues("", sampleIssues());
+
+        assertThat(result).isEmpty();
+        verify(runner, never()).run(any(List.class), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void searchIssues_emptyIssueList_shortCircuits() {
+        List<String> result = client.searchIssues("query", Collections.emptyList());
+
+        assertThat(result).isEmpty();
+        verify(runner, never()).run(any(List.class), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void buildSearchStdin_formatsCorrectly() {
+        String systemPrompt = "test prompt";
+        List<IssueSearchEntry> issues = List.of(
+                new IssueSearchEntry("SLAC-7", "로그인 에러", "상세 설명", "진행 중", "김영현"),
+                new IssueSearchEntry("SLAC-8", "UI 개선", null, "할 일", null)
+        );
+
+        String stdin = client.buildSearchStdin(systemPrompt, "로그인 문제", issues);
+
+        assertThat(stdin).contains("[사용자 질문]");
+        assertThat(stdin).contains("로그인 문제");
+        assertThat(stdin).contains("[이슈 목록]");
+        assertThat(stdin).contains("SLAC-7 | 로그인 에러 | 진행 중 | 담당: 김영현");
+        assertThat(stdin).contains("설명: 상세 설명");
+        assertThat(stdin).contains("SLAC-8 | UI 개선 | 할 일 | 담당: 미배정");
+        // No description line for null description
+        assertThat(stdin).doesNotContain("설명: null");
     }
 }

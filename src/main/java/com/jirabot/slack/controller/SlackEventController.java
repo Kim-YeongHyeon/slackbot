@@ -1,10 +1,12 @@
 package com.jirabot.slack.controller;
 
+import com.jirabot.slack.client.ClaudeApiClient;
 import com.jirabot.slack.client.IntentClassifier;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.client.ThreadActionClassifier;
 import com.jirabot.slack.client.dto.IntentResult;
+import com.jirabot.slack.client.dto.IssueSearchEntry;
 import com.jirabot.slack.client.dto.ThreadActionResult;
 import com.jirabot.slack.config.AsyncConfig;
 import com.jirabot.slack.config.JiraProperties;
@@ -54,7 +56,7 @@ public class SlackEventController {
               `@지라 내작업` — 내 진행 중인 작업 조회
               `@지라 작업 김영현` — 특정 팀원의 작업 조회
               `@지라 등록 <Jira 사용자명>` — 내 Slack ↔ Jira 계정 연결
-              `@지라 검색 <키워드>` — 이슈 제목으로 검색
+              `@지라 검색 <키워드>` — 이슈 제목/설명으로 검색 (예: `@지라 검색 preset`)
               `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
               `@지라 완료` — 이슈 스레드에서 → Jira 완료 처리
 
@@ -76,6 +78,7 @@ public class SlackEventController {
     private final ScrumReportService scrumReportService;
     private final JiraSyncService jiraSyncService;
     private final JiraApiClient jiraApiClient;
+    private final ClaudeApiClient claudeApiClient;
     private final JiraProperties jiraProps;
     private final IssueRepository issueRepository;
     private final IntentClassifier intentClassifier;
@@ -91,6 +94,7 @@ public class SlackEventController {
                                 ScrumReportService scrumReportService,
                                 JiraSyncService jiraSyncService,
                                 JiraApiClient jiraApiClient,
+                                ClaudeApiClient claudeApiClient,
                                 JiraProperties jiraProps,
                                 IssueRepository issueRepository,
                                 IntentClassifier intentClassifier,
@@ -105,6 +109,7 @@ public class SlackEventController {
         this.scrumReportService = scrumReportService;
         this.jiraSyncService = jiraSyncService;
         this.jiraApiClient = jiraApiClient;
+        this.claudeApiClient = claudeApiClient;
         this.jiraProps = jiraProps;
         this.issueRepository = issueRepository;
         this.intentClassifier = intentClassifier;
@@ -317,10 +322,12 @@ public class SlackEventController {
                         issueCreateService.createFromSlackText(
                                 IssueCreateCommand.from(event, cleaned), intent);
                 case "search" -> {
-                    // STUDY: Haiku가 검색 의도로 분류한 경우, extracted에서 keyword를 꺼내거나 rawText를 fallback으로 사용.
-                    String keyword = intent.extracted() != null
+                    // STUDY: Haiku가 검색 의도로 분류한 경우, Sonnet 기반 의미 검색을 수행한다.
+                    //        DB에서 전체 이슈를 가져와 Sonnet에게 전달하고, 관련도 높은 이슈만 반환받는다.
+                    //        Sonnet 호출 실패 시 extracted keyword로 DB 키워드 검색으로 fallback.
+                    String fallbackKeyword = intent.extracted() != null
                             ? intent.extracted().getOrDefault("keyword", cleaned) : cleaned;
-                    handleSearch(event, keyword);
+                    handleSemanticSearch(event, cleaned, fallbackKeyword);
                 }
                 case "statistics" ->
                         replyThread(event, ":bar_chart: 통계 기능은 준비 중입니다. `@지라 help`를 확인해주세요.");
@@ -497,6 +504,58 @@ public class SlackEventController {
                 replyThread(event, ":x: 검색 중 오류가 발생했어요.");
             }
         });
+    }
+
+    // STUDY: Sonnet 기반 의미 검색. 전체 이슈를 가져와 Sonnet에게 사용자 질문과 함께 전달한다.
+    //        Sonnet이 관련 이슈 키 목록을 반환하면, 해당 이슈만 필터링하여 결과를 포맷팅한다.
+    //        Sonnet 실패 시 fallbackKeyword로 기존 DB 키워드 검색을 수행한다.
+    private void handleSemanticSearch(SlackEventInner event, String userQuery, String fallbackKeyword) {
+        // STUDY: 이미 slackExecutor 내에서 호출되므로 추가 비동기 래핑 불필요.
+        try {
+            List<IssueEntity> allIssues = issueRepository.findAll();
+            if (allIssues.isEmpty()) {
+                replyThread(event, ":mag: 검색할 이슈가 없습니다. `@지라 sync`로 먼저 동기화해주세요.");
+                return;
+            }
+
+            List<IssueSearchEntry> entries = allIssues.stream()
+                    .map(issue -> new IssueSearchEntry(
+                            issue.getIssueKey(),
+                            issue.getSummary(),
+                            issue.getDescription(),
+                            issue.getStatusCategory(),
+                            issue.getAssignee()))
+                    .toList();
+
+            List<String> matchedKeys = claudeApiClient.searchIssues(userQuery, entries);
+
+            if (matchedKeys == null || matchedKeys.isEmpty()) {
+                // Sonnet이 빈 결과를 반환한 경우 — 키워드 fallback 시도
+                log.info("Sonnet returned empty results, falling back to keyword search: '{}'", fallbackKeyword);
+                handleSearch(event, fallbackKeyword);
+                return;
+            }
+
+            // STUDY: Sonnet이 반환한 키 순서(관련도순)를 유지하면서 DB 엔티티를 매칭한다.
+            java.util.Map<String, IssueEntity> issueMap = allIssues.stream()
+                    .collect(Collectors.toMap(IssueEntity::getIssueKey, issue -> issue, (a, b) -> a));
+            List<IssueEntity> matched = matchedKeys.stream()
+                    .filter(issueMap::containsKey)
+                    .map(issueMap::get)
+                    .toList();
+
+            if (matched.isEmpty()) {
+                replyThread(event, String.format(":mag: \"%s\" 검색 결과가 없습니다.", userQuery));
+                return;
+            }
+
+            String message = formatSearchResults(userQuery, matched);
+            replyThread(event, message);
+
+        } catch (Exception e) {
+            log.warn("Semantic search failed, falling back to keyword search: {}", e.toString());
+            handleSearch(event, fallbackKeyword);
+        }
     }
 
     // STUDY: 패키지-프라이빗으로 선언하여 테스트에서 직접 호출 가능.

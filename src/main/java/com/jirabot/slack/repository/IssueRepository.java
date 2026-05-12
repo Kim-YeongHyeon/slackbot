@@ -30,6 +30,7 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
     Optional<IssueEntity> findBySlackChannelAndSlackThreadTs(String slackChannel, String slackThreadTs);
 
     // STUDY: findBySummaryContaining은 완료 이슈를 제외하지만, 검색 기능은 모든 상태의 이슈를 포함한다.
-    @Query("SELECT i FROM IssueEntity i WHERE LOWER(i.summary) LIKE LOWER(CONCAT('%', :keyword, '%')) ORDER BY i.jiraUpdated DESC")
+    // STUDY: summary와 description 모두에서 검색하여 검색 범위를 확장한다. OR 절로 두 컬럼을 함께 매칭.
+    @Query("SELECT i FROM IssueEntity i WHERE (LOWER(i.summary) LIKE LOWER(CONCAT('%', :keyword, '%')) OR LOWER(i.description) LIKE LOWER(CONCAT('%', :keyword, '%'))) ORDER BY i.jiraUpdated DESC")
     List<IssueEntity> searchByKeyword(@Param("keyword") String keyword);
 }

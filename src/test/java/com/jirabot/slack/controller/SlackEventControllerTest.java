@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
+import com.jirabot.slack.client.ClaudeApiClient;
 import com.jirabot.slack.client.IntentClassifier;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
@@ -42,6 +43,7 @@ class SlackEventControllerTest {
     private ScrumReportService scrumReportService;
     private JiraSyncService jiraSyncService;
     private JiraApiClient jiraApiClient;
+    private ClaudeApiClient claudeApiClient;
     private IssueRepository issueRepository;
     private IntentClassifier intentClassifier;
     private ThreadActionClassifier threadActionClassifier;
@@ -58,6 +60,7 @@ class SlackEventControllerTest {
         scrumReportService = mock(ScrumReportService.class);
         jiraSyncService = mock(JiraSyncService.class);
         jiraApiClient = mock(JiraApiClient.class);
+        claudeApiClient = mock(ClaudeApiClient.class);
         issueRepository = mock(IssueRepository.class);
         intentClassifier = mock(IntentClassifier.class);
         threadActionClassifier = mock(ThreadActionClassifier.class);
@@ -69,7 +72,7 @@ class SlackEventControllerTest {
         SlackEventDeduplicator deduplicator = new SlackEventDeduplicator();
         controller = new SlackEventController(
                 issueCreateService, scrumReportService, jiraSyncService,
-                jiraApiClient, jiraProps, issueRepository, intentClassifier,
+                jiraApiClient, claudeApiClient, jiraProps, issueRepository, intentClassifier,
                 threadActionClassifier, intentFailureRepository,
                 userMappingRepository, slackNotifier,
                 directExecutor, deduplicator, "C1,C2");
@@ -285,6 +288,60 @@ class SlackEventControllerTest {
                 .contains("외 2건이 더 있습니다.")
                 .doesNotContain("SLAC-11")
                 .doesNotContain("SLAC-12");
+    }
+
+    @Test
+    void semanticSearch_haiku_classifiesAsSearch_callsSonnet() throws Exception {
+        // When Haiku classifies as "search", Sonnet semantic search should be invoked
+        when(intentClassifier.classify(any()))
+                .thenReturn(new IntentResult("search", 0.90, Map.of("keyword", "로그인 에러"), "로그인 에러 관련 이슈 알려줘"));
+
+        IssueEntity issue1 = new IssueEntity("SLAC-7", "로그인 500 에러", "Bug", "진행 중", "진행 중",
+                "김영현", 3.0, "reporter", "로그인 페이지에서 500 에러 발생", Instant.now(), Instant.now());
+        IssueEntity issue2 = new IssueEntity("SLAC-8", "결제 금액 표시", "Bug", "완료", "완료",
+                "최아록", 2.0, "reporter", null, Instant.now(), Instant.now());
+
+        when(issueRepository.findAll()).thenReturn(List.of(issue1, issue2));
+        when(claudeApiClient.searchIssues(any(), any())).thenReturn(List.of("SLAC-7"));
+
+        String body = """
+                {"type":"event_callback","event":{
+                    "type":"app_mention","user":"U1","text":"<@U0BOT> 로그인 에러 관련 이슈 알려줘","channel":"C1","ts":"1.0"}}
+                """;
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        verify(claudeApiClient).searchIssues(any(), any());
+        verify(slackNotifier).postThreadReply(any(), any(), org.mockito.ArgumentMatchers.contains("SLAC-7"));
+    }
+
+    @Test
+    void semanticSearch_sonnetFails_fallsBackToKeywordSearch() throws Exception {
+        when(intentClassifier.classify(any()))
+                .thenReturn(new IntentResult("search", 0.90, Map.of("keyword", "로그인"), "로그인 관련"));
+
+        IssueEntity issue1 = new IssueEntity("SLAC-7", "로그인 500 에러", "Bug", "진행 중", "진행 중",
+                "김영현", 3.0, "reporter", null, Instant.now(), Instant.now());
+
+        when(issueRepository.findAll()).thenReturn(List.of(issue1));
+        // Sonnet returns empty → fallback to keyword search
+        when(claudeApiClient.searchIssues(any(), any())).thenReturn(Collections.emptyList());
+        when(issueRepository.searchByKeyword("로그인")).thenReturn(List.of(issue1));
+
+        String body = """
+                {"type":"event_callback","event":{
+                    "type":"app_mention","user":"U1","text":"<@U0BOT> 로그인 관련","channel":"C1","ts":"1.0"}}
+                """;
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        verify(issueRepository).searchByKeyword("로그인");
     }
 
     @Test

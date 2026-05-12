@@ -1,12 +1,18 @@
 package com.jirabot.slack.client;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jirabot.slack.client.dto.IntentResult;
 import com.jirabot.slack.client.dto.IssueClassification;
+import com.jirabot.slack.client.dto.IssueSearchEntry;
 import com.jirabot.slack.client.process.ProcessRunner;
 import com.jirabot.slack.config.ClaudeProperties;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -121,6 +127,126 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
             log.warn("Claude classify failed, using fallback. err={}", e.toString());
             return IssueClassification.fallback(rawText);
         }
+    }
+
+    // STUDY: Sonnet 기반 의미 검색. 전체 이슈 목록을 Sonnet에게 전달하여 사용자 질문과 관련도 높은 이슈를 선별한다.
+    //        프롬프트 파일(prompts/sonnet-issue-search.md)을 시스템 프롬프트로 사용하고,
+    //        이슈 목록을 stdin으로 전달한다.
+    static final String SEARCH_PROMPT_FILE = "prompts/sonnet-issue-search.md";
+
+    @Override
+    public List<String> searchIssues(String userQuery, List<IssueSearchEntry> issues) {
+        if (userQuery == null || userQuery.isBlank() || issues == null || issues.isEmpty()) {
+            return Collections.emptyList();
+        }
+        try {
+            String systemPrompt = loadSearchPrompt();
+            String stdin = buildSearchStdin(systemPrompt, userQuery, issues);
+
+            // STUDY: Sonnet 모델로 호출. 기존 classify와 동일한 CLI 패턴이지만 model은 props.model() (Sonnet).
+            List<String> command = buildCommand();
+            Duration timeout = Duration.ofSeconds(props.timeoutSeconds());
+
+            ProcessRunner.Result result = processRunner.run(command, stdin, timeout);
+
+            if (result.timedOut()) {
+                log.warn("Claude CLI search timed out after {}s", props.timeoutSeconds());
+                return Collections.emptyList();
+            }
+            if (result.exitCode() != 0) {
+                log.warn("Claude CLI search exited with code={} stderr={}", result.exitCode(), truncate(result.stderr()));
+                return Collections.emptyList();
+            }
+            if (result.stdout() == null || result.stdout().isBlank()) {
+                log.warn("Claude CLI search returned empty stdout");
+                return Collections.emptyList();
+            }
+            return parseSearchResult(result.stdout());
+        } catch (Exception e) {
+            log.warn("Claude search failed: {}", e.toString());
+            return Collections.emptyList();
+        }
+    }
+
+    private String loadSearchPrompt() {
+        try {
+            return Files.readString(Path.of(SEARCH_PROMPT_FILE));
+        } catch (IOException e) {
+            log.warn("Failed to load search prompt file, using inline prompt: {}", e.toString());
+            return "당신은 Jira 이슈 검색 어시스턴트입니다.\n"
+                    + "사용자의 질문과 가장 관련 있는 이슈를 찾아 issueKey 목록을 JSON 배열로 반환하세요.\n"
+                    + "최대 10개까지, 관련도 높은 순서로 반환합니다.\n"
+                    + "관련 이슈가 없으면 빈 배열 []을 반환하세요.\n"
+                    + "반드시 JSON 배열만 반환하세요. 예: [\"SLAC-7\", \"SLAC-15\"]";
+        }
+    }
+
+    // STUDY: 패키지-프라이빗으로 테스트에서 직접 호출 가능.
+    String buildSearchStdin(String systemPrompt, String userQuery, List<IssueSearchEntry> issues) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(systemPrompt).append("\n\n");
+        sb.append("[사용자 질문]\n").append(userQuery).append("\n\n");
+        sb.append("[이슈 목록]\n");
+        for (IssueSearchEntry entry : issues) {
+            String assignee = entry.assignee() != null ? entry.assignee() : "미배정";
+            sb.append(entry.issueKey()).append(" | ")
+                    .append(entry.summary()).append(" | ")
+                    .append(entry.status()).append(" | ")
+                    .append("담당: ").append(assignee).append("\n");
+            if (entry.description() != null && !entry.description().isBlank()) {
+                // STUDY: description이 너무 길면 Sonnet 컨텍스트를 낭비하므로 200자로 제한.
+                String desc = entry.description().length() > 200
+                        ? entry.description().substring(0, 200) + "..."
+                        : entry.description();
+                sb.append("설명: ").append(desc).append("\n");
+            }
+            sb.append("\n");
+        }
+        return sb.toString();
+    }
+
+    // STUDY: Sonnet 응답은 --output-format json envelope 안에 JSON 배열이 들어 있다.
+    //        envelope.result에서 배열을 추출하여 List<String>으로 파싱한다.
+    List<String> parseSearchResult(String stdout) {
+        try {
+            JsonNode envelope = objectMapper.readTree(stdout);
+            if (envelope.path("is_error").asBoolean(false)) {
+                log.warn("Claude CLI search reported is_error=true");
+                return Collections.emptyList();
+            }
+            String inner = envelope.path("result").asText("");
+            if (inner.isBlank()) {
+                return Collections.emptyList();
+            }
+            String stripped = stripToJsonArray(inner);
+            return objectMapper.readValue(stripped, new TypeReference<List<String>>() {});
+        } catch (Exception e) {
+            log.warn("Claude search result parse failed: {}", e.toString());
+            return Collections.emptyList();
+        }
+    }
+
+    // STUDY: Sonnet이 markdown fence나 추가 텍스트로 감싸는 경우 방어적으로 JSON 배열만 추출.
+    private static String stripToJsonArray(String raw) {
+        String s = raw.strip();
+        if (s.startsWith("```")) {
+            int nl = s.indexOf('\n');
+            if (nl >= 0) {
+                s = s.substring(nl + 1);
+            }
+            if (s.endsWith("```")) {
+                s = s.substring(0, s.length() - 3);
+            }
+            s = s.strip();
+        }
+        if (!s.startsWith("[")) {
+            int open = s.indexOf('[');
+            int close = s.lastIndexOf(']');
+            if (open >= 0 && close > open) {
+                s = s.substring(open, close + 1);
+            }
+        }
+        return s;
     }
 
     private List<String> buildCommand() {
