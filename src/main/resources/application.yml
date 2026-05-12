@@ -56,13 +56,6 @@ management:
       exposure:
         include: health,info
 
-slackbot:
-  # 비동기 처리 executor 튜닝. IO-bound (Claude CLI + Jira REST) 부하 기준 값.
-  executor:
-    core-size: 4
-    max-size: 10
-    queue-capacity: 50
-
 logging:
   level:
     com.jirabot.slack: DEBUG

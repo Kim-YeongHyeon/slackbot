@@ -20,26 +20,16 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 public class AsyncConfig implements AsyncConfigurer {
 
     public static final String SLACK_EXECUTOR = "slackTaskExecutor";
+    private static final int QUEUE_CAPACITY = 50;
     private static final Logger log = LoggerFactory.getLogger(AsyncConfig.class);
-
-    @org.springframework.beans.factory.annotation.Value("${slackbot.executor.core-size:4}")
-    private int corePoolSize;
-
-    @org.springframework.beans.factory.annotation.Value("${slackbot.executor.max-size:10}")
-    private int maxPoolSize;
-
-    @org.springframework.beans.factory.annotation.Value("${slackbot.executor.queue-capacity:50}")
-    private int queueCapacity;
 
     @Bean(name = SLACK_EXECUTOR)
     public Executor slackTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // STUDY: core/max/queue 사이즈는 properties로 외부화 (slackbot.executor.*). IO-bound 파이프라인이므로
-        //        큐가 먼저 차고 그 후 max 로 확장된다.
-        final int currentQueueCapacity = queueCapacity;
-        executor.setCorePoolSize(corePoolSize);
-        executor.setMaxPoolSize(maxPoolSize);
-        executor.setQueueCapacity(currentQueueCapacity);
+        // STUDY: core=4/max=10/queue=50 — IO-bound(Claude/Jira HTTP) 기준. 큐가 먼저 차고 그 후 max 로 확장.
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(10);
+        executor.setQueueCapacity(QUEUE_CAPACITY);
         executor.setKeepAliveSeconds(60);
         executor.setThreadNamePrefix("slack-async-");
         // STUDY: AbortPolicy 기반 rejection — Slack 3초 ack 계약 보호. Controller 가 이미 200 반환 후
@@ -49,7 +39,7 @@ public class AsyncConfig implements AsyncConfigurer {
         executor.setRejectedExecutionHandler((task, exec) -> {
             log.warn("slackTaskExecutor saturated, task rejected: pool={}/{} active={} queue={}/{}",
                     exec.getPoolSize(), exec.getMaximumPoolSize(),
-                    exec.getActiveCount(), exec.getQueue().size(), currentQueueCapacity);
+                    exec.getActiveCount(), exec.getQueue().size(), QUEUE_CAPACITY);
             throw new RejectedExecutionException("slackTaskExecutor saturated");
         });
         executor.setWaitForTasksToCompleteOnShutdown(true);
