@@ -6,12 +6,8 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
-import org.springframework.web.reactive.function.client.ClientRequest;
-import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
 import org.springframework.web.reactive.function.client.WebClient;
-import reactor.core.publisher.Mono;
 
 // STUDY: Slack chat.postMessage API로 스레드 댓글을 남긴다.
 //        thread_ts 파라미터를 보내면 해당 메시지의 스레드에 댓글이 달린다.
@@ -23,28 +19,12 @@ public class SlackNotifierImpl implements SlackNotifier {
     private final WebClient slackWebClient;
 
     public SlackNotifierImpl(@Value("${slack.bot-token:}") String botToken) {
-        // STUDY: 토큰을 defaultHeader 대신 ExchangeFilterFunction으로 매 요청 시점에 주입한다.
-        //        defaultHeader는 WebClient 인스턴스 상태로 남아 디버그 로깅/직렬화 시 노출 위험이 있는 반면,
-        //        필터 람다 내부에 캡처된 변수는 요청 단위로만 사용된다.
+        // STUDY: WebClient를 빈으로 분리하지 않고 로컬 생성 — Slack API 호출은 이 클래스만 사용.
         this.slackWebClient = WebClient.builder()
                 .baseUrl("https://slack.com/api")
+                .defaultHeader("Authorization", "Bearer " + botToken)
                 .defaultHeader("Content-Type", "application/json; charset=utf-8")
-                .filter(authFilter(botToken))
                 .build();
-    }
-
-    private static ExchangeFilterFunction authFilter(String botToken) {
-        String header = "Bearer " + (botToken == null ? "" : botToken);
-        return (request, next) -> next.exchange(ClientRequest.from(request)
-                .header(HttpHeaders.AUTHORIZATION, header)
-                .build());
-    }
-
-    // STUDY: 향후 디버그 로깅을 추가하더라도 Authorization 헤더는 절대 평문 출력하지 않도록 도우미 노출.
-    static Mono<ClientRequest> sanitizeForLog(ClientRequest request) {
-        return Mono.just(ClientRequest.from(request)
-                .headers(h -> h.set(HttpHeaders.AUTHORIZATION, "[REDACTED]"))
-                .build());
     }
 
     @Override

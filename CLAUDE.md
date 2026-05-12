@@ -22,6 +22,7 @@
 - Challenge your own work before presenting it
 
 ## Core Principles
+- **Simplicity First**: Make every change as simple as possible. Impact minimal code
 - **No Laziness**: Find root causes. No temporary fixes. Senior developer standards
 - **Study**: When writing Spring Boot code, add inline comments starting with "// STUDY:" to explain concepts the developer should study further (e.g., unfamiliar annotations, patterns, or framework internals). This is a deliberate exception to the user-level "minimize comments in production code" rule, scoped to learning-oriented edits in this project.
 

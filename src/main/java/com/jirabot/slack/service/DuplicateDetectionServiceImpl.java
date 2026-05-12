@@ -9,7 +9,6 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class DuplicateDetectionServiceImpl implements DuplicateDetectionService {
 
     private static final Logger log = LoggerFactory.getLogger(DuplicateDetectionServiceImpl.class);
+    private static final int MIN_KEYWORD_LENGTH = 2;
+    private static final int MAX_RESULTS = 5;
 
     // STUDY: 한국어 조사/접미사, 영어 불용어 등 의미 없는 단어를 제외해야 검색 정확도가 올라간다.
     private static final Set<String> STOP_WORDS = Set.of(
@@ -31,19 +32,14 @@ public class DuplicateDetectionServiceImpl implements DuplicateDetectionService 
     private static final Pattern SPLIT_PATTERN = Pattern.compile("[\\s/\\-_.,()\\[\\]{}]+");
 
     private final IssueRepository issueRepository;
-    private final int minKeywordLength;
-    private final int minKeywordMatches;
-    private final int maxResults;
 
-    public DuplicateDetectionServiceImpl(IssueRepository issueRepository,
-                                         @Value("${slackbot.duplicate.min-keyword-length:2}") int minKeywordLength,
-                                         @Value("${slackbot.duplicate.min-keyword-matches:2}") int minKeywordMatches,
-                                         @Value("${slackbot.duplicate.max-results:5}") int maxResults) {
+    public DuplicateDetectionServiceImpl(IssueRepository issueRepository) {
         this.issueRepository = issueRepository;
-        this.minKeywordLength = minKeywordLength;
-        this.minKeywordMatches = minKeywordMatches;
-        this.maxResults = maxResults;
     }
+
+    // STUDY: 키워드 1개만 겹치면 오탐이 많다 (예: "페이지"만으로 모든 페이지 관련 이슈 매칭).
+    //        최소 2개 이상의 키워드가 겹쳐야 유사 이슈로 판정한다.
+    private static final int MIN_KEYWORD_MATCHES = 2;
 
     @Override
     public List<IssueEntity> findSimilar(String title) {
@@ -52,7 +48,7 @@ public class DuplicateDetectionServiceImpl implements DuplicateDetectionService 
         }
 
         List<String> keywords = extractKeywords(title);
-        if (keywords.size() < minKeywordMatches) {
+        if (keywords.size() < MIN_KEYWORD_MATCHES) {
             return List.of();
         }
 
@@ -70,9 +66,9 @@ public class DuplicateDetectionServiceImpl implements DuplicateDetectionService 
 
         // 2개 이상 키워드가 겹치는 이슈만 필터링, 매칭 수 내림차순 정렬
         List<IssueEntity> result = matchCount.entrySet().stream()
-                .filter(e -> e.getValue() >= minKeywordMatches)
+                .filter(e -> e.getValue() >= MIN_KEYWORD_MATCHES)
                 .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-                .limit(maxResults)
+                .limit(MAX_RESULTS)
                 .map(e -> issueMap.get(e.getKey()))
                 .toList();
 
@@ -84,7 +80,7 @@ public class DuplicateDetectionServiceImpl implements DuplicateDetectionService 
         String[] tokens = SPLIT_PATTERN.split(title.strip().toLowerCase());
         List<String> keywords = new ArrayList<>();
         for (String token : tokens) {
-            if (token.length() >= minKeywordLength && !STOP_WORDS.contains(token)) {
+            if (token.length() >= MIN_KEYWORD_LENGTH && !STOP_WORDS.contains(token)) {
                 keywords.add(token);
             }
         }

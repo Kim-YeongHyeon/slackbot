@@ -19,7 +19,6 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
-import reactor.core.publisher.Mono;
 
 // STUDY: @Retryable은 AOP 프록시로 동작 — 같은 빈 내부 호출은 재시도가 안 걸린다. 외부 빈에서 호출해야 함.
 // STUDY: retryFor/noRetryFor로 어떤 예외만 재시도할지 명시.
@@ -123,60 +122,35 @@ public class JiraApiClientImpl implements JiraApiClient {
     @Override
     public Optional<SprintInfo> getActiveSprint() {
         try {
-            // STUDY: 단일 block()으로 board 조회 → 활성 sprint 조회를 reactive chain으로 묶는다.
-            //        예전엔 block()을 두 번 호출해 호출 스레드가 두 번 suspend/resume 됐으나,
-            //        flatMap 으로 묶으면 한 번의 suspend 동안 IO 스레드가 두 hop을 처리한다.
-            SprintInfo info = jiraWebClient.get()
+            // STUDY: Jira Agile API로 프로젝트의 보드를 찾고, 활성 스프린트를 조회한다.
+            //        보드 ID는 프로젝트마다 다르므로 동적으로 조회.
+            String boardJson = jiraWebClient.get()
                     .uri("/rest/agile/1.0/board?projectKeyOrId={key}", props.projectKey())
-                    .retrieve().bodyToMono(String.class)
-                    .flatMap(boardJson -> {
-                        int boardId = parseFirstBoardId(boardJson);
-                        if (boardId < 0) {
-                            log.warn("No board found for project {}", props.projectKey());
-                            return Mono.empty();
-                        }
-                        return jiraWebClient.get()
-                                .uri("/rest/agile/1.0/board/{boardId}/sprint?state=active", boardId)
-                                .retrieve().bodyToMono(String.class);
-                    })
-                    .flatMap(sprintJson -> Mono.justOrEmpty(parseFirstActiveSprint(sprintJson)))
-                    .block();
-            return Optional.ofNullable(info);
-        } catch (Exception e) {
-            log.error("Failed to get active sprint: {}", e.toString());
-            return Optional.empty();
-        }
-    }
-
-    private int parseFirstBoardId(String boardJson) {
-        try {
+                    .retrieve().bodyToMono(String.class).block();
             JsonNode boards = objectMapper.readTree(boardJson).path("values");
             if (!boards.isArray() || boards.isEmpty()) {
-                return -1;
+                log.warn("No board found for project {}", props.projectKey());
+                return Optional.empty();
             }
-            return boards.get(0).path("id").asInt(-1);
-        } catch (Exception e) {
-            log.error("Failed to parse board json: {}", e.toString());
-            return -1;
-        }
-    }
+            int boardId = boards.get(0).path("id").asInt();
 
-    private SprintInfo parseFirstActiveSprint(String sprintJson) {
-        try {
+            String sprintJson = jiraWebClient.get()
+                    .uri("/rest/agile/1.0/board/{boardId}/sprint?state=active", boardId)
+                    .retrieve().bodyToMono(String.class).block();
             JsonNode sprints = objectMapper.readTree(sprintJson).path("values");
             if (!sprints.isArray() || sprints.isEmpty()) {
-                return null;
+                return Optional.empty();
             }
             JsonNode s = sprints.get(0);
-            return new SprintInfo(
+            return Optional.of(new SprintInfo(
                     s.path("id").asInt(),
                     s.path("name").asText(),
                     s.path("state").asText(),
                     s.path("startDate").asText(""),
-                    s.path("endDate").asText(""));
+                    s.path("endDate").asText("")));
         } catch (Exception e) {
-            log.error("Failed to parse sprint json: {}", e.toString());
-            return null;
+            log.error("Failed to get active sprint: {}", e.toString());
+            return Optional.empty();
         }
     }
 

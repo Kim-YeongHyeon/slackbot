@@ -18,8 +18,6 @@ import com.jirabot.slack.repository.UserMappingRepository;
 import com.jirabot.slack.service.IssueCreateService;
 import com.jirabot.slack.service.JiraSyncService;
 import com.jirabot.slack.service.ScrumReportService;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,8 +27,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.util.StreamUtils;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,21 +41,31 @@ public class SlackEventController {
 
     private static final Logger log = LoggerFactory.getLogger(SlackEventController.class);
 
-    // STUDY: HELP_TEXT는 classpath:help-text.md 에서 startup에 로드한다. 기존엔 클래스 상수로
-    //        하드코딩되어 변경 시 재컴파일이 필요했지만, 외부 리소스로 분리하면 빌드 산출물의
-    //        리소스만 갱신해도 반영된다. 또한 동일 콘텐츠를 HELP.md 문서와 single source of truth로
-    //        유지하기 쉬워진다.
-    private static final String HELP_TEXT_RESOURCE = "help-text.md";
-    private static final String HELP_TEXT = loadHelpText();
+    // STUDY: 하이브리드 라우팅 — 키워드 매칭 먼저, 실패 시 Claude 분류로 fallback.
+    //        키워드 명령은 즉시 실행(0초), Claude 분류는 비동기(~30초).
+    private static final String HELP_TEXT = """
+            :robot_face: *지라 사용법*
 
-    private static String loadHelpText() {
-        try (var is = new ClassPathResource(HELP_TEXT_RESOURCE).getInputStream()) {
-            return StreamUtils.copyToString(is, StandardCharsets.UTF_8).strip();
-        } catch (IOException e) {
-            log.warn("help-text resource missing, falling back to minimal text: {}", e.toString());
-            return ":robot_face: 지라 (help 리소스를 찾을 수 없습니다)";
-        }
-    }
+            *키워드 명령 (즉시 실행):*
+              `@지라 help` — 이 도움말 표시
+              `@지라 scrum` — 스프린트 일일 리포트
+              `@지라 내작업` — 내 진행 중인 작업 조회
+              `@지라 작업 김영현` — 특정 팀원의 작업 조회
+              `@지라 등록 <Jira 사용자명>` — 내 Slack ↔ Jira 계정 연결
+              `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
+              `@지라 완료` — 이슈 스레드에서 → Jira 완료 처리
+
+            *스레드 액션 (이슈 스레드에서 댓글로 사용):*
+              `@지라 하위작업 <내용>` — 하위작업 생성
+              `@지라 댓글 <내용>` — Jira 코멘트 추가
+              `@지라 수정 <내용>` — Jira 설명에 내용 추가
+              또는 자연어로 입력하면 AI가 액션을 판단합니다.
+
+            *자연어 입력 (AI 분류 → Jira 이슈 생성):*
+              `@지라 로그인 페이지에서 500 에러 발생` → :bug: 버그로 등록
+              `@지라 다크모드 지원해주세요` → :pencil: 기능 요청으로 등록
+
+            이슈 등록 시 AI가 자동으로 분류(BUG/FEATURE/OTHER)하고 Story Point를 추정합니다.""";
 
     private final IssueCreateService issueCreateService;
     private final ScrumReportService scrumReportService;

@@ -1,8 +1,8 @@
 # 지라 Help
 
 Slack에서 `@지라 help`를 입력하면 같은 내용이 채널에 표시됩니다. 운영자/개발자 참조용으로
-이 문서를 함께 유지합니다. 명령 정의 자체는 코드의 단일 출처(SlackEventController의 HELP_TEXT
-및 `resources/help-text.md`)를 따르므로 변경 시 반드시 두 곳을 함께 갱신해 주세요.
+이 문서를 함께 유지합니다. 명령 정의 자체는 `SlackEventController#HELP_TEXT`(단일 출처)를
+따르므로, 명령을 추가/수정할 때는 코드와 이 문서를 함께 갱신해 주세요.
 
 ## 키워드 명령 (즉시 실행)
 

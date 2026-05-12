@@ -62,11 +62,6 @@ slackbot:
     core-size: 4
     max-size: 10
     queue-capacity: 50
-  # 중복 감지 키워드 매칭 임계값. 너무 낮추면 오탐, 너무 높이면 누락이 늘어남.
-  duplicate:
-    min-keyword-length: 2
-    min-keyword-matches: 2
-    max-results: 5
 
 logging:
   level:
