@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -117,6 +118,24 @@ class IssueCreateServiceImplTest {
         // No notification when channel/eventTs are null
         verify(slackNotifier, never()).postThreadReply(anyString(), anyString(), anyString());
         verify(claude, never()).classify(anyString(), any());
+    }
+
+    @Test
+    void unregisteredUser_notificationFails_returnsUnregisteredNotRuntimeException() throws Exception {
+        when(userMappingRepository.findBySlackUserId("U_FAIL"))
+                .thenReturn(Optional.empty());
+        doThrow(new RuntimeException("Slack API down"))
+                .when(slackNotifier).postThreadReply(anyString(), anyString(), anyString());
+
+        var cmd = new IssueCreateCommand("deploy failed", "U_FAIL", "C1", "111.0");
+        var result = service.createFromSlackText(cmd).get();
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errorMessage()).isEqualTo("unregistered");
+
+        // Should NOT call Claude classify or Jira API
+        verify(claude, never()).classify(anyString(), any());
+        verify(jira, never()).createIssue(any(), anyString(), any());
     }
 
     @Test

@@ -290,6 +290,8 @@ public class SlackEventController {
         });
     }
 
+    // STUDY: 스레드 액션(하위작업, 댓글, 수정)은 등록 여부를 체크하지 않는다.
+    //        기존 이슈에 대한 작업이며 reporter를 설정하지 않으므로 매핑 불필요.
     private void executeSubTask(SlackEventInner event, IssueEntity parentIssue, String content) {
         slackExecutor.execute(() -> {
             try {

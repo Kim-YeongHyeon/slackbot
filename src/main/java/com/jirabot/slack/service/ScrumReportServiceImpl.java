@@ -443,7 +443,7 @@ public class ScrumReportServiceImpl implements ScrumReportService {
 
     // STUDY: Slack 유저 ID → Jira displayName 변환.
     //        1순위: DB user_mappings 테이블 (수동 등록)
-    //        2순위: Slack API users.info로 실명 조회 (이름이 같을 때)
+    //        2순위: Slack API users.info로 실명 조회 (표시용, 읽기 전용)
     private String resolveJiraName(String slackUserId) {
         if (slackUserId == null) return null;
 
@@ -453,13 +453,13 @@ public class ScrumReportServiceImpl implements ScrumReportService {
             return mapping.get().getJiraDisplayName();
         }
 
-        // 2. Slack API로 실명 조회 시도
+        // 2. Slack API로 실명 조회 시도 (표시용으로만 사용)
+        // STUDY: 여기서 자동 저장하지 않는 이유 — Slack 실명과 Jira displayName이 다를 수 있으므로
+        //        자동 저장하면 잘못된 Jira 매핑이 생성되어 등록 가드를 우회하게 된다.
+        //        매핑 등록은 반드시 `@지라 등록` 명령을 통해 명시적으로 수행해야 한다.
         try {
             String slackName = slackNotifier.getUserRealName(slackUserId);
             if (slackName != null && !slackName.isBlank()) {
-                // 자동으로 매핑 저장 (다음번에는 DB에서 바로 조회)
-                userMappingRepository.save(new UserMappingEntity(slackUserId, slackName, slackName));
-                log.info("Auto-mapped Slack user {} -> Jira '{}'", slackUserId, slackName);
                 return slackName;
             }
         } catch (Exception e) {
