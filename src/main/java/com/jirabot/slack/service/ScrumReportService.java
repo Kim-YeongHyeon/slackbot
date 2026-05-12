@@ -9,4 +9,6 @@ public interface ScrumReportService {
     CompletableFuture<String> generateMyReport(String slackUserId);
 
     CompletableFuture<String> generateMemberReport(String memberName);
+
+    CompletableFuture<String> generateStatisticsReport();
 }

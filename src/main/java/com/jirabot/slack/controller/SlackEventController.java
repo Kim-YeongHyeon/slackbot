@@ -63,6 +63,7 @@ public class SlackEventController {
               `@지라 버그` — 최근 7일간 해결된 버그 조회
               `@지라 버그 2026.03.11` — 특정 날짜 이후 해결된 버그 조회
               `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
+              `@지라 통계` — 스프린트 SP 통계 요약
               `@지라 완료` — 이슈 스레드에서 → Jira 완료 처리
 
             *스레드 액션 (이슈 스레드에서 댓글로 사용):*
@@ -172,6 +173,7 @@ public class SlackEventController {
                 handleBugQuery(event, LocalDate.now(KST).minusDays(7));
                 return;
             }
+            case "통계", "stats", "statistics" -> { handleStatistics(event); return; }
         }
         // STUDY: "버그 2026.03.11" 패턴 — 버그/bug 뒤에 날짜가 오면 해결된 버그 조회.
         //        "버그 발생했어요" 같은 서술문은 날짜가 아니므로 Haiku로 fall through.
@@ -378,7 +380,7 @@ public class SlackEventController {
                             });
                 }
                 case "statistics" ->
-                        replyThread(event, ":bar_chart: 통계 기능은 준비 중입니다. `@지라 help`를 확인해주세요.");
+                        handleStatistics(event);
                 case "my_tasks" ->
                         handleMyWork(event);
                 case "skip" ->
@@ -545,6 +547,21 @@ public class SlackEventController {
                 .exceptionally(ex -> {
                     log.warn("Member-work report failed for name={}: {}", memberName, ex.toString());
                     replyThread(event, ":x: 작업 조회 중 오류가 발생했어요.");
+                    return null;
+                });
+    }
+
+    private void handleStatistics(SlackEventInner event) {
+        log.info("Statistics report requested by user={}", event.user());
+        scrumReportService.generateStatisticsReport()
+                .thenAccept(report -> {
+                    if (event.channel() != null) {
+                        slackNotifier.postMessage(event.channel(), report);
+                    }
+                })
+                .exceptionally(ex -> {
+                    log.warn("Statistics report failed: {}", ex.toString());
+                    replyThread(event, ":x: 통계 리포트 생성 중 오류가 발생했어요.");
                     return null;
                 });
     }
