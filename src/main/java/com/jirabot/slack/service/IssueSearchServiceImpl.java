@@ -11,6 +11,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -44,10 +45,8 @@ public class IssueSearchServiceImpl implements IssueSearchService {
     @Override
     public CompletableFuture<String> searchByKeyword(String keyword) {
         log.info("Keyword search requested: keyword='{}'", keyword);
-        List<IssueEntity> results = issueRepository.searchByKeyword(escapeWildcards(keyword));
-        List<IssueEntity> limited = results.size() > MAX_SEARCH_RESULTS
-                ? results.subList(0, MAX_SEARCH_RESULTS) : results;
-        return CompletableFuture.completedFuture(formatSearchResults(keyword, limited));
+        List<IssueEntity> results = issueRepository.searchByKeyword(escapeWildcards(keyword), PageRequest.of(0, MAX_SEARCH_RESULTS));
+        return CompletableFuture.completedFuture(formatSearchResults(keyword, results));
     }
 
     @Async("slackTaskExecutor")
@@ -75,10 +74,9 @@ public class IssueSearchServiceImpl implements IssueSearchService {
             if (matchedKeys == null || matchedKeys.isEmpty()) {
                 log.info("Sonnet returned empty results, falling back to keyword search: '{}'", fallbackKeyword);
                 // STUDY: Sonnet 빈 결과 시 키워드 fallback. 동일 스레드에서 직접 호출 (self-invocation이므로 @Async 무시됨, 이미 비동기 스레드 안이라 OK).
-                List<IssueEntity> keywordResults = issueRepository.searchByKeyword(escapeWildcards(fallbackKeyword));
-                List<IssueEntity> limited = keywordResults.size() > MAX_SEARCH_RESULTS
-                        ? keywordResults.subList(0, MAX_SEARCH_RESULTS) : keywordResults;
-                return CompletableFuture.completedFuture(formatSearchResults(fallbackKeyword, limited));
+                List<IssueEntity> keywordResults = issueRepository.searchByKeyword(
+                        escapeWildcards(fallbackKeyword), PageRequest.of(0, MAX_SEARCH_RESULTS));
+                return CompletableFuture.completedFuture(formatSearchResults(fallbackKeyword, keywordResults));
             }
 
             // STUDY: Sonnet이 반환한 키 순서(관련도순)를 유지하면서 DB 엔티티를 매칭한다.
@@ -98,10 +96,9 @@ public class IssueSearchServiceImpl implements IssueSearchService {
 
         } catch (Exception e) {
             log.warn("Semantic search failed, falling back to keyword search: {}", e.toString());
-            List<IssueEntity> keywordResults = issueRepository.searchByKeyword(escapeWildcards(fallbackKeyword));
-            List<IssueEntity> limited = keywordResults.size() > MAX_SEARCH_RESULTS
-                    ? keywordResults.subList(0, MAX_SEARCH_RESULTS) : keywordResults;
-            return CompletableFuture.completedFuture(formatSearchResults(fallbackKeyword, limited));
+            List<IssueEntity> keywordResults = issueRepository.searchByKeyword(
+                    escapeWildcards(fallbackKeyword), PageRequest.of(0, MAX_SEARCH_RESULTS));
+            return CompletableFuture.completedFuture(formatSearchResults(fallbackKeyword, keywordResults));
         }
     }
 

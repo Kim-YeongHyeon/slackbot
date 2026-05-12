@@ -218,7 +218,7 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(issueRepository, never()).searchByKeyword(any());
+        verify(issueRepository, never()).searchByKeyword(any(), any());
         verify(slackNotifier).postThreadReply("C1", "1.0", ":mag: 검색어를 입력해주세요. 예: `@지라 검색 로그인`");
     }
 

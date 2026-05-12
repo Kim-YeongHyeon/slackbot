@@ -37,7 +37,7 @@ class IssueSearchServiceImplTest {
     void searchByKeyword_returnsFormattedResults() throws ExecutionException, InterruptedException {
         IssueEntity issue = new IssueEntity("SLAC-7", "로그인 에러", "Bug", "진행 중", "진행 중",
                 "김영현", 3.0, "reporter", null, Instant.now(), Instant.now());
-        when(issueRepository.searchByKeyword("로그인")).thenReturn(List.of(issue));
+        when(issueRepository.searchByKeyword(eq("로그인"), any())).thenReturn(List.of(issue));
 
         String result = service.searchByKeyword("로그인").get();
 
@@ -46,12 +46,12 @@ class IssueSearchServiceImplTest {
                 .contains("SLAC-7")
                 .contains("로그인 에러")
                 .contains("담당: 김영현");
-        verify(issueRepository).searchByKeyword("로그인");
+        verify(issueRepository).searchByKeyword(eq("로그인"), any());
     }
 
     @Test
     void searchByKeyword_emptyResults_showsEmptyMessage() throws ExecutionException, InterruptedException {
-        when(issueRepository.searchByKeyword("없는키워드")).thenReturn(Collections.emptyList());
+        when(issueRepository.searchByKeyword(eq("없는키워드"), any())).thenReturn(Collections.emptyList());
 
         String result = service.searchByKeyword("없는키워드").get();
 
@@ -59,20 +59,20 @@ class IssueSearchServiceImplTest {
     }
 
     @Test
-    void searchByKeyword_limitsResultsToMax() throws ExecutionException, InterruptedException {
-        // Create 60 issues (more than MAX_SEARCH_RESULTS=50)
-        List<IssueEntity> manyIssues = java.util.stream.IntStream.rangeClosed(1, 60)
+    void searchByKeyword_displaysMaxAndOverflow() throws ExecutionException, InterruptedException {
+        // STUDY: Pageable로 DB 레벨에서 50건 제한. 여기서는 DB가 반환한 결과의 포맷팅을 검증.
+        List<IssueEntity> manyIssues = java.util.stream.IntStream.rangeClosed(1, 15)
                 .mapToObj(i -> new IssueEntity("SLAC-" + i, "이슈 " + i, "Bug", "진행 중", "진행 중",
                         "담당자", 1.0, "reporter", null, Instant.now(), Instant.now()))
                 .toList();
-        when(issueRepository.searchByKeyword("이슈")).thenReturn(manyIssues);
+        when(issueRepository.searchByKeyword(eq("이슈"), any())).thenReturn(manyIssues);
 
         String result = service.searchByKeyword("이슈").get();
 
-        // Should show 50 total, display first 10, overflow message for remaining 40
+        // 15건 반환, 10건 표시, 나머지 5건 overflow
         assertThat(result)
-                .contains(":mag: \"이슈\" 검색 결과 (50건)")
-                .contains("외 40건이 더 있습니다.");
+                .contains(":mag: \"이슈\" 검색 결과 (15건)")
+                .contains("외 5건이 더 있습니다.");
     }
 
     @Test
@@ -98,12 +98,12 @@ class IssueSearchServiceImplTest {
 
         when(issueRepository.findAll()).thenReturn(List.of(issue));
         when(claudeApiClient.searchIssues(any(), any())).thenReturn(Collections.emptyList());
-        when(issueRepository.searchByKeyword("로그인")).thenReturn(List.of(issue));
+        when(issueRepository.searchByKeyword(eq("로그인"), any())).thenReturn(List.of(issue));
 
         String result = service.searchSemantic("로그인 관련 이슈", "로그인").get();
 
         assertThat(result).contains("SLAC-7");
-        verify(issueRepository).searchByKeyword("로그인");
+        verify(issueRepository).searchByKeyword(eq("로그인"), any());
     }
 
     @Test
@@ -113,12 +113,12 @@ class IssueSearchServiceImplTest {
 
         when(issueRepository.findAll()).thenReturn(List.of(issue));
         when(claudeApiClient.searchIssues(any(), any())).thenThrow(new RuntimeException("Sonnet timeout"));
-        when(issueRepository.searchByKeyword("로그인")).thenReturn(List.of(issue));
+        when(issueRepository.searchByKeyword(eq("로그인"), any())).thenReturn(List.of(issue));
 
         String result = service.searchSemantic("로그인 관련 이슈", "로그인").get();
 
         assertThat(result).contains("SLAC-7");
-        verify(issueRepository).searchByKeyword("로그인");
+        verify(issueRepository).searchByKeyword(eq("로그인"), any());
     }
 
     @Test
