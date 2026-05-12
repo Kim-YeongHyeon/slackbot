@@ -22,11 +22,11 @@ class BugQueryServiceImplTest {
     private final IssueRepository issueRepository = mock(IssueRepository.class);
     private final JiraProperties jiraProps = new JiraProperties(
             "https://test.atlassian.net", "test@test.com", "token", "SLAC");
-    private final BugQueryServiceImpl service = new BugQueryServiceImpl(issueRepository, jiraProps);
+    private final BugQueryServiceImpl service = new BugQueryServiceImpl(issueRepository, jiraProps, "버그");
 
     @Test
     void emptyResult_showsNobugsMessage() throws ExecutionException, InterruptedException {
-        when(issueRepository.findResolvedBugsSince(any(), any())).thenReturn(List.of());
+        when(issueRepository.findResolvedBugsSince(any(), any(), any())).thenReturn(List.of());
 
         String result = service.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
 
@@ -39,7 +39,7 @@ class BugQueryServiceImplTest {
     void withResults_formatsCorrectly() throws ExecutionException, InterruptedException {
         IssueEntity bug = new IssueEntity("SLAC-7", "로그인 500 에러", "버그", "완료", "완료",
                 "김영현", 2.0, "reporter", "desc", Instant.now(), Instant.now());
-        when(issueRepository.findResolvedBugsSince(any(), any())).thenReturn(List.of(bug));
+        when(issueRepository.findResolvedBugsSince(any(), any(), any())).thenReturn(List.of(bug));
 
         String result = service.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
 
@@ -57,7 +57,7 @@ class BugQueryServiceImplTest {
         // STUDY: SP null → "-" 표시, 0이 아님
         IssueEntity bug = new IssueEntity("SLAC-8", "SP없는 버그", "버그", "완료", "완료",
                 null, null, "reporter", "desc", Instant.now(), Instant.now());
-        when(issueRepository.findResolvedBugsSince(any(), any())).thenReturn(List.of(bug));
+        when(issueRepository.findResolvedBugsSince(any(), any(), any())).thenReturn(List.of(bug));
 
         String result = service.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
 
@@ -73,7 +73,7 @@ class BugQueryServiceImplTest {
                 "김영현", 3.0, "reporter", "desc", Instant.now(), Instant.now());
         IssueEntity bugWithoutSp = new IssueEntity("SLAC-10", "SP없는 버그", "버그", "완료", "완료",
                 "김영현", null, "reporter", "desc", Instant.now(), Instant.now());
-        when(issueRepository.findResolvedBugsSince(any(), any()))
+        when(issueRepository.findResolvedBugsSince(any(), any(), any()))
                 .thenReturn(List.of(bugWithSp, bugWithoutSp));
 
         String result = service.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
@@ -86,7 +86,7 @@ class BugQueryServiceImplTest {
     void allEstimated_noUnestimatedLabel() throws ExecutionException, InterruptedException {
         IssueEntity bug = new IssueEntity("SLAC-11", "SP있는 버그", "버그", "완료", "완료",
                 "김영현", 5.0, "reporter", "desc", Instant.now(), Instant.now());
-        when(issueRepository.findResolvedBugsSince(any(), any())).thenReturn(List.of(bug));
+        when(issueRepository.findResolvedBugsSince(any(), any(), any())).thenReturn(List.of(bug));
 
         String result = service.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
 
@@ -96,12 +96,12 @@ class BugQueryServiceImplTest {
 
     @Test
     void pageable_passedToRepository() throws ExecutionException, InterruptedException {
-        when(issueRepository.findResolvedBugsSince(any(), any())).thenReturn(List.of());
+        when(issueRepository.findResolvedBugsSince(any(), any(), any())).thenReturn(List.of());
 
         service.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
 
         ArgumentCaptor<Pageable> pageCaptor = ArgumentCaptor.forClass(Pageable.class);
-        verify(issueRepository).findResolvedBugsSince(any(), pageCaptor.capture());
+        verify(issueRepository).findResolvedBugsSince(any(), any(), pageCaptor.capture());
         Pageable pageable = pageCaptor.getValue();
         assertThat(pageable.getPageNumber()).isEqualTo(0);
         assertThat(pageable.getPageSize()).isEqualTo(50);
@@ -111,11 +111,11 @@ class BugQueryServiceImplTest {
     void baseUrlWithTrailingSlash_handledCorrectly() throws ExecutionException, InterruptedException {
         JiraProperties propsWithSlash = new JiraProperties(
                 "https://test.atlassian.net/", "test@test.com", "token", "SLAC");
-        BugQueryServiceImpl serviceWithSlash = new BugQueryServiceImpl(issueRepository, propsWithSlash);
+        BugQueryServiceImpl serviceWithSlash = new BugQueryServiceImpl(issueRepository, propsWithSlash, "버그");
 
         IssueEntity bug = new IssueEntity("SLAC-12", "테스트", "버그", "완료", "완료",
                 "김영현", 1.0, "reporter", "desc", Instant.now(), Instant.now());
-        when(issueRepository.findResolvedBugsSince(any(), any())).thenReturn(List.of(bug));
+        when(issueRepository.findResolvedBugsSince(any(), any(), any())).thenReturn(List.of(bug));
 
         String result = serviceWithSlash.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
 
@@ -127,11 +127,11 @@ class BugQueryServiceImplTest {
     @Test
     void baseUrlNull_handledGracefully() throws ExecutionException, InterruptedException {
         JiraProperties propsNull = new JiraProperties(null, "test@test.com", "token", "SLAC");
-        BugQueryServiceImpl serviceNull = new BugQueryServiceImpl(issueRepository, propsNull);
+        BugQueryServiceImpl serviceNull = new BugQueryServiceImpl(issueRepository, propsNull, "버그");
 
         IssueEntity bug = new IssueEntity("SLAC-13", "테스트", "버그", "완료", "완료",
                 "김영현", 1.0, "reporter", "desc", Instant.now(), Instant.now());
-        when(issueRepository.findResolvedBugsSince(any(), any())).thenReturn(List.of(bug));
+        when(issueRepository.findResolvedBugsSince(any(), any(), any())).thenReturn(List.of(bug));
 
         String result = serviceNull.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
 
@@ -146,7 +146,7 @@ class BugQueryServiceImplTest {
                 "김영현", 1.0, "reporter", "desc", Instant.now(), Instant.now());
         // IssueEntity 생성자에서 completedAt이 설정되므로 N/A 테스트는 불가하지만,
         // 결과에 완료 날짜가 포함되는지 확인
-        when(issueRepository.findResolvedBugsSince(any(), any())).thenReturn(List.of(bug));
+        when(issueRepository.findResolvedBugsSince(any(), any(), any())).thenReturn(List.of(bug));
 
         String result = service.queryResolvedBugs(LocalDate.of(2026, 3, 1)).get();
 

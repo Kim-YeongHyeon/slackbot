@@ -26,12 +26,18 @@ public class BugQueryServiceImpl implements BugQueryService {
     private static final DateTimeFormatter COMPLETION_DATE_FMT = DateTimeFormatter.ofPattern("yyyy.MM.dd");
     private static final int MAX_BUG_QUERY_RESULTS = 50;
     private static final int DISPLAY_LIMIT = 15;
+    // STUDY: Jira 이슈 타입명은 사이트 언어에 따라 다르다. 한국어: "버그", 영어: "Bug".
+    //        application.yml의 slackbot.issue-type.bug 프로퍼티로 외부화하여 프로젝트 변경 시 코드 수정 없이 대응.
+    private static final String DEFAULT_BUG_TYPE = "버그";
 
     private final IssueRepository issueRepository;
     private final String jiraBaseUrl;
+    private final String bugIssueType;
 
-    public BugQueryServiceImpl(IssueRepository issueRepository, JiraProperties jiraProps) {
+    public BugQueryServiceImpl(IssueRepository issueRepository, JiraProperties jiraProps,
+                               @org.springframework.beans.factory.annotation.Value("${slackbot.issue-type.bug:버그}") String bugIssueType) {
         this.issueRepository = issueRepository;
+        this.bugIssueType = bugIssueType;
         // STUDY: baseUrl 후행 슬래시 제거. "https://jira.example.com/" → "https://jira.example.com"
         //        issueLink()에서 "/browse/KEY"를 붙이므로 후행 슬래시가 있으면 이중 슬래시가 된다.
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl();
@@ -46,7 +52,7 @@ public class BugQueryServiceImpl implements BugQueryService {
             Instant sinceInstant = since.atStartOfDay(KST).toInstant();
             // STUDY: Pageable로 DB 레벨에서 결과 수를 제한. 대량 데이터 시 메모리 보호.
             List<IssueEntity> bugs = issueRepository.findResolvedBugsSince(
-                    sinceInstant, PageRequest.of(0, MAX_BUG_QUERY_RESULTS));
+                    bugIssueType, sinceInstant, PageRequest.of(0, MAX_BUG_QUERY_RESULTS));
 
             String sinceDateStr = since.format(COMPLETION_DATE_FMT);
             StringBuilder sb = new StringBuilder();
