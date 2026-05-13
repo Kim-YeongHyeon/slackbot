@@ -2,10 +2,12 @@ package com.jirabot.slack.repository;
 
 import com.jirabot.slack.entity.IssueEntity;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -101,4 +103,10 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
     List<Object[]> findLatestSprintInfo(Pageable pageable);
 
     List<IssueEntity> findBySprintId(Integer sprintId);
+
+    // STUDY: 백로그 sync 후 Jira 보드에서 사라진 stale 항목 정리용. sprint_id IS NULL 인 로컬 이슈 중
+    //        이번 sync 에 포함되지 않은 키를 일괄 삭제한다. @Modifying 은 SELECT 가 아닌 쿼리에 필수.
+    @Modifying
+    @Query("DELETE FROM IssueEntity i WHERE i.sprintId IS NULL AND i.issueKey NOT IN :keys")
+    int deleteStaleBacklog(@Param("keys") Collection<String> keys);
 }

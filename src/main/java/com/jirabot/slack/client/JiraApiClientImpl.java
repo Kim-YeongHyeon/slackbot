@@ -199,25 +199,31 @@ public class JiraApiClientImpl implements JiraApiClient {
 
     @Override
     public List<SprintIssue> getBacklogIssues() {
-        // STUDY: JQL로 스프린트에 배정되지 않은 이슈를 조회.
-        //        "sprint is EMPTY"는 어떤 스프린트에도 포함되지 않은 이슈를 의미.
-        //        성숙한 프로젝트는 백로그가 수천 건일 수 있으므로 500건 상한을 둔다.
+        // STUDY: board backlog endpoint 사용 — 보드의 JQL 필터가 그대로 적용되어 Jira UI 의
+        //        백로그 뷰와 동일한 집합을 반환한다. 단순 `sprint is EMPTY` JQL 은 보드 필터를
+        //        우회해 프로젝트 전체 이슈를 끌어오므로 UI 와 합계가 어긋났다.
         List<SprintIssue> result = new ArrayList<>();
         int startAt = 0;
         int maxBacklogIssues = 500;
         try {
-            String jql = "project=" + props.projectKey() + " AND sprint is EMPTY AND statusCategory != Done ORDER BY updated DESC";
+            String boardJson = jiraWebClient.get()
+                    .uri("/rest/agile/1.0/board?projectKeyOrId={key}&type=scrum", props.projectKey())
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode boards = objectMapper.readTree(boardJson).path("values");
+            if (!boards.isArray() || boards.isEmpty()) {
+                log.warn("No Scrum board found for backlog fetch project={}", props.projectKey());
+                return result;
+            }
+            int boardId = boards.get(0).path("id").asInt();
+
             while (result.size() < maxBacklogIssues) {
                 final int offset = startAt;
-                // STUDY: Jira Cloud는 /rest/api/3/search를 deprecated → /rest/api/3/search/jql로 마이그레이션.
-                //        https://developer.atlassian.com/changelog/#CHANGE-2046
                 String json = jiraWebClient.get()
-                        .uri(uri -> uri.path("/rest/api/3/search/jql")
-                                .queryParam("jql", jql)
+                        .uri(uri -> uri.path("/rest/agile/1.0/board/{boardId}/backlog")
                                 .queryParam("fields", sprintFields)
                                 .queryParam("maxResults", 50)
                                 .queryParam("startAt", offset)
-                                .build())
+                                .build(boardId))
                         .retrieve().bodyToMono(String.class).block();
                 JsonNode root = objectMapper.readTree(json);
                 JsonNode issues = root.path("issues");
@@ -228,7 +234,7 @@ public class JiraApiClientImpl implements JiraApiClient {
                 startAt += issues.size();
                 if (startAt >= total) break;
             }
-            log.info("Backlog issues fetched: {} issues", result.size());
+            log.info("Backlog issues fetched from board {}: {} issues", boardId, result.size());
         } catch (Exception e) {
             log.error("Failed to get backlog issues: {}", e.toString());
         }

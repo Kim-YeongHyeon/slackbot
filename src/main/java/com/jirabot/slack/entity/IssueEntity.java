@@ -146,5 +146,11 @@ public class IssueEntity {
         this.sprintId = sprintId;
         this.sprintName = sprintName;
     }
+    // STUDY: 이슈가 스프린트에서 빠져 백로그로 돌아간 경우 호출. sprint_id 가 옛 sprint 에 머물러
+    //        report 분류가 어긋나는 것을 막는다.
+    public void clearSprint() {
+        this.sprintId = null;
+        this.sprintName = null;
+    }
     public Instant getSyncedAt() { return syncedAt; }
 }

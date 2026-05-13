@@ -84,8 +84,9 @@ public class JiraSyncServiceImpl implements JiraSyncService {
 
     @Override
     public String syncBacklog() {
-        // STUDY: 검색 범위 확장을 위해 스프린트 미배정 이슈도 DB에 동기화.
-        //        sprintId/sprintName은 null로 저장 — 통계 쿼리에서 제외됨.
+        // STUDY: Jira 보드의 백로그 뷰와 로컬 DB 의 sprint_id IS NULL 집합을 일치시킨다.
+        //        - 기존 entity 가 옛 sprint_id 를 들고 있더라도 clearSprint 로 NULL 화 (sprint→backlog 이동 케이스)
+        //        - 이번 sync 에 안 잡힌 sprint_id IS NULL 항목은 stale 로 간주해 삭제 (보드 필터 제외/완료 이동 등)
         List<SprintIssue> backlogIssues = jira.getBacklogIssues();
 
         int created = 0;
@@ -99,6 +100,7 @@ public class JiraSyncServiceImpl implements JiraSyncService {
                         ji.summary(), ji.issueType(), ji.status(), ji.statusCategory(),
                         ji.assignee(), ji.storyPoint(),
                         parseInstant(ji.updated()));
+                entity.clearSprint();
                 updated++;
             } else {
                 IssueEntity entity = new IssueEntity(
@@ -111,8 +113,14 @@ public class JiraSyncServiceImpl implements JiraSyncService {
             }
         }
 
-        String result = String.format("Backlog 동기화 완료: %d건 생성, %d건 업데이트 (전체 %d건)",
-                created, updated, backlogIssues.size());
+        int removed = 0;
+        if (!backlogIssues.isEmpty()) {
+            List<String> currentKeys = backlogIssues.stream().map(SprintIssue::key).toList();
+            removed = issueRepository.deleteStaleBacklog(currentKeys);
+        }
+
+        String result = String.format("Backlog 동기화 완료: %d건 생성, %d건 업데이트, %d건 정리 (전체 %d건)",
+                created, updated, removed, backlogIssues.size());
         log.info(result);
         return result;
     }
