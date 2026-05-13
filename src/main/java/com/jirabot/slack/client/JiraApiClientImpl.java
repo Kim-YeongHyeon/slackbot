@@ -234,17 +234,25 @@ public class JiraApiClientImpl implements JiraApiClient {
     }
 
     @Override
-    public String createSubTask(String parentKey, String summary, int storyPoint) {
+    public String createSubTask(String parentKey, String summary, int storyPoint,
+                                String jiraAccountId) {
         try {
             // STUDY: Jira sub-task 생성은 parent 필드로 상위 이슈를 지정한다.
             //        Team-managed 프로젝트의 하위 작업 타입은 "하위 작업" (한글).
-            var body = Map.of("fields", Map.of(
+            //        reporter/assignee는 accountId로 지정. null이면 API 토큰 소유자가 기본값.
+            Map<String, Object> fields = new java.util.HashMap<>(Map.of(
                     "project", Map.of("key", props.projectKey()),
                     "parent", Map.of("key", parentKey),
                     "summary", summary,
                     "issuetype", Map.of("name", "하위 작업"),
                     "customfield_10016", (double) storyPoint
             ));
+            if (jiraAccountId != null) {
+                Map<String, String> accountRef = Map.of("accountId", jiraAccountId);
+                fields.put("reporter", accountRef);
+                fields.put("assignee", accountRef);
+            }
+            var body = Map.of("fields", fields);
             String json = jiraWebClient.post()
                     .uri("/rest/api/3/issue")
                     .bodyValue(body)

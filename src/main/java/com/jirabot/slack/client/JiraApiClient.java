@@ -32,8 +32,10 @@ public interface JiraApiClient {
 
     /**
      * Create a sub-task under a parent issue.
+     *
+     * @param jiraAccountId 보고자/담당자 Jira accountId (null이면 API 토큰 소유자가 기본값)
      */
-    String createSubTask(String parentKey, String summary, int storyPoint);
+    String createSubTask(String parentKey, String summary, int storyPoint, String jiraAccountId);
 
     /**
      * Add a comment to an existing issue.

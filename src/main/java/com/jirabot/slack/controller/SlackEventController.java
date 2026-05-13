@@ -290,17 +290,32 @@ public class SlackEventController {
         });
     }
 
-    // STUDY: 스레드 액션(하위작업, 댓글, 수정)은 등록 여부를 체크하지 않는다.
-    //        기존 이슈에 대한 작업이며 reporter를 설정하지 않으므로 매핑 불필요.
+    // STUDY: 하위작업 생성도 Jira 이슈를 만드는 행위이므로 등록 여부를 체크한다.
+    //        미등록 사용자는 등록 안내 메시지를 받고, 등록된 사용자만 하위작업을 생성할 수 있다.
     private void executeSubTask(SlackEventInner event, IssueEntity parentIssue, String content) {
         slackExecutor.execute(() -> {
             try {
+                // 등록 여부 확인
+                var mapping = userMappingRepository.findBySlackUserId(event.user());
+                if (mapping.isEmpty()) {
+                    log.info("Sub-task creation blocked - unregistered user={}", event.user());
+                    replyInThread(event, event.thread_ts(),
+                            ":warning: Jira 계정이 연결되지 않았습니다.\n"
+                            + "먼저 아래 명령으로 등록해주세요:\n"
+                            + "`@지라 등록 <Jira에 표시되는 이름>`\n"
+                            + "예: `@지라 등록 홍길동`\n"
+                            + "등록 후 다시 시도해주세요!");
+                    return;
+                }
+
                 // STUDY: Haiku 분류 → Sonnet 상세화(제목/SP) → Jira 하위작업 생성
                 var intentHint = new IntentResult("register_story", 0.9, Map.of("keyword", content), content);
                 var classification = issueCreateService.classifyOnly(content, intentHint);
 
+                String jiraAccountId = mapping.get().getJiraAccountId();
                 String subKey = jiraApiClient.createSubTask(
-                        parentIssue.getIssueKey(), classification.title(), classification.storyPoint());
+                        parentIssue.getIssueKey(), classification.title(),
+                        classification.storyPoint(), jiraAccountId);
                 replyInThread(event, event.thread_ts(), String.format(
                         ":white_check_mark: 하위작업 생성: *%s* %s (SP %d)\n상위: %s",
                         subKey, classification.title(), classification.storyPoint(), parentIssue.getIssueKey()));
