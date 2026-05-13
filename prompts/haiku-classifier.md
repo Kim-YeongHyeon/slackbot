@@ -7,7 +7,7 @@ Classify the user's message into exactly one Jira intent and return structured J
 | intent | triggers |
 |---|---|
 | `search` | find, look up, show, check, list, 찾아, 검색, 조회, 있어? |
-| `register_story` | create story, new feature, user story, 스토리, 기능 추가, 만들어 (without error context) |
+| `register_story` | create story, new feature, user story, 스토리, 기능 추가, 만들어 (without error context), 작업, 필요, 해야, 구현, 정리, 개선, 추가, 리팩토링, 설계, 구조, 변경 |
 | `register_bug` | bug, error, defect, crash, fix, broken, fail, 오류, 에러, 버그, 안 돼, 깨짐, 안 됨, 안됨, 안맞아, 안 맞아, 실패, 문제, 이상, 작동 안, 동작 안, 안 나와, 안나와, 느려, 멈춤, 죽어 |
 | `statistics` | stats, count, how many, summary, dashboard, 통계, 몇 개, 현황, 집계 |
 | `my_tasks` | my tasks, what should I do, 내 작업, 내 할 일, 뭐 해야, 해야될, 할 일, 배정된, 담당 |
@@ -20,6 +20,7 @@ Classify the user's message into exactly one Jira intent and return structured J
 - "이슈 만들어줘", "버그 등록해줘" without details → `skip`. "로그인 에러 이슈 만들어줘" with details → `register_bug`.
 - When a message describes something not working, mismatching, failing, or behaving incorrectly → `register_bug`. Even without explicit "에러/버그" keywords.
 - "키 preset 이 안맞아요", "데이터가 이상해요", "화면이 안 나와요" → all `register_bug`.
+- When a message describes work that needs to be done (구현, 정리, 개선, 구조 변경, 작업 필요 등) without error context → `register_story`. These are task/feature requests, not bugs.
 
 ## Output Format
 
@@ -51,6 +52,12 @@ Output: {"intent":"register_bug","confidence":0.92,"extracted":{"keyword":"키 p
 
 Input: "화면이 안 나와요"
 Output: {"intent":"register_bug","confidence":0.91,"extracted":{"keyword":"화면 표시 안됨"},"raw_input":"화면이 안 나와요"}
+
+Input: "single insert 관련하여 FR search 가능하게 하는 구조 정리하는 작업 필요합니다"
+Output: {"intent":"register_story","confidence":0.93,"extracted":{"keyword":"single insert FR search 구조 정리"},"raw_input":"single insert 관련하여 FR search 가능하게 하는 구조 정리하는 작업 필요합니다"}
+
+Input: "인증 모듈 리팩토링 해야 합니다"
+Output: {"intent":"register_story","confidence":0.94,"extracted":{"keyword":"인증 모듈 리팩토링"},"raw_input":"인증 모듈 리팩토링 해야 합니다"}
 
 Input: "이슈 만들어줘"
 Output: {"intent":"skip","confidence":0.95,"extracted":{},"raw_input":"이슈 만들어줘"}
