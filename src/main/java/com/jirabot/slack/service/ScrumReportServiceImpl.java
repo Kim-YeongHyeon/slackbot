@@ -34,6 +34,9 @@ public class ScrumReportServiceImpl implements ScrumReportService {
     private final UserMappingRepository userMappingRepository;
     private final SlackNotifier slackNotifier;
     private final String jiraBaseUrl;
+    // STUDY: Jira UI 의 sprint SP 합계는 parent 만 카운트하고 subtask SP 는 parent 로 롤업된다.
+    //        봇 응답을 UI 와 일치시키기 위해 SP 집계에서 subtask 타입을 제외한다.
+    private final String subtaskTypeName;
 
     public ScrumReportServiceImpl(IssueRepository issueRepository,
                                   UserMappingRepository userMappingRepository,
@@ -44,6 +47,7 @@ public class ScrumReportServiceImpl implements ScrumReportService {
         this.slackNotifier = slackNotifier;
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl();
         this.jiraBaseUrl = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        this.subtaskTypeName = jiraProps.issueTypes().subtask();
     }
 
     @Async("slackTaskExecutor")
@@ -438,12 +442,15 @@ public class ScrumReportServiceImpl implements ScrumReportService {
             sb.append("\n");
         }
 
-        // 전체 SP 집계
+        // STUDY: SP 집계 — subtask 는 제외해 Jira UI 의 sprint 합계와 동일하게 맞춘다.
+        //        Jira UI 는 parent SP 만 카운트하고 subtask SP 는 parent 로 롤업되므로 별도로 더하면 중복.
         double completedSp = issues.stream()
                 .filter(i -> StatusCategory.DONE.equals(i.getStatusCategory()))
+                .filter(i -> !subtaskTypeName.equals(i.getIssueType()))
                 .mapToDouble(i -> i.getStoryPoint() != null ? i.getStoryPoint() : 0)
                 .sum();
         double totalSp = issues.stream()
+                .filter(i -> !subtaskTypeName.equals(i.getIssueType()))
                 .mapToDouble(i -> i.getStoryPoint() != null ? i.getStoryPoint() : 0)
                 .sum();
         sb.append(String.format(":bar_chart: *완료: %.0f SP / 전체: %.0f SP*", completedSp, totalSp));
