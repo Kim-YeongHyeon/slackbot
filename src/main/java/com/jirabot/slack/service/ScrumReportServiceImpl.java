@@ -354,6 +354,29 @@ public class ScrumReportServiceImpl implements ScrumReportService {
         return sp != null && sp > 0 ? String.format("SP %.0f", sp) : "SP -";
     }
 
+    // STUDY: parent-subtask 구조를 시각적으로 보여준다. 같은 섹션 안에 부모가 있으면 그 아래에
+    //        subtask 를 `-` 들여쓰기로 묶고, 부모가 섹션 밖이거나 없으면 subtask 도 최상위로 출력.
+    private void appendHierarchical(StringBuilder sb, List<IssueEntity> items, String indent) {
+        Map<String, IssueEntity> byKey = items.stream()
+                .collect(Collectors.toMap(IssueEntity::getIssueKey, i -> i, (a, b) -> a));
+        for (IssueEntity i : items) {
+            String parentKey = i.getParentKey();
+            // 부모가 같은 섹션에 존재하는 subtask 는 부모 라인 아래에서 출력되므로 여기선 건너뜀.
+            if (parentKey != null && byKey.containsKey(parentKey)) {
+                continue;
+            }
+            sb.append(String.format("%s• %s %s%s\n",
+                    indent, issueLink(i.getIssueKey()), i.getSummary(), spText(i.getStoryPoint())));
+            for (IssueEntity child : items) {
+                if (i.getIssueKey().equals(child.getParentKey())) {
+                    sb.append(String.format("%s  - %s %s%s\n",
+                            indent, issueLink(child.getIssueKey()), child.getSummary(),
+                            spText(child.getStoryPoint())));
+                }
+            }
+        }
+    }
+
     private void appendStatusCountFromStats(StringBuilder sb, long[] stats, String label) {
         long count = stats != null ? stats[0] : 0;
         long sp = stats != null ? stats[1] : 0;
@@ -398,20 +421,14 @@ public class ScrumReportServiceImpl implements ScrumReportService {
                 List<IssueEntity> inProgress = inProgressByAssignee.getOrDefault(assignee, List.of());
                 if (!inProgress.isEmpty()) {
                     sb.append("  진행 중 :hammer:\n");
-                    for (IssueEntity i : inProgress) {
-                        sb.append(String.format("    • %s %s%s\n",
-                                issueLink(i.getIssueKey()), i.getSummary(), spText(i.getStoryPoint())));
-                    }
+                    appendHierarchical(sb, inProgress, "    ");
                 }
 
                 // 해야 할 일
                 List<IssueEntity> todo = todoByAssignee.getOrDefault(assignee, List.of());
                 if (!todo.isEmpty()) {
                     sb.append("  해야 할 일 :clipboard:\n");
-                    for (IssueEntity i : todo) {
-                        sb.append(String.format("    • %s %s%s\n",
-                                issueLink(i.getIssueKey()), i.getSummary(), spText(i.getStoryPoint())));
-                    }
+                    appendHierarchical(sb, todo, "    ");
                 }
                 sb.append("\n");
             }

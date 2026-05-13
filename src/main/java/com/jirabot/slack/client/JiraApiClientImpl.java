@@ -38,7 +38,7 @@ public class JiraApiClientImpl implements JiraApiClient {
         this.jiraWebClient = jiraWebClient;
         this.props = props;
         this.objectMapper = objectMapper;
-        this.sprintFields = "summary,status,assignee,issuetype," + props.storyPointField() + ",created,updated";
+        this.sprintFields = "summary,status,assignee,issuetype,parent," + props.storyPointField() + ",created,updated";
     }
 
     @Override
@@ -244,6 +244,9 @@ public class JiraApiClientImpl implements JiraApiClient {
     private SprintIssue parseSprintIssue(JsonNode issue) {
         JsonNode f = issue.path("fields");
         JsonNode assignee = f.path("assignee");
+        // STUDY: 하위 작업은 fields.parent.key 가 채워져 있다. parent 가 없는 일반 이슈는 null.
+        JsonNode parent = f.path("parent");
+        String parentKey = parent.isMissingNode() || parent.isNull() ? null : parent.path("key").asText(null);
         return new SprintIssue(
                 issue.path("key").asText(),
                 f.path("summary").asText(),
@@ -252,6 +255,7 @@ public class JiraApiClientImpl implements JiraApiClient {
                 assignee.isMissingNode() || assignee.isNull() ? null : assignee.path("displayName").asText(),
                 f.path("issuetype").path("name").asText(),
                 f.path(props.storyPointField()).asDouble(0),
+                parentKey,
                 f.path("created").asText(""),
                 f.path("updated").asText(""));
     }

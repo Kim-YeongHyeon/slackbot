@@ -10,6 +10,7 @@ public record SprintIssue(
         String assignee,         // displayName, null이면 미배정
         String issueType,        // "버그", "작업", "스토리" 등
         double storyPoint,       // 0이면 미설정
+        String parentKey,        // 하위 작업이면 부모 이슈 키, 아니면 null
         String created,          // ISO datetime
         String updated           // ISO datetime
 ) {}

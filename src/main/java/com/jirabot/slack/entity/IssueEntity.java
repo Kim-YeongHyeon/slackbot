@@ -60,6 +60,10 @@ public class IssueEntity {
     // STUDY: 동기화 시점을 기록해서 마지막 동기화 이후 변경분만 가져올 수 있다.
     private Instant syncedAt;
 
+    // STUDY: 하위 작업이면 부모 이슈 키, 일반 이슈/스토리/Epic 등이면 null.
+    //        scrum 리포트의 hierarchical 표시에 사용 (subtask 를 parent 아래 들여쓰기).
+    private String parentKey;
+
     protected IssueEntity() {}
 
     public IssueEntity(String issueKey, String summary, String issueType, String status,
@@ -153,4 +157,6 @@ public class IssueEntity {
         this.sprintName = null;
     }
     public Instant getSyncedAt() { return syncedAt; }
+    public String getParentKey() { return parentKey; }
+    public void setParentKey(String parentKey) { this.parentKey = parentKey; }
 }
