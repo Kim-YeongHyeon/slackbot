@@ -53,9 +53,6 @@ Output: {"intent":"register_bug","confidence":0.92,"extracted":{"keyword":"키 p
 Input: "화면이 안 나와요"
 Output: {"intent":"register_bug","confidence":0.91,"extracted":{"keyword":"화면 표시 안됨"},"raw_input":"화면이 안 나와요"}
 
-Input: "single insert 관련하여 FR search 가능하게 하는 구조 정리하는 작업 필요합니다"
-Output: {"intent":"register_story","confidence":0.93,"extracted":{"keyword":"single insert FR search 구조 정리"},"raw_input":"single insert 관련하여 FR search 가능하게 하는 구조 정리하는 작업 필요합니다"}
-
 Input: "인증 모듈 리팩토링 해야 합니다"
 Output: {"intent":"register_story","confidence":0.94,"extracted":{"keyword":"인증 모듈 리팩토링"},"raw_input":"인증 모듈 리팩토링 해야 합니다"}
 
