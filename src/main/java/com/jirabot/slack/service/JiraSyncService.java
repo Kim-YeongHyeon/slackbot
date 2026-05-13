@@ -9,4 +9,10 @@ public interface JiraSyncService {
      * @return 동기화 결과 요약 메시지
      */
     String syncActiveSprint();
+
+    /**
+     * 스프린트에 포함되지 않은 backlog 이슈를 동기화한다.
+     * 검색 범위 확장용 (통계에는 미포함).
+     */
+    String syncBacklog();
 }

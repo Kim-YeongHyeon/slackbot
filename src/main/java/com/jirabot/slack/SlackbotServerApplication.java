@@ -25,12 +25,15 @@ public class SlackbotServerApplication {
 	}
 
 	// STUDY: ApplicationRunner는 앱 기동 완료 후 1회 실행된다. 시작 시 Jira → DB 동기화.
+	//        스프린트 + 백로그 모두 동기화하여 검색 범위를 확보한다.
 	@Bean
 	ApplicationRunner initialSync(JiraSyncService jiraSyncService) {
 		return args -> {
 			try {
-				String result = jiraSyncService.syncActiveSprint();
-				log.info("Initial Jira sync: {}", result);
+				String sprintResult = jiraSyncService.syncActiveSprint();
+				log.info("Initial sprint sync: {}", sprintResult);
+				String backlogResult = jiraSyncService.syncBacklog();
+				log.info("Initial backlog sync: {}", backlogResult);
 			} catch (Exception e) {
 				log.warn("Initial Jira sync failed (non-fatal): {}", e.toString());
 			}

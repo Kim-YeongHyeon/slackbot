@@ -64,7 +64,7 @@ class SlackEventControllerTest {
         bugQueryService = mock(BugQueryService.class);
         jiraSyncService = mock(JiraSyncService.class);
         jiraApiClient = mock(JiraApiClient.class);
-        jiraProps = new JiraProperties("https://test.atlassian.net", "test@test.com", "token", "SLAC");
+        jiraProps = new JiraProperties("https://test.atlassian.net", "test@test.com", "token", "SLAC", null, null);
         issueRepository = mock(IssueRepository.class);
         intentClassifier = mock(IntentClassifier.class);
         threadActionClassifier = mock(ThreadActionClassifier.class);

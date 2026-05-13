@@ -1,11 +1,13 @@
 package com.jirabot.slack.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.config.AsyncConfig;
 import com.jirabot.slack.dto.SlackInteractionPayload;
 import com.jirabot.slack.filter.CachedBodyFilter;
+import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.util.BlockKitBuilder;
 import jakarta.servlet.http.HttpServletRequest;
@@ -48,9 +50,6 @@ public class SlackInteractionController {
         this.slackExecutor = slackExecutor;
     }
 
-    // STUDY: Slack interaction payload는 application/x-www-form-urlencoded의 "payload" 파라미터.
-    //        CachedBodyFilter가 HMAC 검증을 위해 body를 미리 읽으므로, Tomcat의 form 파라미터 파싱이
-    //        빈 body를 보게 된다. 따라서 @RequestParam 대신 cached raw body에서 직접 payload를 추출.
     @PostMapping(path = "/interaction", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
     public ResponseEntity<String> onInteraction(HttpServletRequest request) {
         try {
@@ -75,8 +74,6 @@ public class SlackInteractionController {
 
             log.info("Interaction received: action={} issueKey={} user={}", actionId, issueKey, userName);
 
-            // STUDY: Slack requires a response within 3 seconds. Immediately acknowledge,
-            //        then perform Jira transition + message update asynchronously.
             slackExecutor.execute(() -> handleTransition(actionId, issueKey, userName, payload));
 
             return ResponseEntity.ok("");
@@ -86,62 +83,64 @@ public class SlackInteractionController {
         }
     }
 
+    // STUDY: 각 버튼의 워크플로:
+    //   해야 할 일: Backlog → 해야 할 일 (Kanban→Scrum backlog). 다음 버튼: 진행 중
+    //   진행 중: 해야 할 일 → 진행 중 + 활성 스프린트 이동. 다음 버튼: 검토 중
+    //   검토 중: 진행 중 → 검토 중. 다음 버튼: 완료
+    //   완료: → 완료 상태. 버튼 없음.
+    //   바로 완료: 해야 할 일 → 진행 중 → 완료 + 스프린트 이동 한번에.
     private void handleTransition(String actionId, String issueKey, String userName,
                                   SlackInteractionPayload payload) {
         String channelId = payload.channel() != null ? payload.channel().id() : null;
         String messageTs = payload.message() != null ? payload.message().ts() : null;
-
-        String targetStatus;
-        String statusEmoji;
-        String statusLabel;
+        JsonNode originalBlocks =
+                payload.message() != null ? payload.message().blocks() : null;
 
         switch (actionId) {
-            case "jira_transition_in_progress" -> {
-                targetStatus = "진행 중";
-                statusEmoji = ":hammer_and_wrench:";
-                statusLabel = "진행 중";
-            }
-            case "jira_transition_done" -> {
-                targetStatus = "완료";
-                statusEmoji = ":white_check_mark:";
-                statusLabel = "완료";
-            }
-            default -> {
-                log.warn("Unknown action_id: {}", actionId);
-                return;
-            }
+            case BlockKitBuilder.ACTION_TODO ->
+                    doTransition(issueKey, "해야 할 일", ":clipboard:", "해야 할 일",
+                            BlockKitBuilder.ACTION_IN_PROGRESS, "\ud83d\udd28 진행 중",
+                            userName, channelId, messageTs, originalBlocks, false);
+            case BlockKitBuilder.ACTION_IN_PROGRESS ->
+                    doTransition(issueKey, "진행 중", ":hammer_and_wrench:", "진행 중",
+                            BlockKitBuilder.ACTION_IN_REVIEW, "\ud83d\udd0d 검토 중",
+                            userName, channelId, messageTs, originalBlocks, true);
+            case BlockKitBuilder.ACTION_IN_REVIEW ->
+                    doTransition(issueKey, "검토 중", ":mag:", "검토 중",
+                            BlockKitBuilder.ACTION_DONE, "\u2705 완료",
+                            userName, channelId, messageTs, originalBlocks, false);
+            case BlockKitBuilder.ACTION_DONE ->
+                    doTransition(issueKey, "완료", ":white_check_mark:", "완료",
+                            null, null,
+                            userName, channelId, messageTs, originalBlocks, false);
+            case BlockKitBuilder.ACTION_QUICK_DONE ->
+                    handleQuickDone(issueKey, userName, channelId, messageTs, originalBlocks);
+            default -> log.warn("Unknown action_id: {}", actionId);
         }
+    }
 
+    private void doTransition(String issueKey, String targetStatus, String statusEmoji,
+                              String statusLabel, String nextActionId, String nextLabel,
+                              String userName, String channelId, String messageTs,
+                              JsonNode originalBlocks,
+                              boolean moveToSprint) {
         try {
             boolean success = jiraApiClient.transitionIssue(issueKey, targetStatus);
             if (success) {
-                // DB 업데이트
-                issueRepository.findByIssueKey(issueKey).ifPresent(issue -> {
-                    issue.updateStatus(targetStatus);
-                    issueRepository.save(issue);
-                    log.info("DB updated: {} \u2192 {}", issueKey, targetStatus);
-                });
-
-                // 원본 메시지 업데이트: 버튼 제거 + 결과 표시
+                if (moveToSprint) {
+                    jiraApiClient.moveToActiveSprint(issueKey);
+                }
+                updateDbStatus(issueKey, targetStatus);
                 if (channelId != null && messageTs != null) {
                     String resultText = String.format(
                             "%s *%s* \u2192 %s (by %s)", statusEmoji, issueKey, statusLabel, userName);
-                    // STUDY: 원본 메시지의 blocks를 payload에서 가져와 보존하면서
-                    //        actions 블록만 제거하고 결과 section을 추가한다.
-                    com.fasterxml.jackson.databind.JsonNode originalBlocks =
-                            payload.message() != null ? payload.message().blocks() : null;
-                    String updatedBlocks = BlockKitBuilder.buildCompletedBlocks(
-                            issueKey, statusEmoji, statusLabel, userName, originalBlocks);
+                    String updatedBlocks = BlockKitBuilder.buildTransitionedBlocks(
+                            issueKey, statusEmoji, statusLabel, userName,
+                            nextActionId, nextLabel, originalBlocks);
                     slackNotifier.updateMessage(channelId, messageTs, resultText, updatedBlocks);
                 }
             } else {
-                log.warn("Jira transition failed for {} \u2192 {}", issueKey, targetStatus);
-                if (channelId != null && messageTs != null) {
-                    // STUDY: 전환 실패 시 스레드 댓글로 에러 알림. 원본 메시지의 버튼은 유지하여 재시도 가능.
-                    slackNotifier.postThreadReply(channelId, messageTs,
-                            String.format(":x: *%s* \u2192 %s 전환에 실패했습니다. Jira에서 직접 확인해주세요.",
-                                    issueKey, statusLabel));
-                }
+                notifyFailure(channelId, messageTs, issueKey, statusLabel);
             }
         } catch (Exception e) {
             log.error("Transition error for {} \u2192 {}: {}", issueKey, targetStatus, e.toString(), e);
@@ -149,6 +148,78 @@ public class SlackInteractionController {
                 slackNotifier.postThreadReply(channelId, messageTs,
                         String.format(":x: *%s* 상태 변경 중 오류: %s", issueKey, e.getMessage()));
             }
+        }
+    }
+
+    // STUDY: 바로 완료는 해야 할 일 → 진행 중 → 완료를 순차 실행.
+    //        각 단계 성공 시 DB를 업데이트하여 중간 실패 시에도 일관된 상태를 유지.
+    //        이미 해당 상태인 경우(transition 실패) 건너뛰고 계속 진행.
+    private void handleQuickDone(String issueKey, String userName, String channelId,
+                                 String messageTs,
+                                 JsonNode originalBlocks) {
+        try {
+            // Step 1: Backlog → 해야 할 일
+            if (jiraApiClient.transitionIssue(issueKey, "해야 할 일")) {
+                updateDbStatus(issueKey, "해야 할 일");
+            }
+
+            // Step 2: 해야 할 일 → 진행 중
+            if (jiraApiClient.transitionIssue(issueKey, "진행 중")) {
+                updateDbStatus(issueKey, "진행 중");
+            }
+
+            // 스프린트 이동은 전환 성공 여부와 무관하게 시도 (이미 진행 중일 수 있음)
+            jiraApiClient.moveToActiveSprint(issueKey);
+
+            // Step 3: 진행 중 → 완료
+            boolean done = jiraApiClient.transitionIssue(issueKey, "완료");
+            if (done) {
+                updateDbStatus(issueKey, "완료");
+                if (channelId != null && messageTs != null) {
+                    String resultText = String.format(
+                            ":zap: *%s* \u2192 바로 완료 (by %s)", issueKey, userName);
+                    String updatedBlocks = BlockKitBuilder.buildCompletedBlocks(
+                            issueKey, ":zap:", "바로 완료", userName, originalBlocks);
+                    slackNotifier.updateMessage(channelId, messageTs, resultText, updatedBlocks);
+                }
+            } else {
+                notifyFailure(channelId, messageTs, issueKey, "바로 완료");
+            }
+        } catch (Exception e) {
+            log.error("Quick done error for {}: {}", issueKey, e.toString(), e);
+            if (channelId != null && messageTs != null) {
+                slackNotifier.postThreadReply(channelId, messageTs,
+                        String.format(":x: *%s* 바로 완료 중 오류: %s", issueKey, e.getMessage()));
+            }
+        }
+    }
+
+    private void updateDbStatus(String issueKey, String targetStatus) {
+        // STUDY: status와 statusCategory는 다르다.
+        //        status="검토 중" → statusCategory="진행 중", status="완료" → statusCategory="완료" 등.
+        String category = resolveCategory(targetStatus);
+        issueRepository.findByIssueKey(issueKey).ifPresent(issue -> {
+            issue.updateStatus(targetStatus, category);
+            issueRepository.save(issue);
+            log.info("DB updated: {} \u2192 {} (category={})", issueKey, targetStatus, category);
+        });
+    }
+
+    // STUDY: Jira 상태명 → statusCategory 매핑. Jira API에서는 3가지 카테고리만 존재.
+    private String resolveCategory(String statusName) {
+        return switch (statusName) {
+            case "완료" -> StatusCategory.DONE;
+            case "진행 중", "검토 중" -> StatusCategory.IN_PROGRESS;
+            default -> StatusCategory.TODO;
+        };
+    }
+
+    private void notifyFailure(String channelId, String messageTs, String issueKey, String statusLabel) {
+        log.warn("Jira transition failed for {} \u2192 {}", issueKey, statusLabel);
+        if (channelId != null && messageTs != null) {
+            slackNotifier.postThreadReply(channelId, messageTs,
+                    String.format(":x: *%s* \u2192 %s 전환에 실패했습니다. Jira에서 직접 확인해주세요.",
+                            issueKey, statusLabel));
         }
     }
 
@@ -166,7 +237,6 @@ public class SlackInteractionController {
                 throw new IllegalStateException("Failed to read request body", e);
             }
         }
-        // form body: "payload=URL_ENCODED_JSON"
         String prefix = "payload=";
         if (body.startsWith(prefix)) {
             return URLDecoder.decode(body.substring(prefix.length()), StandardCharsets.UTF_8);

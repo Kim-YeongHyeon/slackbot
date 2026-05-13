@@ -37,7 +37,7 @@ class IssueCreateServiceImplTest {
     private final IssueRepository issueRepository = mock(IssueRepository.class);
     private final UserMappingRepository userMappingRepository = mock(UserMappingRepository.class);
     private final JiraProperties jiraProps = new JiraProperties(
-            "https://example.atlassian.net", "u@x.com", "token", "PROJ");
+            "https://example.atlassian.net", "u@x.com", "token", "PROJ", null, null);
     private final IssueCreateServiceImpl service =
             new IssueCreateServiceImpl(claude, jira, jiraProps, slackNotifier, duplicateDetection,
                     issueRepository, userMappingRepository);

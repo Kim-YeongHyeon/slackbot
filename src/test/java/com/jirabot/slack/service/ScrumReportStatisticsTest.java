@@ -30,7 +30,7 @@ class ScrumReportStatisticsTest {
     private final UserMappingRepository userMappingRepository = mock(UserMappingRepository.class);
     private final SlackNotifier slackNotifier = mock(SlackNotifier.class);
     private final JiraProperties jiraProps = new JiraProperties(
-            "https://example.atlassian.net", "u@x.com", "token", "PROJ");
+            "https://example.atlassian.net", "u@x.com", "token", "PROJ", null, null);
     private final ScrumReportServiceImpl service =
             new ScrumReportServiceImpl(issueRepository, userMappingRepository, slackNotifier, jiraProps);
 

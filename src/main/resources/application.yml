@@ -48,6 +48,12 @@ jira:
   email: ${JIRA_EMAIL:}
   api-token: ${JIRA_API_TOKEN:}
   project-key: ${JIRA_PROJECT_KEY:}
+  # STUDY: Story Point 커스텀 필드 ID. Jira 사이트마다 다르다 (관리자 > 커스텀 필드에서 확인).
+  story-point-field: ${JIRA_SP_FIELD:customfield_10036}
+  issue-types:
+    bug: ${JIRA_ISSUE_TYPE_BUG:Bug}
+    task: ${JIRA_ISSUE_TYPE_TASK:Task}
+    subtask: ${JIRA_ISSUE_TYPE_SUBTASK:Sub-task}
 
 # STUDY: Actuator. /actuator/health = 헬스체크. Phase 1에서는 별도 /health 컨트롤러도 제공.
 management:

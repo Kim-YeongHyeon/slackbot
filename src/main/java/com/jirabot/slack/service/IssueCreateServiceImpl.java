@@ -9,6 +9,7 @@ import com.jirabot.slack.client.dto.JiraCreateResponse;
 import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.dto.IssueCreateCommand;
 import com.jirabot.slack.entity.IssueEntity;
+import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.entity.UserMappingEntity;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.util.BlockKitBuilder;
@@ -178,9 +179,11 @@ public class IssueCreateServiceImpl implements IssueCreateService {
     private void saveToDb(String issueKey, IssueClassification c, String reporter,
                           IssueCreateCommand command) {
         try {
-            String issueType = c.type() == IssueClassification.IssueType.BUG ? "버그" : "작업";
+            String issueType = c.type() == IssueClassification.IssueType.BUG
+                    ? jiraProps.issueTypes().bug() : jiraProps.issueTypes().task();
+            // STUDY: 새로 생성된 이슈의 초기 상태는 "Backlog". Kanban Backlog Managing에 배치됨.
             IssueEntity entity = new IssueEntity(
-                    issueKey, c.title(), issueType, "해야 할 일", "해야 할 일",
+                    issueKey, c.title(), issueType, "Backlog", StatusCategory.TODO,
                     null, (double) c.storyPoint(), reporter, c.summary(),
                     Instant.now(), Instant.now());
             // 스레드에서 "@지라 완료" 시 이슈를 찾을 수 있도록 Slack 스레드 정보 저장

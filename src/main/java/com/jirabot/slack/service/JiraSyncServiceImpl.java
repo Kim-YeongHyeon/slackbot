@@ -36,6 +36,7 @@ public class JiraSyncServiceImpl implements JiraSyncService {
     public void scheduledSync() {
         log.info("Daily scheduled sync started");
         syncActiveSprint();
+        syncBacklog();
     }
 
     @Override
@@ -77,6 +78,41 @@ public class JiraSyncServiceImpl implements JiraSyncService {
 
         String result = String.format("스프린트 '%s' 동기화 완료: %d건 생성, %d건 업데이트 (전체 %d건)",
                 sprint.name(), created, updated, jiraIssues.size());
+        log.info(result);
+        return result;
+    }
+
+    @Override
+    public String syncBacklog() {
+        // STUDY: 검색 범위 확장을 위해 스프린트 미배정 이슈도 DB에 동기화.
+        //        sprintId/sprintName은 null로 저장 — 통계 쿼리에서 제외됨.
+        List<SprintIssue> backlogIssues = jira.getBacklogIssues();
+
+        int created = 0;
+        int updated = 0;
+
+        for (SprintIssue ji : backlogIssues) {
+            Optional<IssueEntity> existing = issueRepository.findByIssueKey(ji.key());
+            if (existing.isPresent()) {
+                IssueEntity entity = existing.get();
+                entity.updateFrom(
+                        ji.summary(), ji.issueType(), ji.status(), ji.statusCategory(),
+                        ji.assignee(), ji.storyPoint(),
+                        parseInstant(ji.updated()));
+                updated++;
+            } else {
+                IssueEntity entity = new IssueEntity(
+                        ji.key(), ji.summary(), ji.issueType(), ji.status(),
+                        ji.statusCategory(), ji.assignee(), ji.storyPoint(),
+                        null, null,
+                        parseInstant(ji.created()), parseInstant(ji.updated()));
+                issueRepository.save(entity);
+                created++;
+            }
+        }
+
+        String result = String.format("Backlog 동기화 완료: %d건 생성, %d건 업데이트 (전체 %d건)",
+                created, updated, backlogIssues.size());
         log.info(result);
         return result;
     }

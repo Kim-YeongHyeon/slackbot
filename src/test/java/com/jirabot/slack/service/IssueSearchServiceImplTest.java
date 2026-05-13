@@ -24,7 +24,7 @@ class IssueSearchServiceImplTest {
     private final IssueRepository issueRepository = mock(IssueRepository.class);
     private final ClaudeApiClient claudeApiClient = mock(ClaudeApiClient.class);
     private final JiraProperties jiraProps =
-            new JiraProperties("https://jira.example.com", "test@example.com", "token", "SLAC");
+            new JiraProperties("https://jira.example.com", "test@example.com", "token", "SLAC", null, null);
 
     private IssueSearchServiceImpl service;
 

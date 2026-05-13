@@ -25,7 +25,7 @@ class JiraApiClientImplTest {
     void setUp() throws IOException {
         server = new MockWebServer();
         server.start();
-        var props = new JiraProperties(server.url("/").toString(), "u@x.com", "t", "PROJ");
+        var props = new JiraProperties(server.url("/").toString(), "u@x.com", "t", "PROJ", null, null);
         WebClient webClient = WebClient.builder().baseUrl(server.url("/").toString()).build();
         client = new JiraApiClientImpl(webClient, props, new ObjectMapper());
     }

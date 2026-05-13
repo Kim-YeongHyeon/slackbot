@@ -22,6 +22,12 @@ public interface JiraApiClient {
     List<SprintIssue> getSprintIssues(int sprintId);
 
     /**
+     * Kanban backlog 이슈를 조회한다 (스프린트에 포함되지 않은 이슈).
+     * 검색 범위 확장용.
+     */
+    List<SprintIssue> getBacklogIssues();
+
+    /**
      * Jira 이슈의 상태를 전환한다.
      *
      * @param issueKey 이슈 키 (예: SLAC-7)
@@ -36,6 +42,13 @@ public interface JiraApiClient {
      * @param jiraAccountId 보고자/담당자 Jira accountId (null이면 API 토큰 소유자가 기본값)
      */
     String createSubTask(String parentKey, String summary, int storyPoint, String jiraAccountId);
+
+    /**
+     * 이슈를 활성 스프린트로 이동한다.
+     *
+     * @return 성공 여부
+     */
+    boolean moveToActiveSprint(String issueKey);
 
     /**
      * Add a comment to an existing issue.
