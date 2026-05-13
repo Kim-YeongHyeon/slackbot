@@ -23,6 +23,7 @@ class IssueSearchServiceImplTest {
 
     private final IssueRepository issueRepository = mock(IssueRepository.class);
     private final ClaudeApiClient claudeApiClient = mock(ClaudeApiClient.class);
+    private final JiraSyncService jiraSyncService = mock(JiraSyncService.class);
     private final JiraProperties jiraProps =
             new JiraProperties("https://jira.example.com", "test@example.com", "token", "SLAC", null, null);
 
@@ -30,7 +31,7 @@ class IssueSearchServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new IssueSearchServiceImpl(issueRepository, claudeApiClient, jiraProps);
+        service = new IssueSearchServiceImpl(issueRepository, claudeApiClient, jiraSyncService, jiraProps);
     }
 
     @Test

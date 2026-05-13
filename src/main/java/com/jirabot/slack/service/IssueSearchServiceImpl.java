@@ -28,15 +28,30 @@ public class IssueSearchServiceImpl implements IssueSearchService {
 
     private final IssueRepository issueRepository;
     private final ClaudeApiClient claudeApiClient;
+    private final JiraSyncService jiraSyncService;
     private final String jiraBaseUrl;
 
     public IssueSearchServiceImpl(IssueRepository issueRepository,
                                   ClaudeApiClient claudeApiClient,
+                                  JiraSyncService jiraSyncService,
                                   JiraProperties jiraProps) {
         this.issueRepository = issueRepository;
         this.claudeApiClient = claudeApiClient;
+        this.jiraSyncService = jiraSyncService;
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl();
         this.jiraBaseUrl = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+    }
+
+    // STUDY: 검색 freshness 를 위해 sync 를 먼저 돌린다. 매 호출 2~3s 지연이 추가되지만 사용자가
+    //        Jira 에서 방금 만든 이슈/변경된 상태도 결과에 반영됨. sync 실패는 검색을 막지 않는다
+    //        (있는 로컬 데이터로라도 응답).
+    private void prefetchFromJira() {
+        try {
+            jiraSyncService.syncActiveSprint();
+            jiraSyncService.syncBacklog();
+        } catch (Exception e) {
+            log.warn("Pre-search sync failed, proceeding with current DB state: {}", e.toString());
+        }
     }
 
     // STUDY: @Async 메서드는 Spring 프록시를 통해 호출되어야 비동기가 적용된다.
@@ -45,6 +60,7 @@ public class IssueSearchServiceImpl implements IssueSearchService {
     @Override
     public CompletableFuture<String> searchByKeyword(String keyword) {
         log.info("Keyword search requested: keyword='{}'", keyword);
+        prefetchFromJira();
         List<IssueEntity> results = issueRepository.searchByKeyword(escapeWildcards(keyword), PageRequest.of(0, MAX_SEARCH_RESULTS));
         return CompletableFuture.completedFuture(formatSearchResults(keyword, results));
     }
@@ -53,6 +69,7 @@ public class IssueSearchServiceImpl implements IssueSearchService {
     @Override
     public CompletableFuture<String> searchSemantic(String userQuery, String fallbackKeyword) {
         log.info("Semantic search requested: query='{}' fallback='{}'", userQuery, fallbackKeyword);
+        prefetchFromJira();
         try {
             List<IssueEntity> allIssues = issueRepository.findAll();
             if (allIssues.isEmpty()) {
