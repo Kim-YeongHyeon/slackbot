@@ -38,7 +38,10 @@ public class IntentClassifierImpl implements IntentClassifier {
             List<String> command = buildCommand();
             Duration timeout = Duration.ofSeconds(props.timeoutSeconds());
             // STUDY: stdin에는 사용자 메시지만 전달. 시스템 프롬프트는 --system-prompt-file로 분리.
-            ProcessRunner.Result result = processRunner.run(command, rawText, timeout);
+            //        매우 짧은 입력 ("안녕하세요", "ok") 을 모델이 시스템에 대한 직접 인사로 받아
+            //        비-JSON 대화 응답을 내는 회귀가 있어, 분류 대상임을 명시적으로 프레이밍한다.
+            String framedInput = "Classify this user message: " + rawText;
+            ProcessRunner.Result result = processRunner.run(command, framedInput, timeout);
 
             if (result.timedOut()) {
                 log.warn("Haiku intent classifier timed out after {}s", props.timeoutSeconds());
