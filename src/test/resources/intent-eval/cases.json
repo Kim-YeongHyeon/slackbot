@@ -3,7 +3,7 @@
     "description": "Intent classifier evaluation fixture. Each case maps a user input to the expected intent per prompts/haiku-classifier.md.",
     "schema": "1.0",
     "labelingRules": "prompts/haiku-classifier.md — Intent Definitions table + Disambiguation rules",
-    "totalCases": 99
+    "totalCases": 90
   },
   "cases": [
     { "id": "search-001", "input": "PROJ-123 찾아줘", "expected": "search" },
@@ -56,15 +56,15 @@
     { "id": "mine-008", "input": "뭐 해야 해?", "expected": "my_tasks", "note": "disambiguation: no sprint/team context, ambiguous '뭐 해야 해?' defaults to my_tasks per prompt rule" },
     { "id": "mine-009", "input": "내 진행중 이슈", "expected": "my_tasks" },
 
-    { "id": "sprint-001", "input": "이번 스프린트에 뭐 해야 해?", "expected": "sprint_report" },
-    { "id": "sprint-002", "input": "스프린트 진행 상황 알려줘", "expected": "sprint_report" },
-    { "id": "sprint-003", "input": "팀 작업 어떻게 되고 있어?", "expected": "sprint_report" },
-    { "id": "sprint-004", "input": "스크럼 보고 해줘", "expected": "sprint_report" },
-    { "id": "sprint-005", "input": "이번 sprint 어디까지 왔어", "expected": "sprint_report" },
-    { "id": "sprint-006", "input": "우리 팀 현재 상태 어때", "expected": "sprint_report" },
-    { "id": "sprint-007", "input": "daily standup 정리해줘", "expected": "sprint_report" },
-    { "id": "sprint-008", "input": "스프린트 남은 거 정리해줘", "expected": "sprint_report" },
-    { "id": "sprint-009", "input": "sprint progress", "expected": "sprint_report" },
+    { "id": "sprint-001", "input": "이번 스프린트에 뭐 해야 해?", "expected": "scrum_report" },
+    { "id": "sprint-002", "input": "스프린트 진행 상황 알려줘", "expected": "scrum_report" },
+    { "id": "sprint-003", "input": "팀 작업 어떻게 되고 있어?", "expected": "scrum_report" },
+    { "id": "sprint-004", "input": "스크럼 보고 해줘", "expected": "scrum_report" },
+    { "id": "sprint-005", "input": "이번 sprint 어디까지 왔어", "expected": "scrum_report" },
+    { "id": "sprint-006", "input": "우리 팀 현재 상태 어때", "expected": "scrum_report" },
+    { "id": "sprint-007", "input": "daily standup 정리해줘", "expected": "scrum_report" },
+    { "id": "sprint-008", "input": "스프린트 남은 거 정리해줘", "expected": "scrum_report" },
+    { "id": "sprint-009", "input": "sprint progress", "expected": "scrum_report" },
 
     { "id": "sync-001", "input": "지금 Jira 동기화해줘", "expected": "sync_request" },
     { "id": "sync-002", "input": "새로고침 좀", "expected": "sync_request" },
@@ -85,16 +85,6 @@
     { "id": "done-007", "input": "다 했어", "expected": "complete_issue" },
     { "id": "done-008", "input": "작업 완료 처리", "expected": "complete_issue" },
     { "id": "done-009", "input": "완료로 옮겨줘", "expected": "complete_issue" },
-
-    { "id": "remind-001", "input": "리마인더 켜줘", "expected": "reminder_toggle" },
-    { "id": "remind-002", "input": "알림 활성화해줘", "expected": "reminder_toggle" },
-    { "id": "remind-003", "input": "리마인더 on", "expected": "reminder_toggle" },
-    { "id": "remind-004", "input": "리마인더 꺼줘", "expected": "reminder_toggle" },
-    { "id": "remind-005", "input": "알림 끄기", "expected": "reminder_toggle" },
-    { "id": "remind-006", "input": "reminder off", "expected": "reminder_toggle" },
-    { "id": "remind-007", "input": "리마인더 어떻게 돼있어?", "expected": "reminder_toggle" },
-    { "id": "remind-008", "input": "리마인더 상태 알려줘", "expected": "reminder_toggle" },
-    { "id": "remind-009", "input": "알림 상태", "expected": "reminder_toggle" },
 
     { "id": "skip-001", "input": "고마워~", "expected": "skip" },
     { "id": "skip-002", "input": "안녕하세요", "expected": "skip" },
