@@ -238,10 +238,9 @@ class IntentClassifierEvalTest {
             case "register_bug" -> "bug";
             case "statistics" -> "stat";
             case "my_tasks" -> "mine";
-            case "sprint_report" -> "sprt";
+            case "scrum_report" -> "scrm";
             case "sync_request" -> "sync";
             case "complete_issue" -> "done";
-            case "reminder_toggle" -> "rmnd";
             case "skip" -> "skip";
             case "unknown" -> "unk";
             default -> intent.length() <= 4 ? intent : intent.substring(0, 4);
