@@ -401,6 +401,13 @@ public class SlackEventController {
                         handleStatistics(event);
                 case "my_tasks" ->
                         handleMyWork(event);
+                case "scrum_report" ->
+                        handleScrum(event);
+                case "sync_request" ->
+                        handleSync(event);
+                case "complete_issue" ->
+                        // handleComplete 가 thread_ts 와 부모 이슈 존재 여부를 자체 가드함.
+                        handleComplete(event);
                 case "skip" ->
                         replyThread(event, ":no_entry_sign: 구체적인 내용을 포함해주세요.\n" +
                                 "예: `@지라 로그인 페이지에서 500 에러 발생`");
