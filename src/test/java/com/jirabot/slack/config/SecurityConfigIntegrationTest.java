@@ -9,6 +9,7 @@ import com.jirabot.slack.filter.CachedBodyFilter;
 import com.jirabot.slack.filter.SlackSignatureFilter;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
+import com.jirabot.slack.repository.ProcessedJiraChangelogRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
 import com.jirabot.slack.service.JiraSyncService;
 import jakarta.servlet.Filter;
@@ -44,6 +45,9 @@ class SecurityConfigIntegrationTest {
 
     @MockitoBean
     private UserMappingRepository userMappingRepository;
+
+    @MockitoBean
+    private ProcessedJiraChangelogRepository processedJiraChangelogRepository;
 
     @MockitoBean
     private JiraSyncService jiraSyncService;

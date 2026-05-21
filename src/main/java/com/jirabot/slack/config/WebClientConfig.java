@@ -17,7 +17,8 @@ import reactor.netty.http.client.HttpClient;
 // STUDY: @EnableConfigurationProperties로 @ConfigurationProperties 빈 등록 (record에는 @Component 쓸 수 없음).
 // STUDY: WebClient는 reactive HTTP client. block()을 호출하면 동기처럼 쓸 수 있다 (@Async 안에서 block 안전).
 @Configuration
-@EnableConfigurationProperties({ClaudeProperties.class, JiraProperties.class, IntentProperties.class})
+@EnableConfigurationProperties({ClaudeProperties.class, JiraProperties.class, IntentProperties.class,
+        JiraWebhookProperties.class, NotifyProperties.class})
 public class WebClientConfig {
 
     // STUDY: HttpClient 레벨에서 connect/read timeout을 별도로 설정해야 한다.

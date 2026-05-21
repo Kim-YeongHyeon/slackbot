@@ -54,6 +54,20 @@ jira:
     bug: ${JIRA_ISSUE_TYPE_BUG:Bug}
     task: ${JIRA_ISSUE_TYPE_TASK:Task}
     subtask: ${JIRA_ISSUE_TYPE_SUBTASK:Sub-task}
+  # Jira → 봇 webhook 수신 설정. secret 이 비어있으면 모든 요청 403.
+  webhook:
+    enabled: ${JIRA_WEBHOOK_ENABLED:true}
+    secret: ${JIRA_WEBHOOK_SECRET:}
+    # STATUS | STATUS_CATEGORY | DONE_ONLY | STATUS_AND_ASSIGNEE
+    notify-on: ${JIRA_WEBHOOK_NOTIFY_ON:STATUS_AND_ASSIGNEE}
+
+# 봇 응답 메시지의 알림 정책.
+notify:
+  # MENTION (기본) — <@USER> 형식으로 Slack 알림 발송
+  # PLAIN          — displayName 평문만 표기 (알림 X)
+  mention: ${NOTIFY_MENTION:MENTION}
+  # 같은 이슈의 연속 알림 최소 간격. 0 = 비활성 (§C 단계에서 의미 부여 예정)
+  min-interval-seconds: ${NOTIFY_MIN_INTERVAL_SECONDS:0}
 
 # STUDY: Actuator. /actuator/health = 헬스체크. Phase 1에서는 별도 /health 컨트롤러도 제공.
 management:
