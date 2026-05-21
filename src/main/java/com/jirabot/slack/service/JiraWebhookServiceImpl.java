@@ -249,7 +249,8 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
         JsonNode assigneeNode = fields.path("assignee");
         String assignee = (assigneeNode.isMissingNode() || assigneeNode.isNull())
                 ? null : assigneeNode.path("displayName").asText(issue.getAssignee());
-        JsonNode spNode = fields.path("customfield_10016");
+        // STUDY: SP 커스텀 필드는 Jira 사이트마다 다르므로 설정값을 사용한다.
+        JsonNode spNode = fields.path(jiraProps.storyPointField());
         Double storyPoint = (spNode.isMissingNode() || spNode.isNull()) ? issue.getStoryPoint() : spNode.asDouble();
         Instant jiraUpdated = parseInstantOrFallback(fields.path("updated").asText(null), issue.getJiraUpdated());
 
