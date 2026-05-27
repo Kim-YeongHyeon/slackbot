@@ -39,7 +39,7 @@ claude:
   # STUDY: Haiku 의도 분류기 설정. --bare로 불필요한 컨텍스트 스킵, --system-prompt-file로 skill 전달.
   intent:
     model: claude-haiku-4-5
-    timeout-seconds: 15
+    timeout-seconds: 25
     prompt-file: prompts/haiku-classifier.md
 
 # Jira 설정 — spring-service-engineer의 JiraApiClient

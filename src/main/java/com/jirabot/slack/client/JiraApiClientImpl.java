@@ -269,20 +269,32 @@ public class JiraApiClientImpl implements JiraApiClient {
             String json = jiraWebClient.get()
                     .uri("/rest/api/3/issue/{key}/transitions", issueKey)
                     .retrieve().bodyToMono(String.class).block();
-            JsonNode transitions = objectMapper.readTree(json).path("transitions");
+            JsonNode root = objectMapper.readTree(json);
+            JsonNode transitions = root.path("transitions");
+
+            // STUDY: transition API가 에러를 반환하면 transitions 키가 없어 빈 노드가 된다.
+            //        이 경우 로그에 응답 본문을 남겨 원인 파악을 돕는다.
+            if (transitions.isMissingNode() || !transitions.isArray()) {
+                log.warn("Transition API returned no transitions for {}: {}", issueKey, json);
+                return false;
+            }
 
             // STUDY: transition name은 프로젝트마다 다르지만 (예: "Start to Work", "진행 중"),
             //        target status name은 프로젝트 내에서 일관적이다 (예: "진행 중").
             //        t.to.name으로 매칭하면 transition 이름에 의존하지 않아 범용적.
             String transitionId = null;
             for (JsonNode t : transitions) {
-                if (targetStatusName.equals(t.path("to").path("name").asText())) {
+                String toName = t.path("to").path("name").asText();
+                log.debug("Available transition: id={} name='{}' to.name='{}'",
+                        t.path("id").asText(), t.path("name").asText(), toName);
+                if (targetStatusName.equals(toName)) {
                     transitionId = t.path("id").asText();
                     break;
                 }
             }
             if (transitionId == null) {
-                log.warn("Transition '{}' not found for issue {}", targetStatusName, issueKey);
+                log.warn("Transition '{}' not found for issue {}. Available: {}",
+                        targetStatusName, issueKey, transitions);
                 return false;
             }
 
