@@ -3,6 +3,31 @@
 > **등록일:** 2026-05-18
 > **우선순위:** 중간
 > **요청자:** 사용자 요청 (이전 대화에서 논의 후 보류 → 재등록)
+> **상태(2026-06-01):** ✅ **1차 구현됨 — "Jira 경유" 힌트 방식 (v0.0.4)**
+
+## ✅ 구현된 것 (2026-06-01)
+
+사용자 결정: "git(GitHub API) 직접 연동이 아니라 **Jira를 통해** 브랜치 생성".
+
+기술적 현실: 네이티브 **GitHub for Jira 앱은 create-branch 딥링크를 제공하지 않는다**
+([atlassian/github-for-jira#402](https://github.com/atlassian/github-for-jira/issues/402)).
+따라서 봇이 자동 생성하지 않고, **"진행 중" 전환 시 다음을 스레드에 안내**한다:
+- 이슈 개발 패널 링크 (`{base}/browse/{KEY}`)
+- 규칙 기반 **권장 브랜치명** — `BranchNameBuilder` (Bug→`bugfix/`, 그 외→`feature/`, `KEY-요약슬러그`)
+
+실제 브랜치 생성은 사용자가 **Jira 개발 패널 → "브랜치 만들기"** 에서 대상 레포·base 를 선택해 수행
+→ 연결된 GitHub 가 생성. **봇은 GitHub 토큰 불필요**, "레포가 작업마다 다름" 블로커도 클릭 시점 선택으로 해소.
+
+구현 위치: `SlackInteractionController.postBranchHint`, `util/BranchNameBuilder` (+테스트).
+
+## 남은(선택) 고도화
+- **진짜 원클릭 생성**: GitKraken "Git Integration for Jira"(유료 앱)는 create-branch 딥링크를 제공 →
+  그 앱이 연결돼 있으면 딥링크로 모달을 바로 열 수 있음. 현재 Jira-GitHub 연동 종류 확인 필요.
+- base branch 기본값/오버라이드, 브랜치 존재 시 처리 등은 Jira UI 가 담당.
+
+---
+
+### (이하 최초 요구사항 기록 — 참고용)
 
 ## 배경
 
