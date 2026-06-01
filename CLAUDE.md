@@ -38,3 +38,4 @@
 - Use semantic versioning for the project. Each time you generate a new version, bump the PATCH section of the version number.
 - Generate the Docker Compose file to run all components used by the application.
 - Update README.md each time you generate a new version.
+- **Story Point 산정은 항상 [docs/story-point-guide.md](docs/story-point-guide.md) 를 기준으로 한다** (1=반나절, 2=하루, 3=1~2일, 5=2~3일, 8=3~4일·스프린트 최대). SP 관련 코드/프롬프트 수정 시 이 문서와 일치시킨다.
