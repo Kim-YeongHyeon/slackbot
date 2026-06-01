@@ -35,23 +35,41 @@ public class NotionApiClientImpl implements NotionApiClient {
     @Override
     public Optional<String> findPageId(String databaseId, String issueKey) {
         try {
-            // STUDY: 제목(이슈) 에 issueKey 가 포함된 row 를 조회. upsert 의 "존재 확인" 단계.
+            // STUDY(버그 수정): 제목은 "KEY summary" 형태. Notion title 필터 contains/starts_with 는 부분일치라
+            //        "ES2-1" 이 "ES2-1012" 까지 잡는다 → upsert 가 엉뚱한 row 를 덮어쓴다. 그래서 contains 로
+            //        후보를 모은 뒤(page_size 100), 제목의 첫 토큰이 issueKey 와 정확히 일치하는 row 만 채택한다.
             Map<String, Object> body = Map.of(
                     "filter", Map.of("property", TITLE_PROP, "title", Map.of("contains", issueKey)),
-                    "page_size", 1);
+                    "page_size", 100);
             String resp = notionWebClient.post()
                     .uri("/databases/{id}/query", databaseId)
                     .bodyValue(body)
                     .retrieve().bodyToMono(String.class).block();
             JsonNode results = objectMapper.readTree(resp).path("results");
-            if (results.isArray() && !results.isEmpty()) {
-                return Optional.ofNullable(results.get(0).path("id").asText(null));
+            if (results.isArray()) {
+                for (JsonNode row : results) {
+                    JsonNode titleArr = row.path("properties").path(TITLE_PROP).path("title");
+                    String title = titleArr.isArray() && !titleArr.isEmpty()
+                            ? titleArr.get(0).path("plain_text").asText("") : "";
+                    if (titleMatchesKey(title, issueKey)) {
+                        return Optional.ofNullable(row.path("id").asText(null));
+                    }
+                }
             }
             return Optional.empty();
         } catch (Exception e) {
             log.warn("Notion findPageId failed db={} issue={}: {}", databaseId, issueKey, e.toString());
             return Optional.empty();
         }
+    }
+
+    // STUDY: 제목 "KEY summary" 의 첫 토큰이 issueKey 와 정확히 같은지. contains 부분일치 충돌(ES2-1 ↔ ES2-1012) 방지.
+    static boolean titleMatchesKey(String title, String issueKey) {
+        if (title == null || title.isBlank() || issueKey == null) {
+            return false;
+        }
+        String firstToken = title.strip().split(" ", 2)[0];
+        return issueKey.equals(firstToken);
     }
 
     @Override
