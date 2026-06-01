@@ -369,7 +369,7 @@ public class ScrumReportServiceImpl implements ScrumReportService {
                     indent, issueLink(i.getIssueKey()), i.getSummary(), spText(i.getStoryPoint())));
             for (IssueEntity child : items) {
                 if (i.getIssueKey().equals(child.getParentKey())) {
-                    sb.append(String.format("%s  - %s %s%s\n",
+                    sb.append(String.format("%s    ◦ %s %s%s\n",
                             indent, issueLink(child.getIssueKey()), child.getSummary(),
                             spText(child.getStoryPoint())));
                 }

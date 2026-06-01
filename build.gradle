@@ -42,4 +42,7 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	// STUDY: -Dintent.eval=true 같은 CLI 시스템 프로퍼티는 기본적으로 Gradle 호스트 JVM 에만 적용된다.
+	//        JUnit @EnabledIfSystemProperty 가 보는 곳은 test 워커 JVM 이므로 명시적으로 forward 한다.
+	systemProperty 'intent.eval', System.getProperty('intent.eval', 'false')
 }

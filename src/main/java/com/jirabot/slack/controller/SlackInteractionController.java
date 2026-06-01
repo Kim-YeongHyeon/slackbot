@@ -85,7 +85,8 @@ public class SlackInteractionController {
 
     // STUDY: 각 버튼의 워크플로:
     //   해야 할 일: Backlog → 해야 할 일 (Kanban→Scrum backlog). 다음 버튼: 진행 중
-    //   진행 중: 해야 할 일 → 진행 중 + 활성 스프린트 이동. 다음 버튼: 검토 중
+    //   진행 중: (Backlog →) 해야 할 일 → 진행 중 + 활성 스프린트 이동. 다음 버튼: 검토 중
+    //            Jira 워크플로상 Backlog에서 진행 중으로 직접 전환 불가 — 해야 할 일을 먼저 거친다.
     //   검토 중: 진행 중 → 검토 중. 다음 버튼: 완료
     //   완료: → 완료 상태. 버튼 없음.
     //   바로 완료: 해야 할 일 → 진행 중 → 완료 + 스프린트 이동 한번에.
@@ -102,9 +103,7 @@ public class SlackInteractionController {
                             BlockKitBuilder.ACTION_IN_PROGRESS, "\ud83d\udd28 진행 중",
                             userName, channelId, messageTs, originalBlocks, false);
             case BlockKitBuilder.ACTION_IN_PROGRESS ->
-                    doTransition(issueKey, "진행 중", ":hammer_and_wrench:", "진행 중",
-                            BlockKitBuilder.ACTION_IN_REVIEW, "\ud83d\udd0d 검토 중",
-                            userName, channelId, messageTs, originalBlocks, true);
+                    handleInProgress(issueKey, userName, channelId, messageTs, originalBlocks);
             case BlockKitBuilder.ACTION_IN_REVIEW ->
                     doTransition(issueKey, "검토 중", ":mag:", "검토 중",
                             BlockKitBuilder.ACTION_DONE, "\u2705 완료",
@@ -116,6 +115,42 @@ public class SlackInteractionController {
             case BlockKitBuilder.ACTION_QUICK_DONE ->
                     handleQuickDone(issueKey, userName, channelId, messageTs, originalBlocks);
             default -> log.warn("Unknown action_id: {}", actionId);
+        }
+    }
+
+    // STUDY: 진행 중 버튼 — Jira 워크플로상 Backlog에서 진행 중으로 직접 전환이 불가하므로
+    //        먼저 "해야 할 일"로 전환을 시도한다. 이미 해야 할 일 상태라면 실패해도 무시하고 계속 진행.
+    //        최종적으로 "진행 중" 전환 + 스프린트 이동을 수행한다.
+    private void handleInProgress(String issueKey, String userName, String channelId,
+                                  String messageTs, JsonNode originalBlocks) {
+        try {
+            // Step 1: Backlog → 해야 할 일 (이미 해야 할 일이면 실패해도 무시)
+            if (jiraApiClient.transitionIssue(issueKey, "해야 할 일")) {
+                updateDbStatus(issueKey, "해야 할 일");
+            }
+
+            // Step 2: 해야 할 일 → 진행 중
+            boolean success = jiraApiClient.transitionIssue(issueKey, "진행 중");
+            if (success) {
+                jiraApiClient.moveToActiveSprint(issueKey);
+                updateDbStatus(issueKey, "진행 중");
+                if (channelId != null && messageTs != null) {
+                    String resultText = String.format(
+                            ":hammer_and_wrench: *%s* → 진행 중 (by %s)", issueKey, userName);
+                    String updatedBlocks = BlockKitBuilder.buildTransitionedBlocks(
+                            issueKey, ":hammer_and_wrench:", "진행 중", userName,
+                            BlockKitBuilder.ACTION_IN_REVIEW, "\ud83d\udd0d 검토 중", originalBlocks);
+                    slackNotifier.updateMessage(channelId, messageTs, resultText, updatedBlocks);
+                }
+            } else {
+                notifyFailure(channelId, messageTs, issueKey, "진행 중");
+            }
+        } catch (Exception e) {
+            log.error("InProgress transition error for {}: {}", issueKey, e.toString(), e);
+            if (channelId != null && messageTs != null) {
+                slackNotifier.postThreadReply(channelId, messageTs,
+                        String.format(":x: *%s* 진행 중 전환 중 오류: %s", issueKey, e.getMessage()));
+            }
         }
     }
 

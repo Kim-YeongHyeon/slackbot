@@ -81,6 +81,10 @@ public class SlackEventController {
 
             이슈 등록 시 AI가 자동으로 분류(BUG/FEATURE/OTHER)하고 Story Point를 추정합니다.""";
 
+    // STUDY: 서버 재시작 시 Slack이 밀린 이벤트를 재전송하면 오래된 요청이 중복 처리된다.
+    //        이벤트 ts(Unix epoch)가 현재 시각보다 일정 시간 이상 지났으면 stale로 간주하여 처리하지 않는다.
+    private static final long STALE_EVENT_SECONDS = 180; // 3분
+
     // STUDY: 날짜 파싱용 정규식. yyyy.MM.dd, yyyy-MM-dd, yyyy/MM/dd 형식을 모두 지원.
     private static final java.util.regex.Pattern DATE_PATTERN =
             java.util.regex.Pattern.compile("(\\d{4})[.\\-/](\\d{1,2})[.\\-/](\\d{1,2})");
@@ -148,6 +152,19 @@ public class SlackEventController {
 
     private boolean isChannelAllowed(String channel) {
         return allowedChannels.isEmpty() || allowedChannels.contains(channel);
+    }
+
+    // STUDY: Slack ts는 "1716012345.123456" (Unix epoch 초.마이크로초) 형식.
+    //        소수점 앞부분을 epoch seconds로 파싱하여 현재 시각과 비교한다.
+    private boolean isStaleEvent(String ts) {
+        if (ts == null || ts.isBlank()) return false;
+        try {
+            long eventEpoch = Long.parseLong(ts.contains(".") ? ts.substring(0, ts.indexOf('.')) : ts);
+            long nowEpoch = java.time.Instant.now().getEpochSecond();
+            return (nowEpoch - eventEpoch) > STALE_EVENT_SECONDS;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     // STUDY: Slack app_mention 이벤트의 text 는 "<@U0AT5U95C4T> 버그 내용" 형태.
@@ -415,6 +432,13 @@ public class SlackEventController {
                         handleStatistics(event);
                 case "my_tasks" ->
                         handleMyWork(event);
+                case "scrum_report" ->
+                        handleScrum(event);
+                case "sync_request" ->
+                        handleSync(event);
+                case "complete_issue" ->
+                        // handleComplete 가 thread_ts 와 부모 이슈 존재 여부를 자체 가드함.
+                        handleComplete(event);
                 case "skip" ->
                         replyThread(event, ":no_entry_sign: 구체적인 내용을 포함해주세요.\n" +
                                 "예: `@지라 로그인 페이지에서 500 에러 발생`");
@@ -648,6 +672,11 @@ public class SlackEventController {
                 return ResponseEntity.ok(Map.of("ok", true));
             }
             if (deduplicator.isDuplicate(event.channel(), event.ts())) {
+                return ResponseEntity.ok(Map.of("ok", true));
+            }
+            if (isStaleEvent(event.ts())) {
+                log.info("Ignoring stale event ts={} (older than {}s)", event.ts(), STALE_EVENT_SECONDS);
+                replyThread(event, ":hourglass: 일정 시간이 지난 요청이라 처리하지 않았습니다. 다시 보내주세요.");
                 return ResponseEntity.ok(Map.of("ok", true));
             }
             String cleaned = stripMention(event.text());
