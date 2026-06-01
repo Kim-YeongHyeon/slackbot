@@ -5,14 +5,18 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.config.AsyncConfig;
+import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.dto.SlackInteractionPayload;
 import com.jirabot.slack.filter.CachedBodyFilter;
+import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.util.BlockKitBuilder;
+import com.jirabot.slack.util.BranchNameBuilder;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,17 +40,20 @@ public class SlackInteractionController {
     private final JiraApiClient jiraApiClient;
     private final SlackNotifier slackNotifier;
     private final IssueRepository issueRepository;
+    private final JiraProperties jiraProps;
     private final Executor slackExecutor;
 
     public SlackInteractionController(ObjectMapper objectMapper,
                                       JiraApiClient jiraApiClient,
                                       SlackNotifier slackNotifier,
                                       IssueRepository issueRepository,
+                                      JiraProperties jiraProps,
                                       @Qualifier(AsyncConfig.SLACK_EXECUTOR) Executor slackExecutor) {
         this.objectMapper = objectMapper;
         this.jiraApiClient = jiraApiClient;
         this.slackNotifier = slackNotifier;
         this.issueRepository = issueRepository;
+        this.jiraProps = jiraProps;
         this.slackExecutor = slackExecutor;
     }
 
@@ -142,6 +149,9 @@ public class SlackInteractionController {
                             BlockKitBuilder.ACTION_IN_REVIEW, "\ud83d\udd0d 검토 중", originalBlocks);
                     slackNotifier.updateMessage(channelId, messageTs, resultText, updatedBlocks);
                 }
+                // STUDY: 진행 중 전환 후 브랜치 만들기를 안내한다. 실제 생성은 Jira 개발 패널의 "브랜치 만들기"가
+                //        연결된 GitHub 로 위임 — 봇은 규칙 기반 권장 브랜치명과 이슈 링크만 제공한다(GitHub API 직접 호출 X).
+                postBranchHint(issueKey, channelId, messageTs);
             } else {
                 notifyFailure(channelId, messageTs, issueKey, "진행 중");
             }
@@ -152,6 +162,37 @@ public class SlackInteractionController {
                         String.format(":x: *%s* 진행 중 전환 중 오류: %s", issueKey, e.getMessage()));
             }
         }
+    }
+
+    // STUDY: "Jira 를 통한 브랜치 생성" — 네이티브 GitHub for Jira 앱은 create-branch 딥링크를 제공하지 않으므로
+    //        (atlassian/github-for-jira#402), 봇은 이슈 개발 패널 링크 + 규칙 기반 권장 브랜치명을 안내하고
+    //        실제 생성은 사용자가 Jira 개발 패널의 "브랜치 만들기"에서 대상 레포·base 를 선택해 수행한다.
+    private void postBranchHint(String issueKey, String channelId, String messageTs) {
+        if (channelId == null || messageTs == null) {
+            return;
+        }
+        try {
+            Optional<IssueEntity> found = issueRepository.findByIssueKey(issueKey);
+            String issueType = found.map(IssueEntity::getIssueType).orElse(null);
+            String summary = found.map(IssueEntity::getSummary).orElse(null);
+            String branch = BranchNameBuilder.build(issueType, issueKey, summary);
+            String message = String.format(
+                    ":herb: 브랜치 만들기: <%s|%s> 우측 *개발(Development)* 패널 → \"브랜치 만들기\"\n"
+                            + "권장 브랜치명: `%s`",
+                    issueLink(issueKey), issueKey, branch);
+            slackNotifier.postThreadReply(channelId, messageTs, message);
+        } catch (Exception e) {
+            log.warn("Branch hint failed for {}: {}", issueKey, e.toString());
+        }
+    }
+
+    private String issueLink(String issueKey) {
+        String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl();
+        if (base.isBlank()) {
+            return issueKey;
+        }
+        String trimmed = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        return trimmed + "/browse/" + issueKey;
     }
 
     private void doTransition(String issueKey, String targetStatus, String statusEmoji,

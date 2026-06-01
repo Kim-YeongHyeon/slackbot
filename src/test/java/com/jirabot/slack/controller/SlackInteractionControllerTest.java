@@ -34,6 +34,9 @@ class SlackInteractionControllerTest {
     private final JiraApiClient jiraApiClient = mock(JiraApiClient.class);
     private final SlackNotifier slackNotifier = mock(SlackNotifier.class);
     private final IssueRepository issueRepository = mock(IssueRepository.class);
+    private final com.jirabot.slack.config.JiraProperties jiraProps =
+            new com.jirabot.slack.config.JiraProperties(
+                    "https://test.atlassian.net", "e@test.com", "token", "PROJ", null, null);
     private final Executor directExecutor = Runnable::run;
 
     private SlackInteractionController controller;
@@ -41,7 +44,7 @@ class SlackInteractionControllerTest {
     @BeforeEach
     void setUp() {
         controller = new SlackInteractionController(
-                objectMapper, jiraApiClient, slackNotifier, issueRepository, directExecutor);
+                objectMapper, jiraApiClient, slackNotifier, issueRepository, jiraProps, directExecutor);
     }
 
     private HttpServletRequest mockRequest(String payloadJson) {
@@ -107,6 +110,13 @@ class SlackInteractionControllerTest {
         verify(slackNotifier).updateMessage(eq("C456"), eq("1234567890.123456"),
                 anyString(), blocksCaptor.capture());
         assertThat(blocksCaptor.getValue()).contains("jira_transition_in_review");
+
+        // 진행 중 전환 시 브랜치 만들기 안내(이슈 개발 패널 링크 + 규칙 기반 권장 브랜치명)가 스레드에 게시된다.
+        ArgumentCaptor<String> hintCaptor = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(eq("C456"), eq("1234567890.123456"), hintCaptor.capture());
+        assertThat(hintCaptor.getValue())
+                .contains("feature/PROJ-1-test")
+                .contains("/browse/PROJ-1");
     }
 
     @Test
