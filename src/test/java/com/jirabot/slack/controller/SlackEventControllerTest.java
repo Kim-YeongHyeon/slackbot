@@ -54,6 +54,7 @@ class SlackEventControllerTest {
     private UserMappingRepository userMappingRepository;
     private SlackNotifier slackNotifier;
     private com.jirabot.slack.service.ReminderSubscriptionService reminderSubscriptionService;
+    private com.jirabot.slack.service.BugNotionService bugNotionService;
     private SlackEventController controller;
     private MockMvc mockMvc;
 
@@ -73,6 +74,7 @@ class SlackEventControllerTest {
         userMappingRepository = mock(UserMappingRepository.class);
         slackNotifier = mock(SlackNotifier.class);
         reminderSubscriptionService = mock(com.jirabot.slack.service.ReminderSubscriptionService.class);
+        bugNotionService = mock(com.jirabot.slack.service.BugNotionService.class);
         Executor directExecutor = Runnable::run;
         SlackEventDeduplicator deduplicator = new SlackEventDeduplicator();
         controller = new SlackEventController(
@@ -80,7 +82,7 @@ class SlackEventControllerTest {
                 jiraSyncService, jiraApiClient, jiraProps, issueRepository, intentClassifier,
                 threadActionClassifier, intentFailureRepository,
                 userMappingRepository, slackNotifier,
-                directExecutor, deduplicator, reminderSubscriptionService, "C1,C2");
+                directExecutor, deduplicator, reminderSubscriptionService, bugNotionService, "C1,C2");
         mockMvc = standaloneSetup(controller).build();
     }
 

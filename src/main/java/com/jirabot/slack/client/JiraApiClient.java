@@ -59,4 +59,14 @@ public interface JiraApiClient {
      * Append text to an existing issue's description.
      */
     void appendDescription(String issueKey, String additionalText);
+
+    /**
+     * JQL 로 이슈를 조회한다(페이지네이션 포함). 버그 백필 등 범용 검색용.
+     */
+    List<SprintIssue> searchByJql(String jql);
+
+    /**
+     * 이슈의 댓글 본문 목록을 조회한다(오래된 순). 버그 해결 요약 입력용.
+     */
+    List<String> getComments(String issueKey);
 }

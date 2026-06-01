@@ -3,6 +3,7 @@ package com.jirabot.slack.client;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jirabot.slack.client.dto.BugResolutionSummary;
 import com.jirabot.slack.client.dto.IntentResult;
 import com.jirabot.slack.client.dto.IssueClassification;
 import com.jirabot.slack.client.dto.IssueSearchEntry;
@@ -250,6 +251,68 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
             }
         }
         return s;
+    }
+
+    // STUDY: 버그 완료 시 원인/해결 요약. classify 와 동일한 CLI 패턴(Sonnet, --output-format json).
+    static final String RESOLUTION_PROMPT = """
+            You summarize how a software bug was resolved, in Korean.
+            Given a Jira bug's description, its comments, and the Slack thread discussion,
+            extract the root cause and the fix.
+
+            Rules:
+            - cause: 근본 원인을 1-2문장으로. 정보가 부족하면 "정보 부족"이라고 적는다.
+            - fix: 적용된 해결 방법을 1-2문장으로. 불명확하면 "해결 방법 불명확"이라고 적는다.
+            - 추측을 사실처럼 단정하지 말 것. 주어진 텍스트에 근거.
+
+            You MUST respond with ONLY a valid JSON object: {"cause":"...","fix":"..."}
+            No markdown fences. No prose. JSON.parse-able only.
+            """;
+
+    @Override
+    public BugResolutionSummary summarizeBugResolution(String issueKey, String description,
+                                                       List<String> comments, List<String> threadMessages) {
+        try {
+            StringBuilder sb = new StringBuilder(RESOLUTION_PROMPT);
+            sb.append("\n\n---\nISSUE: ").append(issueKey == null ? "" : issueKey).append("\n");
+            sb.append("DESCRIPTION:\n").append(description == null || description.isBlank() ? "(none)" : description).append("\n\n");
+            sb.append("COMMENTS:\n");
+            if (comments == null || comments.isEmpty()) {
+                sb.append("(none)\n");
+            } else {
+                for (String c : comments) {
+                    sb.append("- ").append(c).append("\n");
+                }
+            }
+            sb.append("\nSLACK THREAD:\n");
+            if (threadMessages == null || threadMessages.isEmpty()) {
+                sb.append("(none)\n");
+            } else {
+                for (String m : threadMessages) {
+                    sb.append("- ").append(m).append("\n");
+                }
+            }
+
+            ProcessRunner.Result result = processRunner.run(
+                    buildCommand(), sb.toString(), Duration.ofSeconds(props.timeoutSeconds()));
+            if (result.timedOut() || result.exitCode() != 0
+                    || result.stdout() == null || result.stdout().isBlank()) {
+                log.warn("Claude resolution summary failed for {} (timeout={}, exit={})",
+                        issueKey, result.timedOut(), result.exitCode());
+                return BugResolutionSummary.fallback();
+            }
+            JsonNode envelope = objectMapper.readTree(result.stdout());
+            if (envelope.path("is_error").asBoolean(false)) {
+                return BugResolutionSummary.fallback();
+            }
+            String inner = envelope.path("result").asText("");
+            if (inner.isBlank()) {
+                return BugResolutionSummary.fallback();
+            }
+            return objectMapper.readValue(stripToJsonObject(inner), BugResolutionSummary.class);
+        } catch (Exception e) {
+            log.warn("Claude resolution summary error for {}: {}", issueKey, e.toString());
+            return BugResolutionSummary.fallback();
+        }
     }
 
     private List<String> buildCommand() {

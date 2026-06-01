@@ -446,4 +446,84 @@ public class JiraApiClientImpl implements JiraApiClient {
                                 Map.of("type", "text", "text",
                                         "Classified as " + c.type() + " · Story Point " + c.storyPoint())))));
     }
+
+    // STUDY: 새 Jira Cloud 검색 엔드포인트 /rest/api/3/search/jql 사용(구 /search 는 deprecated).
+    //        nextPageToken 기반 페이지네이션. guard 로 무한 루프 방지(최대 50페이지).
+    @Override
+    public List<SprintIssue> searchByJql(String jql) {
+        List<SprintIssue> result = new ArrayList<>();
+        String nextToken = null;
+        int guard = 0;
+        try {
+            do {
+                final String token = nextToken;
+                String json = jiraWebClient.get()
+                        .uri(uri -> {
+                            uri.path("/rest/api/3/search/jql")
+                                    .queryParam("jql", jql)
+                                    .queryParam("fields", sprintFields)
+                                    .queryParam("maxResults", 100);
+                            if (token != null) {
+                                uri.queryParam("nextPageToken", token);
+                            }
+                            return uri.build();
+                        })
+                        .retrieve().bodyToMono(String.class).block();
+                JsonNode root = objectMapper.readTree(json);
+                for (JsonNode issue : root.path("issues")) {
+                    result.add(parseSprintIssue(issue));
+                }
+                JsonNode tokenNode = root.path("nextPageToken");
+                nextToken = (tokenNode.isMissingNode() || tokenNode.isNull()) ? null : tokenNode.asText(null);
+                guard++;
+            } while (nextToken != null && guard < 50);
+            log.info("JQL search returned {} issues for '{}'", result.size(), jql);
+        } catch (Exception e) {
+            log.error("JQL search failed '{}': {}", jql, e.toString());
+        }
+        return result;
+    }
+
+    @Override
+    public List<String> getComments(String issueKey) {
+        List<String> out = new ArrayList<>();
+        try {
+            String json = jiraWebClient.get()
+                    .uri("/rest/api/3/issue/{key}/comment?maxResults=50&orderBy=created", issueKey)
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode comments = objectMapper.readTree(json).path("comments");
+            for (JsonNode c : comments) {
+                String text = extractAdfText(c.path("body"));
+                if (!text.isEmpty()) {
+                    out.add(text);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch comments for {}: {}", issueKey, e.toString());
+        }
+        return out;
+    }
+
+    // STUDY: Atlassian Document Format(ADF) 은 중첩 content 트리. text 노드만 재귀 수집해 평문화한다.
+    private static String extractAdfText(JsonNode node) {
+        StringBuilder sb = new StringBuilder();
+        collectAdfText(node, sb);
+        return sb.toString().replaceAll("\\s+", " ").strip();
+    }
+
+    private static void collectAdfText(JsonNode node, StringBuilder sb) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return;
+        }
+        JsonNode text = node.path("text");
+        if (text.isTextual()) {
+            sb.append(text.asText()).append(' ');
+        }
+        JsonNode content = node.path("content");
+        if (content.isArray()) {
+            for (JsonNode child : content) {
+                collectAdfText(child, sb);
+            }
+        }
+    }
 }

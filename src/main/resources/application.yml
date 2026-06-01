@@ -61,6 +61,16 @@ jira:
     # STATUS | STATUS_CATEGORY | DONE_ONLY | STATUS_AND_ASSIGNEE
     notify-on: ${JIRA_WEBHOOK_NOTIFY_ON:STATUS_AND_ASSIGNEE}
 
+# Notion 연동 — 버그 해결 기록(resolution-db) + 버그 현황(status-db).
+# token 이 비어 있으면 기능 비활성(앱 기동에는 영향 없음).
+notion:
+  enabled: ${NOTION_ENABLED:true}
+  token: ${NOTION_TOKEN:}
+  version: ${NOTION_VERSION:2022-06-28}
+  parent-page-id: ${NOTION_PARENT_PAGE_ID:}
+  resolution-db-id: ${NOTION_DATABASE_ID:}
+  status-db-id: ${NOTION_STATUS_DB_ID:}
+
 # 봇 응답 메시지의 알림 정책.
 notify:
   # MENTION (기본) — <@USER> 형식으로 Slack 알림 발송
