@@ -82,6 +82,20 @@ class SlackEventControllerTest {
         mockMvc = standaloneSetup(controller).build();
     }
 
+    // STUDY: 컨트롤러의 stale 가드(now - ts > 180s)를 통과하려면 이벤트 ts가 "현재"여야 한다.
+    //        과거 고정값(예: "1.0" = 1970년)을 쓰면 모든 라우팅이 stale로 차단된다.
+    private static String freshTs() {
+        return java.time.Instant.now().getEpochSecond() + ".000000";
+    }
+
+    // STUDY: app_mention 이벤트 JSON 빌더 — text/ts만 바뀌므로 한 곳에 모은다.
+    private static String appMentionEvent(String text, String ts) {
+        return """
+                {"type":"event_callback","event":{
+                    "type":"app_mention","user":"U1","text":"%s","channel":"C1","ts":"%s"}}
+                """.formatted(text, ts);
+    }
+
     @Test
     void urlVerification_returnsChallenge() throws Exception {
         String body = "{\"type\":\"url_verification\",\"challenge\":\"abc123\"}";
@@ -101,10 +115,7 @@ class SlackEventControllerTest {
                 .thenReturn(new IntentResult("register_bug", 0.95, Map.of(), "버그있음"));
         when(issueCreateService.createFromSlackText(any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(IssueCreateResult.ok("P-1", "u")));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그있음","channel":"C1","ts":"1.0"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그있음", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -149,10 +160,7 @@ class SlackEventControllerTest {
     void scrumCommand_dispatchesToScrumService() throws Exception {
         when(scrumReportService.generateReport())
                 .thenReturn(CompletableFuture.completedFuture("리포트"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> scrum","channel":"C1","ts":"1.0"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> scrum", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -166,10 +174,7 @@ class SlackEventControllerTest {
 
     @Test
     void helpCommand_sendsHelpText() throws Exception {
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> help","channel":"C1","ts":"1.0"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> help", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -184,10 +189,7 @@ class SlackEventControllerTest {
     void myWorkCommand_dispatchesToMyReport() throws Exception {
         when(scrumReportService.generateMyReport(any()))
                 .thenReturn(CompletableFuture.completedFuture("내 작업"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 내작업","channel":"C1","ts":"1.0"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 내작업", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -203,10 +205,7 @@ class SlackEventControllerTest {
     @Test
     void bugCommand_exact_queriesResolvedBugs() throws Exception {
         when(bugQueryService.queryResolvedBugs(any())).thenReturn(CompletableFuture.completedFuture("결과"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그","channel":"C1","ts":"2.0"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -220,10 +219,7 @@ class SlackEventControllerTest {
     @Test
     void bugQueryCommand_exact_queriesResolvedBugs() throws Exception {
         when(bugQueryService.queryResolvedBugs(any())).thenReturn(CompletableFuture.completedFuture("결과"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그조회","channel":"C1","ts":"2.1"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그조회", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -236,10 +232,7 @@ class SlackEventControllerTest {
     @Test
     void bugEnglishCommand_queriesResolvedBugs() throws Exception {
         when(bugQueryService.queryResolvedBugs(any())).thenReturn(CompletableFuture.completedFuture("결과"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> bug","channel":"C1","ts":"2.2"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> bug", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -252,10 +245,7 @@ class SlackEventControllerTest {
     @Test
     void bugWithDate_queriesResolvedBugsWithCorrectDate() throws Exception {
         when(bugQueryService.queryResolvedBugs(any())).thenReturn(CompletableFuture.completedFuture("결과"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그 2026.03.11","channel":"C1","ts":"2.3"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그 2026.03.11", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -273,10 +263,7 @@ class SlackEventControllerTest {
                 .thenReturn(new IntentResult("register_bug", 0.95, Map.of(), "버그 발생했어요"));
         when(issueCreateService.createFromSlackText(any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(IssueCreateResult.ok("P-1", "u")));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그 발생했어요","channel":"C1","ts":"2.4"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그 발생했어요", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -294,10 +281,7 @@ class SlackEventControllerTest {
         when(bugQueryService.queryResolvedBugs(any()))
                 .thenReturn(CompletableFuture.completedFuture(":bug: 결과"));
 
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그","channel":"C1","ts":"2.5"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -315,10 +299,7 @@ class SlackEventControllerTest {
         when(bugQueryService.queryResolvedBugs(any()))
                 .thenReturn(CompletableFuture.completedFuture("결과"));
 
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그","channel":"C1","ts":"2.6"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -337,10 +318,7 @@ class SlackEventControllerTest {
         when(bugQueryService.queryResolvedBugs(any()))
                 .thenReturn(CompletableFuture.completedFuture("결과"));
 
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그 2026.13.40","channel":"C1","ts":"2.7"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그 2026.13.40", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -356,10 +334,7 @@ class SlackEventControllerTest {
     void bugQuery_dashDateFormat_parsesCorrectly() throws Exception {
         when(bugQueryService.queryResolvedBugs(any()))
                 .thenReturn(CompletableFuture.completedFuture("결과"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그 2026-03-11","channel":"C1","ts":"2.8"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그 2026-03-11", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -375,10 +350,7 @@ class SlackEventControllerTest {
     void bugQuery_slashDateFormat_parsesCorrectly() throws Exception {
         when(bugQueryService.queryResolvedBugs(any()))
                 .thenReturn(CompletableFuture.completedFuture("결과"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 버그 2026/03/11","channel":"C1","ts":"2.9"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 버그 2026/03/11", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -394,10 +366,7 @@ class SlackEventControllerTest {
     void searchCommand_withKeyword_callsSearchService() throws Exception {
         when(issueSearchService.searchByKeyword("로그인"))
                 .thenReturn(CompletableFuture.completedFuture(":mag: \"로그인\" 검색 결과 (1건)"));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 검색 로그인","channel":"C1","ts":"1.0"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 검색 로그인", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -410,10 +379,8 @@ class SlackEventControllerTest {
 
     @Test
     void searchCommand_withoutKeyword_sendsGuidance() throws Exception {
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 검색","channel":"C1","ts":"1.0"}}
-                """;
+        String ts = freshTs();
+        String body = appMentionEvent("<@U0BOT> 검색", ts);
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -421,17 +388,14 @@ class SlackEventControllerTest {
                 .andExpect(status().isOk());
 
         verify(issueRepository, never()).searchByKeyword(any(), any());
-        verify(slackNotifier).postThreadReply("C1", "1.0", ":mag: 검색어를 입력해주세요. 예: `@지라 검색 로그인`");
+        verify(slackNotifier).postThreadReply("C1", ts, ":mag: 검색어를 입력해주세요. 예: `@지라 검색 로그인`");
     }
 
     @Test
     void searchCommand_english_callsSearchService() throws Exception {
         when(issueSearchService.searchByKeyword("login"))
                 .thenReturn(CompletableFuture.completedFuture(":mag: \"login\" 검색 결과가 없습니다."));
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> search login","channel":"C1","ts":"1.0"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> search login", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -448,10 +412,7 @@ class SlackEventControllerTest {
         when(issueSearchService.searchSemantic(any(), any()))
                 .thenReturn(CompletableFuture.completedFuture(":mag: \"로그인 에러 관련 이슈 알려줘\" 검색 결과 (1건)\n• SLAC-7"));
 
-        String body = """
-                {"type":"event_callback","event":{
-                    "type":"app_mention","user":"U1","text":"<@U0BOT> 로그인 에러 관련 이슈 알려줘","channel":"C1","ts":"1.0"}}
-                """;
+        String body = appMentionEvent("<@U0BOT> 로그인 에러 관련 이슈 알려줘", freshTs());
 
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)

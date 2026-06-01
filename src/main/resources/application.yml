@@ -32,7 +32,7 @@ slack:
 # 별도 API Key 불필요 (구독 계정 재사용). CLI 인증은 `claude login` 으로 사전 수행.
 claude:
   cli-path: ${CLAUDE_CLI_PATH:claude}
-  model: claude-sonnet-4-5
+  model: claude-sonnet-4-6
   timeout-seconds: 60
   permission-mode: plan
   max-turns: 1

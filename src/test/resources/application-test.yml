@@ -18,7 +18,7 @@ claude:
   # /bin/true = 컨텍스트 부팅 시 실제 claude 바이너리가 설치되어 있지 않아도 통과.
   # 실제 동작 테스트는 ProcessRunner 를 Mockito mock 으로 주입하여 수행.
   cli-path: /bin/true
-  model: claude-sonnet-4-5
+  model: claude-sonnet-4-6
   timeout-seconds: 5
   permission-mode: plan
   max-turns: 1
