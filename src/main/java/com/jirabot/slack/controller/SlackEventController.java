@@ -17,6 +17,7 @@ import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
+import com.jirabot.slack.service.BugNotionService;
 import com.jirabot.slack.service.BugQueryService;
 import com.jirabot.slack.service.IssueCreateService;
 import com.jirabot.slack.service.IssueSearchService;
@@ -63,6 +64,7 @@ public class SlackEventController {
               `@지라 등록 <Jira 사용자명>` — 내 Slack ↔ Jira 계정 연결
               `@지라 검색 <키워드>` — 이슈 제목/설명으로 검색 (예: `@지라 검색 preset`)
               `@지라 리마인더 on` / `off` / `상태` — 평일 09:00 미해결 이슈 DM 알림 토글
+              `@지라 notion백필` — Jira 전체 버그를 Notion '버그 현황' DB로 동기화
               `@지라 버그` — 최근 7일간 해결된 버그 조회
               `@지라 버그 2026.03.11` — 특정 날짜 이후 해결된 버그 조회
               `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
@@ -106,6 +108,7 @@ public class SlackEventController {
     private final Executor slackExecutor;
     private final SlackEventDeduplicator deduplicator;
     private final ReminderSubscriptionService reminderSubscriptionService;
+    private final BugNotionService bugNotionService;
     private final Set<String> allowedChannels;
 
     public SlackEventController(IssueCreateService issueCreateService,
@@ -124,6 +127,7 @@ public class SlackEventController {
                                 @Qualifier(AsyncConfig.SLACK_EXECUTOR) Executor slackExecutor,
                                 SlackEventDeduplicator deduplicator,
                                 ReminderSubscriptionService reminderSubscriptionService,
+                                BugNotionService bugNotionService,
                                 @Value("${slack.allowed-channels:}") String allowedChannelsConfig) {
         this.issueCreateService = issueCreateService;
         this.issueSearchService = issueSearchService;
@@ -141,6 +145,7 @@ public class SlackEventController {
         this.slackExecutor = slackExecutor;
         this.deduplicator = deduplicator;
         this.reminderSubscriptionService = reminderSubscriptionService;
+        this.bugNotionService = bugNotionService;
         // STUDY: 허용 채널이 비어있으면 모든 채널 허용. 쉼표 구분으로 파싱.
         if (allowedChannelsConfig == null || allowedChannelsConfig.isBlank()) {
             this.allowedChannels = Set.of();
@@ -235,6 +240,10 @@ public class SlackEventController {
         if (lower.startsWith("리마인더 ") || lower.startsWith("reminder ")) {
             String arg = cleaned.substring(cleaned.indexOf(' ') + 1).strip().toLowerCase();
             handleReminder(event, arg);
+            return;
+        }
+        if (lower.equals("notion백필") || lower.equals("notion sync") || lower.equals("노션백필")) {
+            handleNotionBackfill(event);
             return;
         }
         if (lower.equals("검색") || lower.equals("search")) {
@@ -619,6 +628,24 @@ public class SlackEventController {
             default -> ":warning: 사용법: `@지라 리마인더 on` / `off` / `상태`";
         };
         replyThread(event, result);
+    }
+
+    // STUDY: Jira 전체 버그를 Notion '버그 현황' DB 로 백필. 건수가 많아 비동기로 실행하고 결과만 회신.
+    private void handleNotionBackfill(SlackEventInner event) {
+        if (!bugNotionService.enabled()) {
+            replyThread(event, ":warning: Notion 연동이 비활성 상태입니다. (NOTION_TOKEN 확인)");
+            return;
+        }
+        replyThread(event, ":hourglass_flowing_sand: 버그 현황을 Notion에 백필 중입니다…");
+        slackExecutor.execute(() -> {
+            try {
+                int count = bugNotionService.backfillStatusDb();
+                replyThread(event, String.format(":notebook: 버그 현황 백필 완료 — %d건 정리했습니다.", count));
+            } catch (Exception e) {
+                log.error("Notion backfill failed: {}", e.toString());
+                replyThread(event, ":x: 백필 중 오류가 발생했어요.");
+            }
+        });
     }
 
     private void handleMemberWork(SlackEventInner event, String memberName) {

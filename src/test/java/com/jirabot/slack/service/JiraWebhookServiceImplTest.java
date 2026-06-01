@@ -40,6 +40,7 @@ class JiraWebhookServiceImplTest {
     private ProcessedJiraChangelogRepository processedRepo;
     private SlackNotifier slackNotifier;
     private JiraStatusCategoryResolver resolver;
+    private com.jirabot.slack.service.BugNotionService bugNotionService;
     private JiraWebhookServiceImpl service;
 
     @BeforeEach
@@ -49,6 +50,7 @@ class JiraWebhookServiceImplTest {
         processedRepo = mock(ProcessedJiraChangelogRepository.class);
         slackNotifier = mock(SlackNotifier.class);
         resolver = new JiraStatusCategoryResolver();
+        bugNotionService = mock(com.jirabot.slack.service.BugNotionService.class);
     }
 
     private void rebuild(NotifyTrigger trigger, MentionMode mentionMode) {
@@ -58,7 +60,8 @@ class JiraWebhookServiceImplTest {
                 "https://cryptolab.atlassian.net", "u@x", "t", "ES2",
                 "customfield_10036", new JiraProperties.IssueTypes("Bug", "Task", "Sub-task"));
         service = new JiraWebhookServiceImpl(new ObjectMapper(), issueRepository,
-                userMappingRepository, processedRepo, slackNotifier, props, notify, jiraProps, resolver);
+                userMappingRepository, processedRepo, slackNotifier, props, notify, jiraProps, resolver,
+                bugNotionService);
     }
 
     private IssueEntity botIssue() {

@@ -46,6 +46,7 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
     private final NotifyProperties notifyProps;
     private final JiraProperties jiraProps;
     private final JiraStatusCategoryResolver resolver;
+    private final BugNotionService bugNotionService;
 
     public JiraWebhookServiceImpl(ObjectMapper objectMapper,
                                   IssueRepository issueRepository,
@@ -55,7 +56,8 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
                                   JiraWebhookProperties webhookProps,
                                   NotifyProperties notifyProps,
                                   JiraProperties jiraProps,
-                                  JiraStatusCategoryResolver resolver) {
+                                  JiraStatusCategoryResolver resolver,
+                                  BugNotionService bugNotionService) {
         this.objectMapper = objectMapper;
         this.issueRepository = issueRepository;
         this.userMappingRepository = userMappingRepository;
@@ -65,6 +67,7 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
         this.notifyProps = notifyProps;
         this.jiraProps = jiraProps;
         this.resolver = resolver;
+        this.bugNotionService = bugNotionService;
     }
 
     @Override
@@ -119,6 +122,10 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
                 slackNotifier.postThreadReply(issue.getSlackChannel(), issue.getSlackThreadTs(), message);
                 applyIssueUpdate(root, issue);
                 log.info("Webhook notified key={} changelogId={}", issueKey, changelogId);
+
+                // STUDY: 버그의 상태 변경이면 Notion 현황 DB 를 동기화하고, 완료로 전환된 경우 해결 기록 DB 도 적재한다.
+                //        Notion 비활성/실패는 enabled() 가드 + 내부 try-catch 로 본 흐름을 깨지 않는다.
+                syncNotionIfBug(issue, items);
             } else {
                 log.debug("Webhook below threshold notify-on={} items={}", webhookProps.notifyOn(), items.size());
             }
@@ -169,6 +176,33 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
             }
         }
         return false;
+    }
+
+    // STUDY: 버그 + 상태 변경일 때만 Notion 동기화. toDone 은 이번 변경에서 "완료 아님 → 완료" 전환인지.
+    private void syncNotionIfBug(IssueEntity issue, List<JiraChangelog> items) {
+        if (!bugNotionService.enabled() || !isBug(issue.getIssueType())) {
+            return;
+        }
+        boolean statusChanged = items.stream().anyMatch(i -> "status".equals(i.field()));
+        if (!statusChanged) {
+            return;
+        }
+        boolean toDone = items.stream().anyMatch(i -> "status".equals(i.field())
+                && resolver.isDone(i.toValue()) && !resolver.isDone(i.fromValue()));
+        try {
+            bugNotionService.syncOnStatusChange(issue, toDone);
+        } catch (Exception e) {
+            log.warn("Notion sync failed key={}: {}", issue.getIssueKey(), e.toString());
+        }
+    }
+
+    private boolean isBug(String issueType) {
+        if (issueType == null) {
+            return false;
+        }
+        String cfg = jiraProps.issueTypes() != null ? jiraProps.issueTypes().bug() : null;
+        return issueType.toLowerCase().contains("버그") || issueType.toLowerCase().contains("bug")
+                || (cfg != null && issueType.equalsIgnoreCase(cfg));
     }
 
     private String buildMessage(JsonNode root, IssueEntity issue, List<JiraChangelog> items) {

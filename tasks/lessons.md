@@ -91,3 +91,25 @@
 - 애매하면 **실제 create/transition 시도가 최종 판정**. 400 이면 무해(생성 안 됨), 201 이면 정리하면 된다 — 한 번의 실측이 추측 한 시간을 이긴다.
 
 **How to apply**: 외부 API 의 허용 여부를 metadata 로 추론하게 되면, 결론 내리기 전에 무해한 실측(샘플 호출, 실패 시 부수효과 없음)을 1회 수행한다. 특히 "이건 안 될 것" 같은 부정 단정 전에.
+
+---
+
+## L7 — JQL 의 issuetype 매칭 이름 ≠ API 응답의 표시명 (L4 의 JQL 판)
+
+**Context**: Notion 백필에서 ES2 버그를 `project = ES2 AND issuetype = "버그"` 로 조회 → **0건**. 그런데
+`project = ES2` 로 받으면 응답의 `issuetype.name` 은 분명 "버그"였고 14/104건 존재했다.
+
+**Mistake**: 응답에 보이는 표시명("버그")이 JQL 매칭에도 통할 거라 가정. 실측 결과:
+- `issuetype = "버그"` → 0
+- `issuetype = Bug` → 매칭됨 (영문 정식명)
+- `issuetype = 10034` → 매칭됨 (id)
+
+즉 한국어 사이트라도 **JQL 이 매칭하는 issuetype 이름은 영문 정식명(또는 id)** 이고, **응답/생성(name) 은 표시명("버그")**. 같은 필드가 문맥마다 다른 값을 요구한다.
+
+**Rule**:
+- JQL 에서 issuetype/상태 등을 **표시명(localized)으로 필터하지 말 것**. 영문 정식명 또는 id 를 쓰거나,
+  더 안전하게는 **필터를 빼고 받아서 응답의 name 으로 클라이언트 필터**(코드가 쓰는 표시명과 일치).
+- 생성(create)·표시는 표시명("버그"), JQL 검색은 정식명("Bug")/id — 둘을 구분해 다룬다.
+
+**How to apply**: Jira 검색 기능을 만들 때 issuetype/status 를 JQL 조건에 표시명으로 넣었다면 1건이라도 실측.
+0건이면 거의 이 함정 — `project=KEY` 전체 조회 후 응답 name 으로 거르는 방식으로 전환.
