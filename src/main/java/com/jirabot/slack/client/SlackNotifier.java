@@ -16,6 +16,16 @@ public interface SlackNotifier {
     void postMessage(String channel, String text);
 
     /**
+     * Slack 사용자에게 DM 을 발송한다.
+     * 내부적으로 conversations.open 으로 IM 채널 ID(D...) 를 받은 뒤 그 채널 ID 로 chat.postMessage 를 보낸다.
+     * 봇 스코프: chat:write + im:write.
+     *
+     * @param userId Slack 사용자 ID (예: U03...)
+     * @param text   메시지 본문
+     */
+    void sendDirectMessage(String userId, String text);
+
+    /**
      * Slack 유저 ID로 실명(real_name)을 조회한다.
      *
      * @param userId Slack 유저 ID (예: U03L1TJ0EBB)

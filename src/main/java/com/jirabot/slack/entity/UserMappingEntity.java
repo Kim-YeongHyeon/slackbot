@@ -27,6 +27,11 @@ public class UserMappingEntity {
 
     private String jiraAccountId;
 
+    // STUDY: 일일 리마인더 DM 수신 여부. 기본 false 로 두고 사용자가 직접 Slack 명령 `리마인더 on` 으로 토글한다.
+    //        ddl-auto=update 환경에서 컬럼이 자동 추가되며, 기존 row 는 false 가 적용된다 (Hibernate boolean → 0/false).
+    @Column(nullable = false)
+    private boolean reminderEnabled = false;
+
     protected UserMappingEntity() {}
 
     public UserMappingEntity(String slackUserId, String slackDisplayName, String jiraDisplayName) {
@@ -48,6 +53,7 @@ public class UserMappingEntity {
     public String getSlackDisplayName() { return slackDisplayName; }
     public String getJiraDisplayName() { return jiraDisplayName; }
     public String getJiraAccountId() { return jiraAccountId; }
+    public boolean isReminderEnabled() { return reminderEnabled; }
 
     public void setJiraDisplayName(String jiraDisplayName) {
         this.jiraDisplayName = jiraDisplayName;
@@ -59,5 +65,9 @@ public class UserMappingEntity {
 
     public void setJiraAccountId(String jiraAccountId) {
         this.jiraAccountId = jiraAccountId;
+    }
+
+    public void setReminderEnabled(boolean reminderEnabled) {
+        this.reminderEnabled = reminderEnabled;
     }
 }

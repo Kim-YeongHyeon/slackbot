@@ -140,8 +140,8 @@ class ClaudeApiClientImplTest {
 
     private List<IssueSearchEntry> sampleIssues() {
         return List.of(
-                new IssueSearchEntry("SLAC-7", "로그인 500 에러", "로그인 페이지에서 500 에러", "진행 중", "김영현"),
-                new IssueSearchEntry("SLAC-15", "결제 금액 표시", "결제 완료 후 금액 문제", "완료", "최아록")
+                new IssueSearchEntry("SLAC-7", "로그인 500 에러", "로그인 페이지에서 500 에러", "진행 중", "Alice"),
+                new IssueSearchEntry("SLAC-15", "결제 금액 표시", "결제 완료 후 금액 문제", "완료", "Bob")
         );
     }
 
@@ -229,7 +229,7 @@ class ClaudeApiClientImplTest {
     void buildSearchStdin_formatsCorrectly() {
         String systemPrompt = "test prompt";
         List<IssueSearchEntry> issues = List.of(
-                new IssueSearchEntry("SLAC-7", "로그인 에러", "상세 설명", "진행 중", "김영현"),
+                new IssueSearchEntry("SLAC-7", "로그인 에러", "상세 설명", "진행 중", "Alice"),
                 new IssueSearchEntry("SLAC-8", "UI 개선", null, "할 일", null)
         );
 
@@ -238,7 +238,7 @@ class ClaudeApiClientImplTest {
         assertThat(stdin).contains("[사용자 질문]");
         assertThat(stdin).contains("로그인 문제");
         assertThat(stdin).contains("[이슈 목록]");
-        assertThat(stdin).contains("SLAC-7 | 로그인 에러 | 진행 중 | 담당: 김영현");
+        assertThat(stdin).contains("SLAC-7 | 로그인 에러 | 진행 중 | 담당: Alice");
         assertThat(stdin).contains("설명: 상세 설명");
         assertThat(stdin).contains("SLAC-8 | UI 개선 | 할 일 | 담당: 미배정");
         // No description line for null description

@@ -69,6 +69,13 @@ notify:
   # 같은 이슈의 연속 알림 최소 간격. 0 = 비활성 (§C 단계에서 의미 부여 예정)
   min-interval-seconds: ${NOTIFY_MIN_INTERVAL_SECONDS:0}
 
+# 일일 리마인더 — 사용자별 opt-in 은 Slack 명령 `@봇더지라 리마인더 on` 으로 처리.
+# enabled 는 전역 비상 차단용. 기본 true, 평소 손대지 않는다.
+reminder:
+  enabled: ${REMINDER_ENABLED:true}
+  cron: ${REMINDER_CRON:0 0 9 * * MON-FRI}
+  zone: ${REMINDER_ZONE:Asia/Seoul}
+
 # STUDY: Actuator. /actuator/health = 헬스체크. Phase 1에서는 별도 /health 컨트롤러도 제공.
 management:
   endpoints:
