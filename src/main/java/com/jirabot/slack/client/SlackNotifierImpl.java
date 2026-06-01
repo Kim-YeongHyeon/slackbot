@@ -193,7 +193,7 @@ public class SlackNotifierImpl implements SlackNotifier {
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
-            var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(openResp);
+            var node = objectMapper.readTree(openResp);
             if (!node.path("ok").asBoolean(false)) {
                 log.warn("conversations.open failed for userId={}: {}", userId, node.path("error").asText());
                 return;

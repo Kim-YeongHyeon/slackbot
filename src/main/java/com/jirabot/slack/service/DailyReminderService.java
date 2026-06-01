@@ -4,6 +4,7 @@ import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.config.ReminderProperties;
 import com.jirabot.slack.entity.IssueEntity;
+import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.entity.UserMappingEntity;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
@@ -72,7 +73,7 @@ public class DailyReminderService {
         Map<String, List<IssueEntity>> byAssignee = new HashMap<>();
         if (!assignees.isEmpty()) {
             List<IssueEntity> open = issueRepository
-                    .findByAssigneeInAndStatusCategoryNot(assignees, "완료");
+                    .findByAssigneeInAndStatusCategoryNot(assignees, StatusCategory.DONE);
             for (IssueEntity issue : open) {
                 byAssignee.computeIfAbsent(issue.getAssignee(), k -> new ArrayList<>()).add(issue);
             }
