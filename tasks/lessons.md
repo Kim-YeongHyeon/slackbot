@@ -113,3 +113,29 @@
 
 **How to apply**: Jira 검색 기능을 만들 때 issuetype/status 를 JQL 조건에 표시명으로 넣었다면 1건이라도 실측.
 0건이면 거의 이 함정 — `project=KEY` 전체 조회 후 응답 name 으로 거르는 방식으로 전환.
+
+---
+
+## L8 — `ddl-auto=update` 는 ADD COLUMN 에 DEFAULT 를 안 만든다 → NOT NULL 컬럼 추가가 조용히 실패
+
+**Context**: PR #15 가 `UserMappingEntity` 에 `@Column(nullable=false) boolean reminderEnabled` 추가.
+기존 row 가 있는 `user_mappings` 에 Hibernate 가 `ALTER TABLE ... ADD COLUMN reminder_enabled boolean NOT NULL`
+(DEFAULT 절 없음) 실행 → Postgres 가 거부(`contains null values`). Hibernate 는 이를 **WARN 으로만** 남기고
+앱을 정상 기동 → 컬럼 미생성. 이후 그 컬럼을 SELECT 하는 모든 쿼리가 런타임에 깨짐(이슈 생성 시 매핑 조회 실패).
+
+**Mistake**: 엔티티 STUDY 주석이 "ddl-auto=update 가 컬럼 자동 추가하고 기존 row 는 false 백필된다"고 단정.
+실제로 Hibernate 의 schema update 는 **ALTER ADD COLUMN 에 DEFAULT 를 생성하지 않으며, 마이그레이션 실패를
+치명적 에러로 올리지 않고 WARN 후 계속 기동**한다. "앱이 떴으니 스키마도 맞겠지" 가정이 함정.
+
+**Rule**:
+- `ddl-auto=update` 환경에서 **데이터 있는 테이블에 NOT NULL 컬럼을 추가**할 땐 반드시 엔티티에
+  `@Column(nullable=false, columnDefinition="<type> default <v>")` 로 DEFAULT 를 명시. (boolean → `boolean default false`)
+- 새 컬럼 추가 배포 후엔 **시작 로그에서 `alter table` WARN/ExceptionHandlerLoggedImpl 을 확인**하거나
+  `\d <table>` 로 컬럼 실재 여부를 검증. WARN 은 안 보면 묻힌다.
+- 이미 깨진 운영 DB 복구는 `ALTER TABLE <t> ADD COLUMN IF NOT EXISTS <c> <type> NOT NULL DEFAULT <v>;`
+  (앱 재시작 불필요 — 떠있는 앱 쿼리가 즉시 통과).
+- 근본 해결: `application.yml` 주석대로 Flyway + `ddl-auto=validate`.
+
+**How to apply**: 엔티티에 NOT NULL 컬럼을 추가하는 PR 을 만들거나 리뷰할 때, 대상 테이블에 데이터가 있을 수 있으면
+columnDefinition DEFAULT 가 있는지 먼저 확인. 없으면 이 함정. 그리고 "column does not exist" 런타임 에러는
+스키마 마이그레이션 실패를 1순위로 의심.

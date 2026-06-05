@@ -245,3 +245,4 @@ slackbot/
 | Claude CLI 인증 만료 | `claude login` 재실행 |
 | "이해하지 못했어요" 반복 | `intent_failures` 테이블 확인 (`docker exec jirabot-postgres psql -U jirabot -d jirabot -c "SELECT * FROM intent_failures ORDER BY failed_at DESC LIMIT 10;"`) |
 | 봇이 특정 채널에서 무응답 | `.env`의 `SLACK_ALLOWED_CHANNELS`에 해당 채널 ID 추가 |
+| `column ... does not exist` (예: `reminder_enabled`) | `ddl-auto=update`가 데이터 있는 테이블에 `NOT NULL` 컬럼을 DEFAULT 없이 ADD 하다 실패 → Hibernate가 WARN만 남기고 기동(컬럼 미생성). 엔티티에 `@Column(columnDefinition="... default ...")` 명시. 기존 DB는 `ALTER TABLE <t> ADD COLUMN IF NOT EXISTS <c> <type> NOT NULL DEFAULT <v>;` 수동 적용 |

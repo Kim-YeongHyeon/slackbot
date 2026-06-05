@@ -28,8 +28,11 @@ public class UserMappingEntity {
     private String jiraAccountId;
 
     // STUDY: 일일 리마인더 DM 수신 여부. 기본 false 로 두고 사용자가 직접 Slack 명령 `리마인더 on` 으로 토글한다.
-    //        ddl-auto=update 환경에서 컬럼이 자동 추가되며, 기존 row 는 false 가 적용된다 (Hibernate boolean → 0/false).
-    @Column(nullable = false)
+    //        주의: ddl-auto=update 의 ALTER ADD COLUMN 은 DEFAULT 절을 생성하지 않는다. 데이터가 있는 테이블에
+    //        NOT NULL 컬럼을 추가하면 기존 row 가 null 이 되어 Postgres 가 ALTER 를 거부하고, Hibernate 는 이를
+    //        WARN 으로만 남긴 채 기동한다(컬럼 미생성 → 런타임 쿼리 실패). 그래서 columnDefinition 으로 DEFAULT 를
+    //        명시해 기존 row 백필을 보장한다. (근본 해결은 Flyway + ddl-auto=validate — application.yml 참고.)
+    @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean reminderEnabled = false;
 
     protected UserMappingEntity() {}
