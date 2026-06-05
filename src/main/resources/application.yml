@@ -54,6 +54,7 @@ jira:
     bug: ${JIRA_ISSUE_TYPE_BUG:Bug}
     task: ${JIRA_ISSUE_TYPE_TASK:Task}
     subtask: ${JIRA_ISSUE_TYPE_SUBTASK:Sub-task}
+    epic: ${JIRA_ISSUE_TYPE_EPIC:Epic}
   # Jira → 봇 webhook 수신 설정. secret 이 비어있으면 모든 요청 403.
   webhook:
     enabled: ${JIRA_WEBHOOK_ENABLED:true}

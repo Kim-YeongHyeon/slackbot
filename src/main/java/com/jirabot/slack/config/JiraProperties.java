@@ -19,12 +19,20 @@ public record JiraProperties(
     public record IssueTypes(
             String bug,
             String task,
-            String subtask
+            String subtask,
+            String epic
     ) {
+        // STUDY: 기존 3-인자 호출부(테스트/기본값)를 깨지 않으려는 위임 생성자. Spring @ConfigurationProperties
+        //        는 record 의 canonical(4-인자) 생성자로 바인딩하므로, 추가 생성자가 있어도 바인딩에 영향 없다.
+        public IssueTypes(String bug, String task, String subtask) {
+            this(bug, task, subtask, null);
+        }
+
         public IssueTypes {
             if (bug == null) bug = "Bug";
             if (task == null) task = "Task";
             if (subtask == null) subtask = "Sub-task";
+            if (epic == null) epic = "Epic";
         }
     }
 

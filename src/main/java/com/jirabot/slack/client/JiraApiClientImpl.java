@@ -79,19 +79,30 @@ public class JiraApiClientImpl implements JiraApiClient {
     //        Map으로 빌드하면 동적 필드명을 자유롭게 추가할 수 있다.
     private Map<String, Object> buildRequest(IssueClassification c, String reporterName,
                                              String jiraAccountId) {
-        String issueTypeName = c.type() == IssueClassification.IssueType.BUG
-                ? props.issueTypes().bug() : props.issueTypes().task();
-        List<String> labels = List.of("slackbot", "origin-slack", "sp-" + c.storyPoint(),
-                "claude-" + c.type().name().toLowerCase());
+        // STUDY: 이슈 타입명은 분류에 따라 매핑. EPIC 은 키워드 트리거로만 강제되는 특이 케이스.
+        String issueTypeName = switch (c.type()) {
+            case BUG -> props.issueTypes().bug();
+            case EPIC -> props.issueTypes().epic();
+            default -> props.issueTypes().task();
+        };
+        boolean isEpic = c.type() == IssueClassification.IssueType.EPIC;
 
-        Map<String, Object> fields = new java.util.HashMap<>(Map.of(
-                "project", Map.of("key", props.projectKey()),
-                "summary", c.title(),
-                "issuetype", Map.of("name", issueTypeName),
-                "description", buildAdfDescription(c, reporterName),
-                "labels", labels,
-                props.storyPointField(), (double) c.storyPoint()
-        ));
+        List<String> labels = new java.util.ArrayList<>(List.of(
+                "slackbot", "origin-slack", "claude-" + c.type().name().toLowerCase()));
+
+        Map<String, Object> fields = new java.util.HashMap<>();
+        fields.put("project", Map.of("key", props.projectKey()));
+        fields.put("summary", c.title());
+        fields.put("issuetype", Map.of("name", issueTypeName));
+        fields.put("description", buildAdfDescription(c, reporterName));
+        // STUDY: 에픽은 컨테이너성 이슈라 Story Point 를 부여하지 않는다. 일부 Jira 설정은
+        //        에픽에 SP 커스텀 필드 설정 자체를 거부하므로 필드/라벨 모두 생략한다.
+        if (!isEpic) {
+            labels.add("sp-" + c.storyPoint());
+            fields.put(props.storyPointField(), (double) c.storyPoint());
+        }
+        fields.put("labels", labels);
+
         // STUDY: reporter/assignee는 Jira accountId로 지정. null이면 API 토큰 소유자가 기본값.
         if (jiraAccountId != null) {
             Map<String, String> accountRef = Map.of("accountId", jiraAccountId);
@@ -434,6 +445,10 @@ public class JiraApiClientImpl implements JiraApiClient {
     // STUDY: Jira v3 description은 ADF(Atlassian Document Format) JSON. 최소 구조로 paragraph + codeBlock.
     private Map<String, Object> buildAdfDescription(IssueClassification c, String reporter) {
         String reporterText = "Reported by @" + (reporter == null ? "unknown" : reporter) + " via Slack";
+        // STUDY: 에픽은 SP 가 없으므로 푸터에 SP 를 표기하지 않는다.
+        String classifiedText = c.type() == IssueClassification.IssueType.EPIC
+                ? "Classified as EPIC"
+                : "Classified as " + c.type() + " · Story Point " + c.storyPoint();
         return Map.of(
                 "version", 1,
                 "type", "doc",
@@ -443,8 +458,7 @@ public class JiraApiClientImpl implements JiraApiClient {
                         Map.of("type", "paragraph", "content", List.of(
                                 Map.of("type", "text", "text", c.summary() == null ? "" : c.summary()))),
                         Map.of("type", "paragraph", "content", List.of(
-                                Map.of("type", "text", "text",
-                                        "Classified as " + c.type() + " · Story Point " + c.storyPoint())))));
+                                Map.of("type", "text", "text", classifiedText)))));
     }
 
     // STUDY: 새 Jira Cloud 검색 엔드포인트 /rest/api/3/search/jql 사용(구 /search 는 deprecated).

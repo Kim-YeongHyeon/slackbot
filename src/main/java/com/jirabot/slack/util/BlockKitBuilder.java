@@ -80,6 +80,39 @@ public final class BlockKitBuilder {
     }
 
     /**
+     * 에픽 생성 완료 메시지용 Block Kit JSON을 생성한다.
+     * 에픽은 스프린트 워크플로(해야 할 일/진행 중/완료) 대상이 아니므로 액션 버튼 없이
+     * 정보 Section(+유사 이슈 경고)만 표시하여 일반 스토리/버그 알림과 시각적으로 구별한다.
+     */
+    public static String buildEpicCreatedBlocks(String key, String url,
+                                                IssueClassification classification,
+                                                List<IssueEntity> similar) {
+        ArrayNode blocks = MAPPER.createArrayNode();
+
+        String sectionText = String.format(
+                ":bookmark_tabs: *Epic이 생성되었습니다!*\n*<%s|[%s] %s>*\n분류: EPIC",
+                url, key, classification.title());
+        blocks.add(buildMrkdwnSection(sectionText));
+
+        if (similar != null && !similar.isEmpty()) {
+            StringBuilder warning = new StringBuilder(":warning: *유사한 이슈가 존재합니다:*");
+            for (IssueEntity s : similar) {
+                warning.append("\n  • ")
+                        .append(s.getIssueKey())
+                        .append(" ")
+                        .append(s.getSummary())
+                        .append(" (")
+                        .append(s.getStatus())
+                        .append(")");
+            }
+            warning.append("\n중복이라면 새 이슈를 닫아주세요.");
+            blocks.add(buildMrkdwnSection(warning.toString()));
+        }
+
+        return serialize(blocks);
+    }
+
+    /**
      * 상태 전환 후 다음 단계 버튼을 포함하는 Block Kit JSON을 생성한다.
      * 원본 블록에서 actions를 제거하고, 결과 section + 다음 단계 actions를 추가한다.
      */

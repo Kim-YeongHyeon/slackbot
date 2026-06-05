@@ -81,6 +81,11 @@ public class IssueCreateServiceImpl implements IssueCreateService {
                     command.rawText() == null ? 0 : command.rawText().length(),
                     intentHint != null ? intentHint.intent() : "none");
             IssueClassification classification = claude.classify(command.rawText(), intentHint);
+            // STUDY: 에픽은 `에픽`/`epic` 키워드로만 진입하는 특이 케이스(register_epic). Sonnet 의 BUG/FEATURE
+            //        판단과 SP 추정을 무시하고 EPIC 으로 강제하여 스토리/버그와 확실히 구별한다. 제목/요약은 재사용.
+            if (intentHint != null && "register_epic".equals(intentHint.intent())) {
+                classification = classification.asEpic();
+            }
 
             // 중복 감지: Jira 생성 전에 DB에서 유사 이슈 검색
             List<IssueEntity> similar = duplicateDetection.findSimilar(classification.title());
@@ -125,12 +130,19 @@ public class IssueCreateServiceImpl implements IssueCreateService {
         }
         // STUDY: Block Kit JSON으로 리치 메시지 + 액션 버튼을 전송한다.
         //        text 필드는 Block Kit 미지원 클라이언트용 fallback.
-        String fallbackText = String.format(
-                ":white_check_mark: Jira 이슈가 등록되었습니다! [%s] %s 분류: %s | SP: %d %s",
-                key, classification.title(), classification.type(),
-                classification.storyPoint(), url);
+        //        에픽은 스프린트 워크플로 대상이 아니므로 SP/워크플로 버튼 없이 별도 메시지로 구별한다.
+        boolean isEpic = classification.type() == IssueClassification.IssueType.EPIC;
+        String fallbackText = isEpic
+                ? String.format(":bookmark_tabs: Epic이 생성되었습니다! [%s] %s %s",
+                        key, classification.title(), url)
+                : String.format(
+                        ":white_check_mark: Jira 이슈가 등록되었습니다! [%s] %s 분류: %s | SP: %d %s",
+                        key, classification.title(), classification.type(),
+                        classification.storyPoint(), url);
 
-        String blocksJson = BlockKitBuilder.buildIssueCreatedBlocks(key, url, classification, similar);
+        String blocksJson = isEpic
+                ? BlockKitBuilder.buildEpicCreatedBlocks(key, url, classification, similar)
+                : BlockKitBuilder.buildIssueCreatedBlocks(key, url, classification, similar);
 
         slackNotifier.postBlockMessage(command.channel(), command.eventTs(), fallbackText, blocksJson);
     }
@@ -179,8 +191,11 @@ public class IssueCreateServiceImpl implements IssueCreateService {
     private void saveToDb(String issueKey, IssueClassification c, String reporter,
                           IssueCreateCommand command) {
         try {
-            String issueType = c.type() == IssueClassification.IssueType.BUG
-                    ? jiraProps.issueTypes().bug() : jiraProps.issueTypes().task();
+            String issueType = switch (c.type()) {
+                case BUG -> jiraProps.issueTypes().bug();
+                case EPIC -> jiraProps.issueTypes().epic();
+                default -> jiraProps.issueTypes().task();
+            };
             // STUDY: 새로 생성된 이슈의 초기 상태는 "Backlog". Kanban Backlog Managing에 배치됨.
             IssueEntity entity = new IssueEntity(
                     issueKey, c.title(), issueType, "Backlog", StatusCategory.TODO,

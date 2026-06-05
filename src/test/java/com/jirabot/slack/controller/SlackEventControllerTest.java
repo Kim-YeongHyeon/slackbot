@@ -480,6 +480,70 @@ class SlackEventControllerTest {
         verify(slackNotifier).postThreadReply(any(), any(), any());
     }
 
+    // --- Epic creation routing ---
+
+    @Test
+    void epicKeyword_routesToEpicCreation_bypassingHaiku() throws Exception {
+        when(issueCreateService.createFromSlackText(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(IssueCreateResult.ok("ES2-9", "u")));
+        String body = appMentionEvent("<@U0BOT> 에픽 GCP marketplace 배포 확장", freshTs());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<IntentResult> intentCaptor = ArgumentCaptor.forClass(IntentResult.class);
+        verify(issueCreateService).createFromSlackText(any(), intentCaptor.capture());
+        assertThat(intentCaptor.getValue().intent()).isEqualTo("register_epic");
+        // 결정적 경로 — Haiku 분류를 거치지 않아야 한다.
+        verify(intentClassifier, never()).classify(any());
+    }
+
+    @Test
+    void englishEpicKeyword_routesToEpicCreation() throws Exception {
+        when(issueCreateService.createFromSlackText(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(IssueCreateResult.ok("ES2-9", "u")));
+        String body = appMentionEvent("<@U0BOT> create an epic for billing revamp", freshTs());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        verify(issueCreateService).createFromSlackText(any(), any());
+        verify(intentClassifier, never()).classify(any());
+    }
+
+    @Test
+    void nonEpicText_doesNotRouteToEpic_fallsThroughToHaiku() throws Exception {
+        when(intentClassifier.classify(any()))
+                .thenReturn(new IntentResult("register_bug", 0.95, Map.of(), "로그인 버그"));
+        when(issueCreateService.createFromSlackText(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(IssueCreateResult.ok("P-1", "u")));
+        String body = appMentionEvent("<@U0BOT> 로그인 버그 있어요", freshTs());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        // 에픽 키워드 없음 → Haiku 분류로 진행
+        verify(intentClassifier).classify(any());
+    }
+
+    @Test
+    void containsEpicKeyword_detectsWordBoundaries() {
+        assertThat(SlackEventController.containsEpicKeyword("에픽 만들어줘")).isTrue();
+        assertThat(SlackEventController.containsEpicKeyword("에픽을 추가해줘")).isTrue();
+        assertThat(SlackEventController.containsEpicKeyword("create epic for X")).isTrue();
+        assertThat(SlackEventController.containsEpicKeyword("EPIC 배포 확장")).isTrue();
+        assertThat(SlackEventController.containsEpicKeyword("로그인 버그 있어요")).isFalse();
+        assertThat(SlackEventController.containsEpicKeyword("epicenter 측정")).isFalse();
+        assertThat(SlackEventController.containsEpicKeyword(null)).isFalse();
+        assertThat(SlackEventController.containsEpicKeyword("")).isFalse();
+    }
+
     @Test
     void appMention_stripsMentionTag() {
         // "<@U0AT5U95C4T> 로그인 에러" → "로그인 에러"

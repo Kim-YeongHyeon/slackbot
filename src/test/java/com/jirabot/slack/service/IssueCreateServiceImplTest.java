@@ -15,6 +15,7 @@ import com.jirabot.slack.client.ClaudeApiClient;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.JiraApiException;
 import com.jirabot.slack.client.SlackNotifier;
+import com.jirabot.slack.client.dto.IntentResult;
 import com.jirabot.slack.client.dto.IssueClassification;
 import com.jirabot.slack.client.dto.JiraCreateResponse;
 import com.jirabot.slack.config.JiraProperties;
@@ -24,9 +25,11 @@ import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
 import com.jirabot.slack.service.DuplicateDetectionService;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 class IssueCreateServiceImplTest {
 
@@ -136,6 +139,31 @@ class IssueCreateServiceImplTest {
         // Should NOT call Claude classify or Jira API
         verify(claude, never()).classify(anyString(), any());
         verify(jira, never()).createIssue(any(), anyString(), any());
+    }
+
+    @Test
+    void registerEpicIntent_forcesEpicTypeAndZeroStoryPoint() throws Exception {
+        when(userMappingRepository.findBySlackUserId("U_E"))
+                .thenReturn(Optional.of(new UserMappingEntity("U_E", "Kim", "김영현")));
+
+        // Sonnet 이 FEATURE/SP5 로 분류해도 register_epic 의도면 EPIC/SP0 으로 강제되어야 한다.
+        var sonnet = new IssueClassification(
+                IssueClassification.IssueType.FEATURE, 5, "GCP 배포 확장", "요약");
+        when(claude.classify(anyString(), any())).thenReturn(sonnet);
+        when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
+        when(jira.createIssue(any(), anyString(), any()))
+                .thenReturn(new JiraCreateResponse("10009", "PROJ-9", "https://..."));
+
+        var intent = new IntentResult("register_epic", 1.0, Map.of(), "에픽 GCP 배포 확장");
+        var cmd = new IssueCreateCommand("에픽 GCP 배포 확장", "U_E", "C1", "1.0");
+        var result = service.createFromSlackText(cmd, intent).get();
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<IssueClassification> cap = ArgumentCaptor.forClass(IssueClassification.class);
+        verify(jira).createIssue(cap.capture(), anyString(), any());
+        assertThat(cap.getValue().type()).isEqualTo(IssueClassification.IssueType.EPIC);
+        assertThat(cap.getValue().storyPoint()).isZero();
+        assertThat(cap.getValue().title()).isEqualTo("GCP 배포 확장");
     }
 
     @Test

@@ -78,6 +78,48 @@ class BlockKitBuilderTest {
     }
 
     @Test
+    void buildEpicCreatedBlocks_hasNoActionButtons() throws Exception {
+        var classification = new IssueClassification(
+                IssueClassification.IssueType.EPIC, 0, "GCP marketplace 배포 확장", "summary");
+
+        String json = BlockKitBuilder.buildEpicCreatedBlocks(
+                "ES2-50", "https://jira.example.com/browse/ES2-50",
+                classification, List.of());
+
+        JsonNode blocks = mapper.readTree(json);
+        // 에픽은 정보 Section 1개만 — 워크플로 버튼 없음
+        assertThat(blocks.size()).isEqualTo(1);
+        for (JsonNode block : blocks) {
+            assertThat(block.path("type").asText()).isNotEqualTo("actions");
+        }
+        String text = blocks.get(0).path("text").path("text").asText();
+        assertThat(text).contains("ES2-50");
+        assertThat(text).contains("EPIC");
+        assertThat(text).contains("GCP marketplace 배포 확장");
+    }
+
+    @Test
+    void buildEpicCreatedBlocks_withSimilar_includesWarningButStillNoButtons() throws Exception {
+        var classification = new IssueClassification(
+                IssueClassification.IssueType.EPIC, 0, "결제 개편", "summary");
+        IssueEntity similar = new IssueEntity("ES2-10", "결제 리팩토링", "에픽",
+                "진행 중", "진행 중", null, 0.0, "reporter", "desc",
+                Instant.now(), Instant.now());
+
+        String json = BlockKitBuilder.buildEpicCreatedBlocks(
+                "ES2-51", "https://jira.example.com/browse/ES2-51",
+                classification, List.of(similar));
+
+        JsonNode blocks = mapper.readTree(json);
+        // 정보 Section + 유사 경고 Section = 2, 액션 블록은 없음
+        assertThat(blocks.size()).isEqualTo(2);
+        for (JsonNode block : blocks) {
+            assertThat(block.path("type").asText()).isNotEqualTo("actions");
+        }
+        assertThat(blocks.get(1).path("text").path("text").asText()).contains("ES2-10");
+    }
+
+    @Test
     void buildTransitionedBlocks_includesNextButton() throws Exception {
         String json = BlockKitBuilder.buildTransitionedBlocks(
                 "PROJ-1", ":clipboard:", "해야 할 일", "testuser",

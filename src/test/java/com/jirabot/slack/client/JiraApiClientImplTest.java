@@ -49,6 +49,26 @@ class JiraApiClientImplTest {
     }
 
     @Test
+    void createIssue_epic_usesEpicTypeAndOmitsStoryPoint() throws Exception {
+        server.enqueue(new MockResponse()
+                .setResponseCode(201)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody("{\"id\":\"10009\",\"key\":\"PROJ-9\",\"self\":\"https://j/r/PROJ-9\"}"));
+
+        // props 기본값이므로 epic 타입명은 "Epic", SP 필드는 customfield_10036
+        client.createIssue(
+                new IssueClassification(IssueClassification.IssueType.EPIC, 0, "GCP 배포 확장", "summary"),
+                "U1", null);
+
+        String body = server.takeRequest().getBody().readUtf8();
+        // 에픽 타입으로 생성 + SP 커스텀 필드/라벨 미포함 + claude-epic 라벨 포함
+        assertThat(body).contains("\"name\":\"Epic\"");
+        assertThat(body).doesNotContain("customfield_10036");
+        assertThat(body).contains("claude-epic");
+        assertThat(body).doesNotContain("sp-");
+    }
+
+    @Test
     void createIssue_400_throwsNonTransient() {
         server.enqueue(new MockResponse().setResponseCode(400).setBody("bad"));
 

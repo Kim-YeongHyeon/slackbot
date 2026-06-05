@@ -81,6 +81,10 @@ public class SlackEventController {
               `@지라 로그인 페이지에서 500 에러 발생` → :bug: 버그로 등록
               `@지라 다크모드 지원해주세요` → :pencil: 기능 요청으로 등록
 
+            *에픽 생성 (`에픽`/`epic` 키워드 포함 시):*
+              `@지라 에픽 GCP marketplace 배포 확장` → :bookmark_tabs: 에픽으로 등록
+              키워드가 들어가면 AI 분류 없이 항상 에픽으로 생성됩니다 (Story Point 없음).
+
             이슈 등록 시 AI가 자동으로 분류(BUG/FEATURE/OTHER)하고 Story Point를 추정합니다.""";
 
     // STUDY: 서버 재시작 시 Slack이 밀린 이벤트를 재전송하면 오래된 요청이 중복 처리된다.
@@ -262,6 +266,14 @@ public class SlackEventController {
             return;
         }
 
+        // 1.5차: 에픽 키워드 트리거 — `에픽`/`epic` 이 단어로 포함되면 AI 분류를 거치지 않고
+        //        결정적으로 에픽 생성. 스토리/버그(Haiku/Sonnet 분류)와 확실히 구별되는 특이 케이스.
+        //        스레드 안에서도 우선 적용 — 에픽은 하위작업이 될 수 없기 때문.
+        if (containsEpicKeyword(cleaned)) {
+            handleEpicCreate(event, cleaned);
+            return;
+        }
+
         // 2차: 스레드 댓글이면 부모 이슈 확인 → 스레드 액션 모드
         if (event.thread_ts() != null) {
             Optional<IssueEntity> parentIssue = issueRepository
@@ -399,6 +411,28 @@ public class SlackEventController {
         if (event.channel() != null && threadTs != null) {
             slackNotifier.postThreadReply(event.channel(), threadTs, message);
         }
+    }
+
+    // STUDY: 에픽 키워드 감지. 한글 `에픽`은 앞 단어경계(앞에 한글/영문 없음)만 요구하고 뒤 조사(을/으로/...)는
+    //        허용한다. 영문 `epic`은 양쪽 단어경계(\b)로 "epicenter" 같은 오탐을 막는다. 대소문자 무시.
+    private static final java.util.regex.Pattern EPIC_KEYWORD_KO =
+            java.util.regex.Pattern.compile("(?<![가-힣A-Za-z])에픽");
+    private static final java.util.regex.Pattern EPIC_KEYWORD_EN =
+            java.util.regex.Pattern.compile("(?i)\\bepic\\b");
+
+    static boolean containsEpicKeyword(String cleaned) {
+        if (cleaned == null || cleaned.isBlank()) {
+            return false;
+        }
+        return EPIC_KEYWORD_KO.matcher(cleaned).find() || EPIC_KEYWORD_EN.matcher(cleaned).find();
+    }
+
+    // STUDY: 에픽 생성 — 키워드 트리거 전용. register_epic 의도를 직접 만들어 서비스에 넘기면
+    //        Sonnet 은 제목/요약만 추출하고 타입은 EPIC 으로 강제된다(IssueCreateServiceImpl 참고).
+    private void handleEpicCreate(SlackEventInner event, String cleaned) {
+        log.info("Epic creation triggered by keyword: user={} input='{}'", event.user(), cleaned);
+        IntentResult intent = new IntentResult("register_epic", 1.0, Map.of("keyword", cleaned), cleaned);
+        issueCreateService.createFromSlackText(IssueCreateCommand.from(event, cleaned), intent);
     }
 
     // STUDY: 키워드 매칭 실패 시 Haiku로 1차 의도 분류 → intent별 후속 처리.
