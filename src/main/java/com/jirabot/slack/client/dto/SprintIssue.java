@@ -8,6 +8,7 @@ public record SprintIssue(
         String status,           // "해야 할 일", "진행 중", "완료"
         String statusCategory,   // "해야 할 일", "진행 중", "완료"
         String assignee,         // displayName, null이면 미배정
+        String reporter,         // displayName, null이면 미상. 담당자 없을 때 소유자 fallback 으로 사용.
         String issueType,        // "버그", "작업", "스토리" 등
         boolean subtask,         // issuetype.subtask — 타입명이 언어마다 달라도 이 값은 일관적
         double storyPoint,       // 0이면 미설정

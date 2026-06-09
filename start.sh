@@ -7,7 +7,8 @@ cd "$(dirname "$0")"
 
 # --- 설정 ---
 ENV_FILE=".env"
-JAR_FILE="build/libs/slackbot-server-0.0.2-SNAPSHOT.jar"
+# 버전에 독립적으로 빌드 산출물(boot jar)을 자동 탐색한다. -plain.jar(라이브러리 jar)은 제외.
+JAR_GLOB="build/libs/slackbot-server-*-SNAPSHOT.jar"
 SPRING_LOG="/tmp/slackbot.log"
 GOBOT_LOG="/tmp/gobot.log"
 
@@ -58,9 +59,15 @@ start_spring() {
         return
     fi
     echo "=== Starting Spring Boot ==="
+    local jar
+    jar=$(ls $JAR_GLOB 2>/dev/null | grep -v -- '-plain.jar' | head -1)
+    if [ -z "$jar" ]; then
+        echo "  ✗ boot jar not found ($JAR_GLOB) — run build first"
+        return
+    fi
     set -a && source "$ENV_FILE" && set +a
-    nohup java -jar "$JAR_FILE" > "$SPRING_LOG" 2>&1 &
-    echo "  Started (PID $!, log: $SPRING_LOG)"
+    nohup java -jar "$jar" > "$SPRING_LOG" 2>&1 &
+    echo "  Started (PID $!, jar: $jar, log: $SPRING_LOG)"
 
     # health check (최대 15초 대기)
     for i in $(seq 1 15); do

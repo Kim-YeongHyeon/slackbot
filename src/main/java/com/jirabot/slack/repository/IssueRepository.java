@@ -27,6 +27,9 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
 
     List<IssueEntity> findByStatusCategoryNot(String statusCategory);
 
+    // STUDY: 현재 스프린트의 미완료 이슈 — 일일 리마인더(스프린트 범위) 용. statusCategory <> '완료' AND sprint_id = ?.
+    List<IssueEntity> findByStatusCategoryNotAndSprintId(String statusCategory, Integer sprintId);
+
     // STUDY: 다수 담당자의 미완료 이슈를 단일 IN 쿼리로 가져온다 — 일일 리마인더의 N+1 패턴 회피용.
     List<IssueEntity> findByAssigneeInAndStatusCategoryNot(java.util.Collection<String> assignees,
                                                           String statusCategory);

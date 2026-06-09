@@ -22,7 +22,8 @@ class ReminderSubscriptionServiceImplTest {
     @BeforeEach
     void setUp() {
         repository = mock(UserMappingRepository.class);
-        ReminderProperties props = new ReminderProperties(true, "0 0 9 * * MON-FRI", "Asia/Seoul");
+        ReminderProperties props = new ReminderProperties(
+                true, "0 0 9 * * MON-FRI", "Asia/Seoul", "0 30 9 * * MON", "2026-06-22");
         service = new ReminderSubscriptionServiceImpl(repository, props);
     }
 

@@ -528,8 +528,14 @@ public class ScrumReportServiceImpl implements ScrumReportService {
     }
 
     private boolean isMyIssue(IssueEntity issue, String slackUserId, String jiraName) {
-        // reporter가 Slack ID와 일치 (봇으로 생성한 이슈)
+        // reporter가 Slack ID와 일치 (아직 sync 안 된 봇 생성 이슈 — 초기 reporter 는 Slack ID)
         if (slackUserId != null && slackUserId.equals(issue.getReporter())) {
+            return true;
+        }
+        // STUDY: sync 후 reporter 는 Jira displayName 으로 일관화된다(JiraSyncServiceImpl).
+        //        따라서 displayName 기준으로도 보고자 매칭을 해줘야 "내가 보고한 이슈"가 누락되지 않는다.
+        if (jiraName != null && issue.getReporter() != null
+                && issue.getReporter().contains(jiraName)) {
             return true;
         }
         // assignee가 Jira displayName과 일치 (Jira에서 배정된 이슈)

@@ -111,9 +111,9 @@ class BugNotionServiceImplTest {
 
     @Test
     void backfill_upsertsAllBugs_returnsCount() {
-        SprintIssue b1 = new SprintIssue("ES2-1", "버그 A", "완료", "완료", "김영현", "버그",
+        SprintIssue b1 = new SprintIssue("ES2-1", "버그 A", "완료", "완료", "김영현", null, "버그",
                 false, 2.0, null, "2026-05-01T00:00:00.000+0900", "2026-05-02T00:00:00.000+0900");
-        SprintIssue b2 = new SprintIssue("ES2-2", "버그 B", "진행 중", "진행 중", null, "버그",
+        SprintIssue b2 = new SprintIssue("ES2-2", "버그 B", "진행 중", "진행 중", null, null, "버그",
                 false, 0.0, null, "2026-05-03T00:00:00.000+0900", "2026-05-03T00:00:00.000+0900");
         when(jira.searchByJql(anyString())).thenReturn(List.of(b1, b2));
 
@@ -125,7 +125,7 @@ class BugNotionServiceImplTest {
 
     @Test
     void backfill_statusRowHasResolvedLabelForDoneBug() {
-        SprintIssue done = new SprintIssue("ES2-9", "완료 버그", "완료", "완료", "김영현", "버그",
+        SprintIssue done = new SprintIssue("ES2-9", "완료 버그", "완료", "완료", "김영현", null, "버그",
                 false, 1.0, null, "2026-05-01T00:00:00.000+0900", "2026-05-05T00:00:00.000+0900");
         when(jira.searchByJql(anyString())).thenReturn(List.of(done));
 

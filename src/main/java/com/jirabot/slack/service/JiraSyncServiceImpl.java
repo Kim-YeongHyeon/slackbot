@@ -61,6 +61,7 @@ public class JiraSyncServiceImpl implements JiraSyncService {
                         ji.summary(), ji.issueType(), ji.status(), ji.statusCategory(),
                         ji.assignee(), ji.storyPoint(),
                         parseInstant(ji.updated()));
+                entity.setReporter(ji.reporter());
                 entity.setParentKey(ji.parentKey());
                 entity.setSubtask(ji.subtask());
                 // STUDY: 동기화 시마다 스프린트 정보를 갱신. 이슈가 다른 스프린트로 이동하면 자동 반영.
@@ -70,7 +71,7 @@ public class JiraSyncServiceImpl implements JiraSyncService {
                 IssueEntity entity = new IssueEntity(
                         ji.key(), ji.summary(), ji.issueType(), ji.status(),
                         ji.statusCategory(), ji.assignee(), ji.storyPoint(),
-                        null, null,
+                        ji.reporter(), null,
                         parseInstant(ji.created()), parseInstant(ji.updated()));
                 entity.setParentKey(ji.parentKey());
                 entity.setSubtask(ji.subtask());
@@ -104,6 +105,7 @@ public class JiraSyncServiceImpl implements JiraSyncService {
                         ji.summary(), ji.issueType(), ji.status(), ji.statusCategory(),
                         ji.assignee(), ji.storyPoint(),
                         parseInstant(ji.updated()));
+                entity.setReporter(ji.reporter());
                 entity.setParentKey(ji.parentKey());
                 entity.setSubtask(ji.subtask());
                 entity.clearSprint();
@@ -112,7 +114,7 @@ public class JiraSyncServiceImpl implements JiraSyncService {
                 IssueEntity entity = new IssueEntity(
                         ji.key(), ji.summary(), ji.issueType(), ji.status(),
                         ji.statusCategory(), ji.assignee(), ji.storyPoint(),
-                        null, null,
+                        ji.reporter(), null,
                         parseInstant(ji.created()), parseInstant(ji.updated()));
                 entity.setParentKey(ji.parentKey());
                 entity.setSubtask(ji.subtask());

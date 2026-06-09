@@ -137,6 +137,9 @@ public class IssueEntity {
     public String getAssignee() { return assignee; }
     public Double getStoryPoint() { return storyPoint; }
     public String getReporter() { return reporter; }
+    // STUDY: 동기화 시 Jira 의 reporter(displayName)로 갱신. 봇 생성 이슈는 초기엔 Slack ID 가 들어있으나
+    //        sync 후 displayName 으로 일관화된다. setParentKey/setSubtask 와 같은 동기화 보조 setter.
+    public void setReporter(String reporter) { this.reporter = reporter; }
     public String getDescription() { return description; }
     public Instant getJiraCreated() { return jiraCreated; }
     public Instant getJiraUpdated() { return jiraUpdated; }
