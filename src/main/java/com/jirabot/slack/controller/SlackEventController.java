@@ -58,6 +58,7 @@ public class SlackEventController {
 
             *키워드 명령 (즉시 실행):*
               `@지라 help` — 이 도움말 표시
+              `@지라 안녕` — 인사 + 사용법 안내
               `@지라 scrum` — 스프린트 일일 리포트
               `@지라 내작업` — 내 진행 중인 작업 조회
               `@지라 작업 김영현` — 특정 팀원의 작업 조회
@@ -95,6 +96,12 @@ public class SlackEventController {
     private static final java.util.regex.Pattern DATE_PATTERN =
             java.util.regex.Pattern.compile("(\\d{4})[.\\-/](\\d{1,2})[.\\-/](\\d{1,2})");
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+
+    // STUDY: 순수 인사말만 매칭(인사 + 선택적 문장부호/ㅋㅋㅎㅎ). "안녕 못하는 버그" 처럼 뒤에 내용이 붙으면
+    //        매칭되지 않아 이슈 생성 흐름으로 넘어간다. 인사면 가볍게 받아주고 사용법을 안내한다.
+    private static final java.util.regex.Pattern GREETING_PATTERN = java.util.regex.Pattern.compile(
+            "(?i)^(안녕(하세요|하십니까)?|안뇽|하이|하잉|헬로|헬루|반가워(요)?|반갑(습니다|네요)|"
+                    + "hi|hello|hey|yo|howdy|gm|good\\s*morning|좋은\\s*아침|굿모닝)[\\s!.~?ㅎㅋ’'^_-]*$");
 
     private final IssueCreateService issueCreateService;
     private final IssueSearchService issueSearchService;
@@ -206,6 +213,12 @@ public class SlackEventController {
                 return;
             }
             case "통계", "stats", "statistics" -> { handleStatistics(event); return; }
+        }
+
+        // STUDY: 순수 인사말이면 가볍게 받아주고 사용법을 안내. 뒤에 내용이 붙은 문장은 매칭 안 돼 이슈 생성으로 넘어간다.
+        if (GREETING_PATTERN.matcher(cleaned.strip()).matches()) {
+            handleGreeting(event);
+            return;
         }
         // STUDY: "버그 2026.03.11" 패턴 — 버그/bug 뒤에 날짜가 오면 해결된 버그 조회.
         //        "버그 발생했어요" 같은 서술문은 날짜가 아니므로 Haiku로 fall through.
@@ -523,6 +536,14 @@ public class SlackEventController {
     private void handleHelp(SlackEventInner event) {
         if (event.channel() != null && event.ts() != null) {
             slackNotifier.postThreadReply(event.channel(), event.ts(), HELP_TEXT);
+        }
+    }
+
+    // STUDY: 인사에 가볍게 응답 + 할 수 있는 일(HELP_TEXT) 안내. 안내 본문은 help 와 중복되지 않게 재사용한다.
+    private void handleGreeting(SlackEventInner event) {
+        if (event.channel() != null && event.ts() != null) {
+            String message = ":wave: 안녕하세요! 저는 지라봇이에요. 이런 걸 도와드릴 수 있어요:\n\n" + HELP_TEXT;
+            slackNotifier.postThreadReply(event.channel(), event.ts(), message);
         }
     }
 

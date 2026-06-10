@@ -243,6 +243,40 @@ class SlackEventControllerTest {
     }
 
     @Test
+    void greeting_repliesWithHelp() throws Exception {
+        String body = appMentionEvent("<@U0BOT> 안녕", freshTs());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("안녕하세요").contains("지라 사용법");
+        verify(issueCreateService, never()).createFromSlackText(any());
+        verify(issueCreateService, never()).createFromSlackText(any(), any());
+    }
+
+    @Test
+    void greetingWithContent_isNotTreatedAsGreeting() throws Exception {
+        // "안녕" 으로 시작해도 뒤에 내용이 붙으면 인사가 아니라 Haiku 분류로 넘어간다.
+        when(intentClassifier.classify(any()))
+                .thenReturn(new IntentResult("register_bug", 0.95, Map.of(), "안녕 안 되는 로그인 버그"));
+        when(issueCreateService.createFromSlackText(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(IssueCreateResult.ok("P-1", "u")));
+        String body = appMentionEvent("<@U0BOT> 안녕 안 되는 로그인 버그", freshTs());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        // 인사 안내가 아니라 분류기로 라우팅됨.
+        verify(slackNotifier, never()).postThreadReply(any(), any(), any());
+    }
+
+    @Test
     void myWorkCommand_dispatchesToMyReport() throws Exception {
         when(scrumReportService.generateMyReport(any()))
                 .thenReturn(CompletableFuture.completedFuture("내 작업"));
