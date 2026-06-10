@@ -52,7 +52,7 @@ class ReminderServiceTest {
 
     private void rebuild(boolean enabled) {
         ReminderProperties reminderProps = new ReminderProperties(
-                enabled, "0 0 9 * * MON-FRI", "Asia/Seoul", "0 30 9 * * MON", ANCHOR.toString());
+                enabled, "0 0 9 * * MON-FRI", "Asia/Seoul", "0 30 9 * * MON", ANCHOR.toString(), 7);
         JiraProperties jiraProps = new JiraProperties(
                 "https://cryptolab.atlassian.net", "u@x", "t", "ES2",
                 "customfield_10036", new JiraProperties.IssueTypes("Bug", "Task", "Sub-task"));
@@ -69,6 +69,12 @@ class ReminderServiceTest {
     private IssueEntity issue(String key, String summary, String assignee, String reporter) {
         return new IssueEntity(key, summary, "작업", "진행 중", "진행 중",
                 assignee, 2.0, reporter, "본문", Instant.now(), Instant.now());
+    }
+
+    // 진행 중 진입 시각(inProgressSince)을 과거로 둔 이슈 — 생성자가 statusCategory=진행 중 이면 jiraUpdated 를 진입 시각으로 쓴다.
+    private IssueEntity inProgressSince(String key, String assignee, Instant since) {
+        return new IssueEntity(key, key, "작업", "진행 중", "진행 중",
+                assignee, 2.0, null, "본문", since, since);
     }
 
     private void activeSprint() {
@@ -224,9 +230,10 @@ class ReminderServiceTest {
     @Test
     void buildMessage_includesScopeLabelLinkAndStatus() {
         rebuild(true);
+        Instant now = Instant.now();
         String message = service.buildMessage(List.of(
                 issue("ES2-1", "이슈 A", "Alice", null),
-                issue("ES2-2", "이슈 B", "Alice", null)), "현재 스프린트");
+                issue("ES2-2", "이슈 B", "Alice", null)), "현재 스프린트", 7, now);
 
         assertThat(message)
                 .contains(":sunny:")
@@ -234,6 +241,55 @@ class ReminderServiceTest {
                 .contains("2건")
                 .contains("<https://cryptolab.atlassian.net/browse/ES2-1|ES2-1>")
                 .contains("이슈 A")
-                .contains("<https://cryptolab.atlassian.net/browse/ES2-2|ES2-2>");
+                .contains("<https://cryptolab.atlassian.net/browse/ES2-2|ES2-2>")
+                // 방금 만든 이슈(진입=now)는 정체 아님 → 태그 없음.
+                .doesNotContain(":warning:");
+    }
+
+    // ---- stale(정체) 태그 ----
+
+    @Test
+    void buildMessage_tagsStaleInProgressIssue() {
+        rebuild(true);
+        Instant now = Instant.now();
+        IssueEntity stale = inProgressSince("ES2-9", "Alice", now.minus(java.time.Duration.ofDays(9)));
+        IssueEntity fresh = inProgressSince("ES2-1", "Alice", now.minus(java.time.Duration.ofDays(2)));
+
+        String message = service.buildMessage(List.of(stale, fresh), "현재 스프린트", 7, now);
+
+        assertThat(message)
+                .contains("정체 1건")          // 헤더 집계
+                .contains(":warning: <https://cryptolab.atlassian.net/browse/ES2-9|ES2-9>")
+                .contains("9일째");            // 경과 일수
+        // fresh 이슈(2일째)는 태그 안 됨.
+        assertThat(message).doesNotContain(":warning: <https://cryptolab.atlassian.net/browse/ES2-1|ES2-1>");
+    }
+
+    @Test
+    void buildMessage_noStaleTagWhenStaleDaysNull() {
+        rebuild(true);
+        Instant now = Instant.now();
+        IssueEntity oldOne = inProgressSince("ES2-9", "Alice", now.minus(java.time.Duration.ofDays(30)));
+
+        // 격주(전체) 리마인더 경로 = staleDays null → 30일째라도 태그 없음.
+        String message = service.buildMessage(List.of(oldOne), "전체", null, now);
+
+        assertThat(message).doesNotContain(":warning:").doesNotContain("정체");
+    }
+
+    @Test
+    void daily_tagsStaleIssueInDm() {
+        rebuild(true);
+        activeSprint();
+        Instant since = Instant.now().minus(java.time.Duration.ofDays(10));
+        when(userMappingRepository.findByReminderEnabledTrue())
+                .thenReturn(List.of(subscriber("U1", "Alice")));
+        when(issueRepository.findByStatusCategoryNotAndSprintId("완료", SPRINT_ID))
+                .thenReturn(List.of(inProgressSince("ES2-9", "Alice", since)));
+
+        service.runDaily(DAILY_DAY);
+
+        verify(slackNotifier).sendDirectMessage(eq("U1"),
+                argThat(text -> text.contains(":warning:") && text.contains("정체 1건")));
     }
 }

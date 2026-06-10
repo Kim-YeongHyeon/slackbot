@@ -11,6 +11,8 @@ import com.jirabot.slack.entity.UserMappingEntity;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
 import java.time.DayOfWeek;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
@@ -85,7 +87,8 @@ public class ReminderService {
         }
         List<IssueEntity> candidates = issueRepository
                 .findByStatusCategoryNotAndSprintId(StatusCategory.DONE, active.get().id());
-        dispatch(candidates, "현재 스프린트");
+        // 일일 리마인더에만 정체(stale) 태그를 적용.
+        dispatch(candidates, "현재 스프린트", reminderProps.staleDays());
     }
 
     // STUDY: 격주 전체 리마인더 — 매주 월 09:30 점화되나 anchor parity 로 격주만 실제 발송.
@@ -104,7 +107,8 @@ public class ReminderService {
             return;
         }
         List<IssueEntity> candidates = issueRepository.findByStatusCategoryNot(StatusCategory.DONE);
-        dispatch(candidates, "전체");
+        // 격주 전체 리마인더는 정체 태그 없음(staleDays=null).
+        dispatch(candidates, "전체", null);
     }
 
     // STUDY: 오늘이 "격주 전체 리마인더 발송일"인지 판단.
@@ -123,7 +127,8 @@ public class ReminderService {
     }
 
     // STUDY: 후보 이슈들을 구독자별로 그룹핑해 DM. 0건 사용자는 생략.
-    void dispatch(List<IssueEntity> candidates, String scopeLabel) {
+    //        staleDays != null 이면 "진행 중" 정체 이슈에 ⚠️ 태그(일일 리마인더 전용).
+    void dispatch(List<IssueEntity> candidates, String scopeLabel, Integer staleDays) {
         List<UserMappingEntity> subscribers = userMappingRepository.findByReminderEnabledTrue();
         log.info("Reminder dispatch scope='{}' subscribers={} candidates={}",
                 scopeLabel, subscribers.size(), candidates.size());
@@ -158,7 +163,7 @@ public class ReminderService {
         }
 
         for (Map.Entry<UserMappingEntity, List<IssueEntity>> e : byUser.entrySet()) {
-            sendOne(e.getKey(), e.getValue(), scopeLabel);
+            sendOne(e.getKey(), e.getValue(), scopeLabel, staleDays);
         }
     }
 
@@ -175,27 +180,62 @@ public class ReminderService {
         return null;
     }
 
-    private void sendOne(UserMappingEntity user, List<IssueEntity> issues, String scopeLabel) {
+    private void sendOne(UserMappingEntity user, List<IssueEntity> issues, String scopeLabel, Integer staleDays) {
         try {
-            slackNotifier.sendDirectMessage(user.getSlackUserId(), buildMessage(issues, scopeLabel));
+            slackNotifier.sendDirectMessage(user.getSlackUserId(),
+                    buildMessage(issues, scopeLabel, staleDays, Instant.now()));
         } catch (Exception e) {
             // 한 사용자 실패가 전체 발송을 막지 않도록 warn 만.
             log.warn("Reminder DM failed for slackUserId={}: {}", user.getSlackUserId(), e.toString());
         }
     }
 
-    String buildMessage(List<IssueEntity> openIssues, String scopeLabel) {
+    // STUDY: staleDays != null 이면 "진행 중" 으로 staleDays 일 이상 정체된 이슈에 ⚠️ 와 경과 일수를 표기.
+    //        now 를 파라미터로 받아 테스트가 결정적이게 한다.
+    String buildMessage(List<IssueEntity> openIssues, String scopeLabel, Integer staleDays, Instant now) {
+        long staleCount = openIssues.stream().filter(i -> isStale(i, staleDays, now)).count();
+
         StringBuilder sb = new StringBuilder();
         sb.append(":sunny: 좋은 아침입니다. ").append(scopeLabel)
-                .append(" 미해결 이슈 ").append(openIssues.size()).append("건이 있습니다.\n");
+                .append(" 미해결 이슈 ").append(openIssues.size()).append("건이 있습니다.");
+        if (staleCount > 0) {
+            sb.append(" (정체 ").append(staleCount).append("건 :warning:)");
+        }
+        sb.append("\n");
+
         for (IssueEntity issue : openIssues) {
             String url = issueLink(issue.getIssueKey());
             String status = (issue.getStatusCategory() == null || issue.getStatusCategory().isBlank())
                     ? "-" : issue.getStatusCategory();
-            sb.append("• <").append(url).append("|").append(issue.getIssueKey()).append("> ")
-                    .append(issue.getSummary()).append(" (").append(status).append(")\n");
+            boolean stale = isStale(issue, staleDays, now);
+            sb.append("• ");
+            if (stale) {
+                sb.append(":warning: ");
+            }
+            sb.append("<").append(url).append("|").append(issue.getIssueKey()).append("> ")
+                    .append(issue.getSummary()).append(" (").append(status);
+            if (stale) {
+                long days = Duration.between(issue.getInProgressSince(), now).toDays();
+                sb.append(" · ").append(days).append("일째");
+            }
+            sb.append(")\n");
         }
         return sb.toString().stripTrailing();
+    }
+
+    // STUDY: 정체 = "진행 중" 상태 && 진입 시점(inProgressSince)으로부터 staleDays 일 이상 경과.
+    private boolean isStale(IssueEntity issue, Integer staleDays, Instant now) {
+        if (staleDays == null) {
+            return false;
+        }
+        if (!StatusCategory.IN_PROGRESS.equals(issue.getStatusCategory())) {
+            return false;
+        }
+        Instant since = issue.getInProgressSince();
+        if (since == null) {
+            return false;
+        }
+        return Duration.between(since, now).toDays() >= staleDays;
     }
 
     private String issueLink(String key) {

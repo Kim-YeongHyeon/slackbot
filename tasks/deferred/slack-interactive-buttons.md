@@ -3,6 +3,8 @@
 > **등록일:** 2026-05-12
 > **우선순위:** 중간
 > **요청자:** 공식 봇 비교 분석
+> **상태(2026-06-09):** ✅ **구현 완료** — `SlackInteractionController` (`/slack/interaction`),
+> `BlockKitBuilder` 버튼(해야 할 일/진행 중/검토 중/완료/바로 완료) + `transitionIssue` 연동. 아래는 최초 계획 기록.
 
 ## 요구사항
 

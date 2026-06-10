@@ -7,21 +7,23 @@ import org.junit.jupiter.api.Test;
 class BranchNameBuilderTest {
 
     @Test
-    void bugType_usesBugfixPrefix_korean() {
-        assertThat(BranchNameBuilder.build("버그", "ES2-1948", "로그인 500 에러"))
-                .isEqualTo("bugfix/ES2-1948-로그인-500-에러");
-    }
-
-    @Test
     void bugType_usesBugfixPrefix_english() {
         assertThat(BranchNameBuilder.build("Bug", "ES2-10", "NPE on save"))
                 .isEqualTo("bugfix/ES2-10-npe-on-save");
     }
 
     @Test
-    void nonBugType_usesFeaturePrefix() {
+    void koreanSlug_isDropped_asciiOnly() {
+        // 브랜치명은 영어로 통일 — 한글은 슬러그에서 제거된다(영어 변환은 호출부의 Claude 가 담당).
+        // 한글이 섞이면 ASCII 부분만 남고, 전부 한글이면 issueKey 만 남는다.
+        assertThat(BranchNameBuilder.build("버그", "ES2-1948", "로그인 500 에러"))
+                .isEqualTo("bugfix/ES2-1948-500");
         assertThat(BranchNameBuilder.build("작업", "ES2-20", "다크모드 추가"))
-                .isEqualTo("feature/ES2-20-다크모드-추가");
+                .isEqualTo("feature/ES2-20");
+    }
+
+    @Test
+    void nonBugType_usesFeaturePrefix() {
         assertThat(BranchNameBuilder.build("Story", "ES2-21", "Add dark mode"))
                 .isEqualTo("feature/ES2-21-add-dark-mode");
     }

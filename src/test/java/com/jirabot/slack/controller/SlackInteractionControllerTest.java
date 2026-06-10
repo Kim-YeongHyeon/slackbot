@@ -34,6 +34,8 @@ class SlackInteractionControllerTest {
     private final JiraApiClient jiraApiClient = mock(JiraApiClient.class);
     private final SlackNotifier slackNotifier = mock(SlackNotifier.class);
     private final IssueRepository issueRepository = mock(IssueRepository.class);
+    private final com.jirabot.slack.client.ClaudeApiClient claudeApiClient =
+            mock(com.jirabot.slack.client.ClaudeApiClient.class);
     private final com.jirabot.slack.config.JiraProperties jiraProps =
             new com.jirabot.slack.config.JiraProperties(
                     "https://test.atlassian.net", "e@test.com", "token", "PROJ", null, null);
@@ -44,7 +46,8 @@ class SlackInteractionControllerTest {
     @BeforeEach
     void setUp() {
         controller = new SlackInteractionController(
-                objectMapper, jiraApiClient, slackNotifier, issueRepository, jiraProps, directExecutor);
+                objectMapper, jiraApiClient, slackNotifier, issueRepository, claudeApiClient,
+                jiraProps, directExecutor);
     }
 
     private HttpServletRequest mockRequest(String payloadJson) {
@@ -99,6 +102,8 @@ class SlackInteractionControllerTest {
         IssueEntity issue = new IssueEntity("PROJ-1", "Test", "Task", "해야 할 일", "해야 할 일",
                 null, 3.0, "reporter", "desc", Instant.now(), Instant.now());
         when(issueRepository.findByIssueKey("PROJ-1")).thenReturn(Optional.of(issue));
+        // 한글 요약 → Claude 가 영어 슬러그로 변환(여기선 "test").
+        when(claudeApiClient.englishBranchSlug("Test")).thenReturn("test");
 
         controller.onInteraction(
                 mockRequest(buildPayload(BlockKitBuilder.ACTION_IN_PROGRESS, "PROJ-1")));

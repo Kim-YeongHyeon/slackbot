@@ -28,14 +28,15 @@ public final class BranchNameBuilder {
         return t.contains("버그") || t.contains("bug");
     }
 
-    // STUDY: 요약을 브랜치명에 안전한 슬러그로 변환. 영문 소문자/숫자/한글만 남기고 나머지는 하이픈으로,
-    //        연속 하이픈 축약 + 양끝 트림 + 길이 제한. git 은 UTF-8 브랜치명을 허용하므로 한글은 보존한다.
+    // STUDY: 요약을 브랜치명에 안전한 슬러그로 변환. 영문 소문자/숫자만 남기고 나머지(공백·기호·한글)는 하이픈으로,
+    //        연속 하이픈 축약 + 양끝 트림 + 길이 제한. 브랜치명은 영어로 통일 — 한글 요약은 호출부에서 Claude 가
+    //        영어 슬러그로 변환해 넘기고(englishBranchSlug), 변환 실패 시 슬러그가 비어 issueKey 만 남는다.
     static String slugify(String summary) {
         if (summary == null) {
             return "";
         }
         String s = summary.toLowerCase().strip()
-                .replaceAll("[^a-z0-9가-힣]+", "-")
+                .replaceAll("[^a-z0-9]+", "-")
                 .replaceAll("(^-+)|(-+$)", "");
         if (s.length() > MAX_SLUG_LEN) {
             s = s.substring(0, MAX_SLUG_LEN).replaceAll("-+$", "");

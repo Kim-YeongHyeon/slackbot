@@ -18,4 +18,8 @@ public interface ClaudeApiClient {
     // STUDY: 버그 완료 시 원인/해결방법 요약. Jira 설명+댓글+Slack 스레드를 입력으로 받아 {cause, fix} JSON 반환.
     BugResolutionSummary summarizeBugResolution(String issueKey, String description,
                                                 List<String> comments, List<String> threadMessages);
+
+    // STUDY: 한글 이슈 요약 → 영어 git 브랜치 슬러그(짧은 영문 구). 권장 브랜치명 생성에 사용.
+    //        실패/타임아웃 시 빈 문자열 반환 → 호출부가 issueKey 만으로 브랜치명을 만든다.
+    String englishBranchSlug(String summary);
 }

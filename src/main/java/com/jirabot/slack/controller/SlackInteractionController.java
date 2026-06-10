@@ -2,6 +2,7 @@ package com.jirabot.slack.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jirabot.slack.client.ClaudeApiClient;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.config.AsyncConfig;
@@ -40,6 +41,7 @@ public class SlackInteractionController {
     private final JiraApiClient jiraApiClient;
     private final SlackNotifier slackNotifier;
     private final IssueRepository issueRepository;
+    private final ClaudeApiClient claudeApiClient;
     private final JiraProperties jiraProps;
     private final Executor slackExecutor;
 
@@ -47,12 +49,14 @@ public class SlackInteractionController {
                                       JiraApiClient jiraApiClient,
                                       SlackNotifier slackNotifier,
                                       IssueRepository issueRepository,
+                                      ClaudeApiClient claudeApiClient,
                                       JiraProperties jiraProps,
                                       @Qualifier(AsyncConfig.SLACK_EXECUTOR) Executor slackExecutor) {
         this.objectMapper = objectMapper;
         this.jiraApiClient = jiraApiClient;
         this.slackNotifier = slackNotifier;
         this.issueRepository = issueRepository;
+        this.claudeApiClient = claudeApiClient;
         this.jiraProps = jiraProps;
         this.slackExecutor = slackExecutor;
     }
@@ -167,6 +171,8 @@ public class SlackInteractionController {
     // STUDY: "Jira 를 통한 브랜치 생성" — 네이티브 GitHub for Jira 앱은 create-branch 딥링크를 제공하지 않으므로
     //        (atlassian/github-for-jira#402), 봇은 이슈 개발 패널 링크 + 규칙 기반 권장 브랜치명을 안내하고
     //        실제 생성은 사용자가 Jira 개발 패널의 "브랜치 만들기"에서 대상 레포·base 를 선택해 수행한다.
+    //        브랜치명은 영어로 통일: 한글 요약은 Claude(englishBranchSlug)로 영어 슬러그를 만들어 사용하고,
+    //        변환 실패 시 issueKey 만으로 브랜치명을 만든다.
     private void postBranchHint(String issueKey, String channelId, String messageTs) {
         if (channelId == null || messageTs == null) {
             return;
@@ -175,7 +181,8 @@ public class SlackInteractionController {
             Optional<IssueEntity> found = issueRepository.findByIssueKey(issueKey);
             String issueType = found.map(IssueEntity::getIssueType).orElse(null);
             String summary = found.map(IssueEntity::getSummary).orElse(null);
-            String branch = BranchNameBuilder.build(issueType, issueKey, summary);
+            String englishSlug = claudeApiClient.englishBranchSlug(summary);
+            String branch = BranchNameBuilder.build(issueType, issueKey, englishSlug);
             String message = String.format(
                     ":herb: 브랜치 만들기: <%s|%s> 우측 *개발(Development)* 패널 → \"브랜치 만들기\"\n"
                             + "권장 브랜치명: `%s`",

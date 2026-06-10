@@ -9,10 +9,14 @@
 
 ## 체크리스트
 
+> **구현 상태(2026-06-09):** Sync/캐시 핵심은 구현됨(`JiraSyncServiceImpl`, `IssueRepository`, `IssueEntity.syncedAt`).
+> 단 실제와 계획이 다른 점: **동기화는 10~30분 주기가 아니라 매일 08:00 cron + 기동 시 1회 + 검색 시 on-demand**.
+> **Flyway 미도입**(여전히 `ddl-auto=update` — lessons L8), **동기화 실패 시 Slack 알림 없음(로그만)**. 아래 `[ ]`는 stale.
+
 ### JiraSyncService
-- [ ] `@Scheduled` Jira 이슈 전체 동기화 (주기: 10~30분 간격)
+- [ ] `@Scheduled` Jira 이슈 전체 동기화 (주기: 10~30분 간격)  ← 실제: 매일 08:00 cron
 - [ ] 신규 / 변경 / 삭제 이슈 Upsert 처리 (`saveOrUpdate` 또는 `merge`)
-- [ ] 동기화 실패 시 Slack DM 또는 로그 알림
+- [ ] 동기화 실패 시 Slack DM 또는 로그 알림  ← 실제: 로그만, DM 미구현
 - [ ] 동기화 상태 추적 (`last_synced_at` 컬럼)
 
 ### JPA + PostgreSQL 이슈 로컬 캐시

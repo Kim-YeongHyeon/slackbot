@@ -186,7 +186,23 @@ public class SlackNotifierImpl implements SlackNotifier {
         try {
             // STUDY: conversations.open 으로 user ID → IM 채널 ID 를 받는다. user ID 를 chat.postMessage 의 channel
             //        파라미터에 직접 넘기는 동작이 일부 워크스페이스/스코프 조합에서 channel_not_found 로 실패하는
-            //        사례가 보고되어, 명시적으로 IM 채널을 여는 방식이 더 견고하다.
+            //        사례가 보고되어, 우선 명시적으로 IM 채널을 여는 방식을 시도한다.
+            //        단 conversations.open 은 im:write 스코프가 필요하고, 봇 토큰에 그 스코프가 없으면 missing_scope 로
+            //        실패한다(2026-06-09 09:00 리마인더 미발송 원인). 이때는 chat.postMessage 에 user ID 를 직접
+            //        넘기는 폴백으로 전송한다(chat:write 만으로 IM 전달 가능 — 검증됨).
+            String channelId = openImChannel(userId);
+            postMessage(channelId != null ? channelId : userId, text);
+        } catch (Exception e) {
+            // 예외 시에도 user ID 직접 전송으로 마지막 폴백.
+            log.warn("Slack DM open failed for userId={}: {} — falling back to direct postMessage",
+                    userId, e.toString());
+            postMessage(userId, text);
+        }
+    }
+
+    // STUDY: conversations.open 으로 IM 채널 ID 를 얻는다. 실패(missing_scope 등)하면 null 반환 → 호출부가 폴백.
+    private String openImChannel(String userId) {
+        try {
             String openResp = slackWebClient.post()
                     .uri("/conversations.open")
                     .bodyValue(Map.of("users", userId))
@@ -195,17 +211,15 @@ public class SlackNotifierImpl implements SlackNotifier {
                     .block();
             var node = objectMapper.readTree(openResp);
             if (!node.path("ok").asBoolean(false)) {
-                log.warn("conversations.open failed for userId={}: {}", userId, node.path("error").asText());
-                return;
+                log.warn("conversations.open failed for userId={}: {} — will fall back to direct postMessage",
+                        userId, node.path("error").asText());
+                return null;
             }
             String channelId = node.path("channel").path("id").asText(null);
-            if (channelId == null || channelId.isBlank()) {
-                log.warn("conversations.open returned no channel id for userId={}", userId);
-                return;
-            }
-            postMessage(channelId, text);
+            return (channelId == null || channelId.isBlank()) ? null : channelId;
         } catch (Exception e) {
-            log.warn("Slack DM failed for userId={}: {}", userId, e.toString());
+            log.warn("conversations.open errored for userId={}: {} — will fall back", userId, e.toString());
+            return null;
         }
     }
 }

@@ -244,4 +244,35 @@ class ClaudeApiClientImplTest {
         // No description line for null description
         assertThat(stdin).doesNotContain("설명: null");
     }
+
+    @Test
+    void englishBranchSlug_returnsModelText() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, envelope("fix-login-500-error", false), "", false));
+
+        assertThat(client.englishBranchSlug("로그인 페이지에서 500 에러 발생"))
+                .isEqualTo("fix-login-500-error");
+    }
+
+    @Test
+    void englishBranchSlug_stripsQuotesAndExtraLines() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, envelope("\"add-dark-mode\"\n(extra prose)", false), "", false));
+
+        assertThat(client.englishBranchSlug("다크모드 추가")).isEqualTo("add-dark-mode");
+    }
+
+    @Test
+    void englishBranchSlug_timeoutReturnsEmpty() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(-1, "", "", true));
+
+        assertThat(client.englishBranchSlug("아무 요약")).isEmpty();
+    }
+
+    @Test
+    void englishBranchSlug_blankSummary_skipsCliCall() {
+        assertThat(client.englishBranchSlug("  ")).isEmpty();
+        verify(runner, never()).run(any(), anyString(), any(Duration.class));
+    }
 }

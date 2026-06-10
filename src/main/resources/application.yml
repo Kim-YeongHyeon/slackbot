@@ -90,6 +90,8 @@ reminder:
   # 격주 전체 리마인더(미해결 전체) — 매주 월 09:30 점화, anchor 기준 짝수 주차 월요일에만 실제 발송.
   biweekly-cron: ${REMINDER_BIWEEKLY_CRON:0 30 9 * * MON}
   biweekly-anchor: ${REMINDER_BIWEEKLY_ANCHOR:2026-06-22}
+  # 일일 리마인더에서 "진행 중" 으로 이 일수 이상 정체된 이슈를 ⚠️ 로 태그(진입 시각 기준).
+  stale-days: ${REMINDER_STALE_DAYS:7}
 
 # STUDY: Actuator. /actuator/health = 헬스체크. Phase 1에서는 별도 /health 컨트롤러도 제공.
 management:

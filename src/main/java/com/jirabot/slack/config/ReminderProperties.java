@@ -19,7 +19,8 @@ public record ReminderProperties(
         String cron,
         String zone,
         String biweeklyCron,
-        String biweeklyAnchor
+        String biweeklyAnchor,
+        Integer staleDays
 ) {
     public ReminderProperties {
         if (cron == null || cron.isBlank()) {
@@ -33,6 +34,10 @@ public record ReminderProperties(
         }
         if (biweeklyAnchor == null || biweeklyAnchor.isBlank()) {
             biweeklyAnchor = "2026-06-22";
+        }
+        // STUDY: 일일 리마인더에서 "진행 중" 상태로 이 일수 이상 정체된 이슈를 ⚠️ 태그. 기본 7일.
+        if (staleDays == null || staleDays <= 0) {
+            staleDays = 7;
         }
     }
 

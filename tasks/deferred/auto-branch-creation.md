@@ -13,7 +13,11 @@
 ([atlassian/github-for-jira#402](https://github.com/atlassian/github-for-jira/issues/402)).
 따라서 봇이 자동 생성하지 않고, **"진행 중" 전환 시 다음을 스레드에 안내**한다:
 - 이슈 개발 패널 링크 (`{base}/browse/{KEY}`)
-- 규칙 기반 **권장 브랜치명** — `BranchNameBuilder` (Bug→`bugfix/`, 그 외→`feature/`, `KEY-요약슬러그`)
+- 규칙 기반 **권장 브랜치명** — `BranchNameBuilder` (Bug→`bugfix/`, 그 외→`feature/`, `KEY-슬러그`)
+
+**브랜치명 영어화(2026-06-09, v0.0.11):** 슬러그는 **영어로 통일**. 한글 요약은 `ClaudeApiClient.englishBranchSlug`
+가 짧은 영어 슬러그로 변환해 사용하고(`slugify` 는 ASCII 만 남김), 변환 실패/타임아웃 시 `KEY` 만으로 브랜치명을 만든다.
+예: "테스트 실행 실패 재현 및 원인 수정" → `bugfix/ES2-2040-reproduce-and-fix-test-failures`.
 
 실제 브랜치 생성은 사용자가 **Jira 개발 패널 → "브랜치 만들기"** 에서 대상 레포·base 를 선택해 수행
 → 연결된 GitHub 가 생성. **봇은 GitHub 토큰 불필요**, "레포가 작업마다 다름" 블로커도 클릭 시점 선택으로 해소.

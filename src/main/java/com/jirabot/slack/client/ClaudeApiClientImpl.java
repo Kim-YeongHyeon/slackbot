@@ -315,6 +315,46 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         }
     }
 
+    // STUDY: 한글(또는 임의 언어) 이슈 요약을 영어 git 브랜치 슬러그로 변환. classify 와 동일한 CLI 패턴.
+    static final String BRANCH_SLUG_PROMPT = """
+            You convert a Jira issue summary into a concise English git branch slug.
+            Rules:
+            - Output ONLY the slug: lowercase ASCII words joined by single hyphens.
+            - 2 to 5 words capturing the core action/subject.
+            - No issue key, no prefix (no "feature/" or "bugfix/"), no quotes, no prose, no markdown.
+            - One line only.
+            Example: "로그인 페이지에서 500 에러 발생" -> fix-login-500-error
+            """;
+
+    @Override
+    public String englishBranchSlug(String summary) {
+        if (summary == null || summary.isBlank()) {
+            return "";
+        }
+        try {
+            String stdin = BRANCH_SLUG_PROMPT + STDIN_DELIMITER + summary;
+            ProcessRunner.Result result = processRunner.run(
+                    buildCommand(), stdin, Duration.ofSeconds(props.timeoutSeconds()));
+            if (result.timedOut() || result.exitCode() != 0
+                    || result.stdout() == null || result.stdout().isBlank()) {
+                log.warn("Claude branch slug failed (timeout={}, exit={})",
+                        result.timedOut(), result.exitCode());
+                return "";
+            }
+            JsonNode envelope = objectMapper.readTree(result.stdout());
+            if (envelope.path("is_error").asBoolean(false)) {
+                return "";
+            }
+            String inner = envelope.path("result").asText("");
+            // 모델이 여러 줄/따옴표를 붙일 수 있으니 첫 줄만, 트림. 최종 슬러그 정제는 BranchNameBuilder 가 담당.
+            String firstLine = inner.strip().lines().findFirst().orElse("").strip();
+            return firstLine.replaceAll("^[\"'`]+|[\"'`]+$", "").strip();
+        } catch (Exception e) {
+            log.warn("Claude branch slug error: {}", e.toString());
+            return "";
+        }
+    }
+
     private List<String> buildCommand() {
         // STUDY: --output-format json → { type, subtype, result, is_error, ... } envelope 로 감싸져서 machine-parseable.
         // STUDY: --max-turns 1 → 모델이 단 한 번의 응답만 내놓도록 보장 (도구 반복 호출 루프 차단).

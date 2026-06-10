@@ -52,6 +52,11 @@ public class IssueEntity {
     //        완료 후 설명 수정 등으로 jiraUpdated가 갱신되어도 완료 시점이 유지된다.
     private Instant completedAt;
 
+    // STUDY: "진행 중"에 진입한 시점. completedAt 과 같은 이유로 jiraUpdated 와 분리 관리한다.
+    //        (jiraUpdated 는 댓글/필드 수정에도 갱신되므로 "얼마나 오래 진행 중인지"의 기준으로 부적합)
+    //        진행 중 → 다른 상태로 이탈하면 null 로 초기화. 정체(stale) 이슈 탐지에 사용.
+    private Instant inProgressSince;
+
     // STUDY: 이슈가 속한 Jira 스프린트 정보. 동기화 시 활성 스프린트의 ID/이름을 함께 저장한다.
     //        통계 기능에서 현재 스프린트 이슈만 필터링하는 데 사용.
     private Integer sprintId;
@@ -88,6 +93,9 @@ public class IssueEntity {
         // STUDY: 동기화로 처음 DB에 들어오는 경우, Jira의 jiraUpdated를 completedAt으로 사용.
         //        Instant.now()를 쓰면 "오늘 완료"로 잘못 집계된다.
         this.completedAt = StatusCategory.DONE.equals(statusCategory) ? jiraUpdated : null;
+        // STUDY: 이미 진행 중인 이슈를 처음 발견하면 정확한 진입 시각을 알 수 없어 jiraUpdated 로 근사.
+        //        이후 실제 전환은 updateFrom/updateStatus 에서 전환 시점으로 정확히 기록된다.
+        this.inProgressSince = StatusCategory.IN_PROGRESS.equals(statusCategory) ? jiraUpdated : null;
     }
 
     public void updateFrom(String summary, String issueType, String status, String statusCategory,
@@ -108,6 +116,16 @@ public class IssueEntity {
         } else if (!StatusCategory.DONE.equals(statusCategory)) {
             this.completedAt = null;
         }
+        // STUDY: 진행 중 진입 시점 기록.
+        //        - 진입 시(또는 신규 컬럼이라 아직 null 인 기존 진행 중 이슈) jiraUpdated 로 기록(backfill 근사).
+        //        - 이미 값이 있으면 유지해 정체 누적을 보존. 진행 중 이탈 시 null 로 초기화.
+        if (StatusCategory.IN_PROGRESS.equals(statusCategory)) {
+            if (this.inProgressSince == null) {
+                this.inProgressSince = jiraUpdated;
+            }
+        } else {
+            this.inProgressSince = null;
+        }
     }
 
     /**
@@ -125,6 +143,14 @@ public class IssueEntity {
             this.completedAt = Instant.now();
         } else if (!StatusCategory.DONE.equals(statusCategory)) {
             this.completedAt = null;
+        }
+        // STUDY: 버튼 등으로 직접 상태 전환 시 진행 중 진입 시각을 현재 시각으로 기록(값 없을 때만).
+        if (StatusCategory.IN_PROGRESS.equals(statusCategory)) {
+            if (this.inProgressSince == null) {
+                this.inProgressSince = Instant.now();
+            }
+        } else {
+            this.inProgressSince = null;
         }
     }
 
@@ -151,6 +177,7 @@ public class IssueEntity {
     }
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
+    public Instant getInProgressSince() { return inProgressSince; }
     public Integer getSprintId() { return sprintId; }
     public String getSprintName() { return sprintName; }
     public void setSprint(int sprintId, String sprintName) {
