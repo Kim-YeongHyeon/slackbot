@@ -256,7 +256,7 @@ class SlackEventControllerTest {
         assertThat(msg.getValue())
                 .contains("안녕하세요")
                 .contains("솔루션 개발팀")
-                .contains("/jira/software/c/projects/SLAC")
+                .contains("/jira/software/c/projects/SLAC/boards/7")
                 .contains("지라 사용법");
         verify(issueCreateService, never()).createFromSlackText(any());
         verify(issueCreateService, never()).createFromSlackText(any(), any());

@@ -552,13 +552,16 @@ public class SlackEventController {
 
     // STUDY: Jira 소프트웨어 프로젝트 보드 링크를 Slack 링크(<url|텍스트>) 형식으로 조립.
     //        설정이 비어있으면 링크 없이 일반 텍스트로 폴백.
+    //        보드 ID(7)는 ES2 스크럼 보드 고정 — 멀티 프로젝트 지원은 deferred 라 현재는 ES2 전용.
+    private static final String JIRA_BOARD_PATH = "/boards/7";
+
     private String projectLink() {
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl().replaceAll("/+$", "");
         String key = jiraProps.projectKey();
         if (base.isEmpty() || key == null || key.isBlank()) {
             return "Jira 프로젝트";
         }
-        return "<" + base + "/jira/software/c/projects/" + key + "|" + key + " 프로젝트>";
+        return "<" + base + "/jira/software/c/projects/" + key + JIRA_BOARD_PATH + "|" + key + " 프로젝트>";
     }
 
     // STUDY: 스레드에서 호출하면 스레드에 응답, 채널에서 호출하면 채널 메시지로 응답.
