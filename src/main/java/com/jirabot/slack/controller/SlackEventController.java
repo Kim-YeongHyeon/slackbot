@@ -540,11 +540,25 @@ public class SlackEventController {
     }
 
     // STUDY: 인사에 가볍게 응답 + 할 수 있는 일(HELP_TEXT) 안내. 안내 본문은 help 와 중복되지 않게 재사용한다.
+    //        소개 문구에 연결된 Jira 프로젝트 링크를 함께 노출 — 링크는 설정(baseUrl/projectKey)에서 조립.
     private void handleGreeting(SlackEventInner event) {
         if (event.channel() != null && event.ts() != null) {
-            String message = ":wave: 안녕하세요! 저는 지라봇이에요. 이런 걸 도와드릴 수 있어요:\n\n" + HELP_TEXT;
+            String message = ":wave: 안녕하세요! 저는 솔루션 개발팀의 지라 봇이에요. "
+                    + projectLink() + " 와 연결되어 있어요!\n"
+                    + "이런 걸 도와드릴 수 있어요:\n\n" + HELP_TEXT;
             slackNotifier.postThreadReply(event.channel(), event.ts(), message);
         }
+    }
+
+    // STUDY: Jira 소프트웨어 프로젝트 보드 링크를 Slack 링크(<url|텍스트>) 형식으로 조립.
+    //        설정이 비어있으면 링크 없이 일반 텍스트로 폴백.
+    private String projectLink() {
+        String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl().replaceAll("/+$", "");
+        String key = jiraProps.projectKey();
+        if (base.isEmpty() || key == null || key.isBlank()) {
+            return "Jira 프로젝트";
+        }
+        return "<" + base + "/jira/software/c/projects/" + key + "|" + key + " 프로젝트>";
     }
 
     // STUDY: 스레드에서 호출하면 스레드에 응답, 채널에서 호출하면 채널 메시지로 응답.
