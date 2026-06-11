@@ -31,10 +31,14 @@ func main() {
 
 	handler := NewHandler(eventForwarder, logger)
 	interactionHandler := NewInteractionHandler(interactionForwarder, logger)
+	jiraWebhookHandler := NewJiraWebhookHandler(cfg.SpringJiraWebhookURL,
+		&http.Client{Timeout: cfg.ForwardTimeout}, logger)
 
 	mux := http.NewServeMux()
 	mux.Handle("/slack/events", handler)
 	mux.Handle("/slack/interactions", interactionHandler)
+	// Jira → (ngrok) → 이 봇 → Spring 프록시. 인증(?token=)은 Spring 이 검증한다.
+	mux.Handle("/api/jira/webhook", jiraWebhookHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

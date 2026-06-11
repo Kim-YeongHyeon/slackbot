@@ -174,20 +174,22 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
             if (mapping.isEmpty() && assigneeItem.toValue() != null && !assigneeItem.toValue().isBlank()) {
                 mapping = userMappingRepository.findByJiraDisplayName(assigneeItem.toValue());
             }
+            // STUDY: 여기부터는 "할당 변경이 실제 감지된" 경우라 빈도가 낮다 — skip 사유를 INFO 로 남겨
+            //        "알림이 안 왔어요" 문의를 로그만으로 진단할 수 있게 한다.
             if (mapping.isEmpty()) {
-                log.debug("Assign DM skipped: no mapping for assignee '{}' ({})",
-                        assigneeItem.toValue(), assigneeItem.toId());
+                log.info("Assign DM skipped key={}: no mapping for assignee '{}' (accountId={})",
+                        issueKey, assigneeItem.toValue(), assigneeItem.toId());
                 return;
             }
             if (!mapping.get().isAssignDmEnabled()) {
-                log.debug("Assign DM skipped: disabled for {}", mapping.get().getSlackUserId());
+                log.info("Assign DM skipped key={}: disabled for {}", issueKey, mapping.get().getSlackUserId());
                 return;
             }
 
             // 셀프할당(변경자 본인에게 할당)은 DM 생략 — 본인이 한 행동이라 알림 가치가 없다.
             String actorAccountId = root.path("user").path("accountId").asText(null);
             if (actorAccountId != null && actorAccountId.equals(assigneeItem.toId())) {
-                log.debug("Assign DM skipped: self-assignment by {}", actorAccountId);
+                log.info("Assign DM skipped key={}: self-assignment by {}", issueKey, actorAccountId);
                 return;
             }
 

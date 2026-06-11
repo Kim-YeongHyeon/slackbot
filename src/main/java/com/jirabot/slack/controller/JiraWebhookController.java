@@ -44,6 +44,9 @@ public class JiraWebhookController {
             return ResponseEntity.status(403).body(Map.of("ok", false, "error", "forbidden"));
         }
 
+        // STUDY: 수신 자체를 INFO 로 남긴다 — "webhook 이 도착했는데 조용히 skip" 과
+        //        "아예 도착 안 함"(Jira 등록 URL 문제)을 운영 로그만으로 구분하기 위함.
+        log.info("Jira webhook received ({} bytes)", body == null ? 0 : body.length());
         service.process(body);
         // STUDY: 인증 통과 후에는 페이로드 파싱·처리 실패와 무관하게 항상 200. Jira 재시도 폭주 방지.
         return ResponseEntity.ok(Map.of("ok", true));

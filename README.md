@@ -31,6 +31,18 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 - **인덱스**: `issues(status_category)`, `issues(sprint_id)`, `issues(completed_at)`.
 - **운영 설정**: `show-sql` off, 로깅 INFO(트러블슈팅 시 `LOG_LEVEL_APP=DEBUG`), HikariCP `maximum-pool-size: 15`.
 
+### Jira 웹훅 수신 경로 (v0.0.23)
+
+Jira → ngrok 터널(:3000) → **Go 봇 `/api/jira/webhook` 프록시** → Spring `/api/jira/webhook`.
+ngrok 이 Go 봇만 노출하므로 프록시가 필수다. 등록은 Jira **사이트 관리자**가 설정 → 시스템 → 웹훅에서:
+
+- URL: `https://<ngrok-domain>/api/jira/webhook?token=<JIRA_WEBHOOK_SECRET>`
+- 이벤트: 이슈 → **업데이트됨** (`jira:issue_updated`)
+- JQL 필터: `project = ES2`
+
+등록이 없으면 할당 DM·스레드 상태변경 알림·버그 완료 Notion 자동 동기화가 모두 동작하지 않는다.
+수신/할당 DM 판정(발송·생략 사유)은 INFO 로그로 남는다 (`Jira webhook received`, `Assign DM sent/skipped`).
+
 ### Claude CLI 최적화 (v0.0.22)
 
 - **프롬프트 skill 파일 외부화**: 분류/검색/해결요약/브랜치슬러그 시스템 프롬프트를 디스크 `prompts/*.md` 로 분리하고

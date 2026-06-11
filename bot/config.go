@@ -11,6 +11,8 @@ type Config struct {
 	Port               string
 	SpringURL          string
 	SpringInteractionURL string
+	// ngrok 터널이 :3000(이 봇)만 노출하므로 Jira webhook 도 이 봇을 경유해 Spring 으로 프록시한다.
+	SpringJiraWebhookURL string
 	SigningSecret      string
 	BotToken           string
 	ForwardTimeout     time.Duration
@@ -21,6 +23,7 @@ func LoadConfig() (Config, error) {
 		Port:               envOr("PORT", "3000"),
 		SpringURL:          envOr("SPRING_EVENT_URL", "http://localhost:8080/api/slack/event"),
 		SpringInteractionURL: envOr("SPRING_INTERACTION_URL", "http://localhost:8080/api/slack/interaction"),
+		SpringJiraWebhookURL: envOr("SPRING_JIRA_WEBHOOK_URL", "http://localhost:8080/api/jira/webhook"),
 		SigningSecret:      os.Getenv("SLACK_SIGNING_SECRET"),
 		BotToken:           os.Getenv("SLACK_BOT_TOKEN"),
 		ForwardTimeout:     5 * time.Second,
