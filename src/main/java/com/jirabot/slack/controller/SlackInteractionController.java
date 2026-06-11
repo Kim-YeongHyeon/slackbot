@@ -117,6 +117,13 @@ public class SlackInteractionController {
         JsonNode originalBlocks =
                 payload.message() != null ? payload.message().blocks() : null;
 
+        // STUDY: 브랜치 버튼은 repo 마다 action_id 가 고유(jira_create_branch_N)하므로 prefix 로 판별한다.
+        //        value = "issueKey|repo|branch" 에 모든 정보가 있어 action_id 의 인덱스는 라우팅에만 쓴다.
+        if (actionId != null && actionId.startsWith(BlockKitBuilder.ACTION_CREATE_BRANCH)) {
+            handleCreateBranch(issueKey, channelId, messageTs);
+            return;
+        }
+
         switch (actionId) {
             case BlockKitBuilder.ACTION_TODO ->
                     doTransition(issueKey, "해야 할 일", ":clipboard:", "해야 할 일",
@@ -134,9 +141,6 @@ public class SlackInteractionController {
                             userName, channelId, messageTs, originalBlocks, false);
             case BlockKitBuilder.ACTION_QUICK_DONE ->
                     handleQuickDone(issueKey, userName, channelId, messageTs, originalBlocks);
-            case BlockKitBuilder.ACTION_CREATE_BRANCH ->
-                    // STUDY: value = "issueKey|repo|branch" 가 issueKey 자리로 들어온다.
-                    handleCreateBranch(issueKey, channelId, messageTs);
             default -> log.warn("Unknown action_id: {}", actionId);
         }
     }

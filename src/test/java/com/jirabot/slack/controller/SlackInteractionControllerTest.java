@@ -164,8 +164,9 @@ class SlackInteractionControllerTest {
                 .thenReturn(BranchResult.created("feature/PROJ-1-test",
                         "https://github.com/CryptoLabInc/evi/tree/feature/PROJ-1-test"));
 
+        // 실제 버튼 action_id 는 repo 별 고유(prefix + 인덱스). prefix 라우팅으로 잡힌다.
         controller.onInteraction(
-                mockRequest(buildPayload(BlockKitBuilder.ACTION_CREATE_BRANCH, "PROJ-1|evi|feature/PROJ-1-test")));
+                mockRequest(buildPayload(BlockKitBuilder.ACTION_CREATE_BRANCH + "_1", "PROJ-1|evi|feature/PROJ-1-test")));
 
         verify(gitHubApiClient).createBranch("evi", "feature/PROJ-1-test");
         ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);

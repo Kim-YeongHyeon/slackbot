@@ -37,8 +37,11 @@ public final class BlockKitBuilder {
                 ":herb: *브랜치 만들기* — 어느 repo에 만들까요?\n권장 브랜치명: `" + branchName + "`"));
 
         ArrayNode elements = MAPPER.createArrayNode();
+        // STUDY: Slack 은 한 메시지 내 모든 버튼의 action_id 가 유일해야 한다(중복이면 invalid_blocks).
+        //        repo 별로 인덱스를 붙여 고유화하되, 라우팅은 ACTION_CREATE_BRANCH prefix 로 판별한다.
+        int i = 0;
         for (String repo : repos) {
-            elements.add(buildButton(repo, ACTION_CREATE_BRANCH,
+            elements.add(buildButton(repo, ACTION_CREATE_BRANCH + "_" + i++,
                     issueKey + "|" + repo + "|" + branchName, null, null));
         }
         ObjectNode actions = MAPPER.createObjectNode();

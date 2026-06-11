@@ -139,3 +139,17 @@
 **How to apply**: 엔티티에 NOT NULL 컬럼을 추가하는 PR 을 만들거나 리뷰할 때, 대상 테이블에 데이터가 있을 수 있으면
 columnDefinition DEFAULT 가 있는지 먼저 확인. 없으면 이 함정. 그리고 "column does not exist" 런타임 에러는
 스키마 마이그레이션 실패를 1순위로 의심.
+
+---
+
+## L9 — Slack Block Kit: 한 메시지 내 모든 버튼의 action_id 는 유일해야 한다
+
+**Context**: "진행 중" 전환 시 repo 12개를 버튼으로 띄우는 기능(v0.0.17). 모든 버튼에 같은 action_id `jira_create_branch` 를 부여.
+
+**Mistake**: 단위 테스트(JSON 구조 검증)는 통과했지만, 실제 Slack `chat.postMessage` 가 `invalid_blocks: "action_id ... already exists"` 로 거부 → 버튼 메시지가 아예 안 떴다. Slack 은 한 메시지 안의 모든 interactive element 의 action_id 가 유일하길 요구한다. 라우팅 편의로 동일 action_id 를 재사용한 게 원인.
+
+**Rule**:
+- 같은 메시지에 같은 종류 버튼을 여러 개 둘 때 action_id 를 `prefix_N`(또는 `prefix:key`)로 **고유화**하고, 핸들러는 `actionId.startsWith(prefix)` 로 라우팅한다. 식별 데이터는 버튼 `value` 에 싣는다.
+- Block Kit 을 새로 만들면 단위 테스트(구조)만 믿지 말고 **실제 Slack API 응답(ok/invalid_blocks)을 로그로 확인**하거나 Block Kit Builder 로 검증한다. Slack 측 검증 규칙(action_id 유일성, 25개 한도 등)은 우리 JSON 직렬화 테스트가 못 잡는다.
+
+**How to apply**: 반복 버튼 생성 루프를 보면 action_id 고유성부터 점검. 배포 후 첫 사용 시 `/tmp/slackbot.log` 에서 `block message sent ... "ok":false` 를 grep 해 invalid_blocks 를 조기 발견.

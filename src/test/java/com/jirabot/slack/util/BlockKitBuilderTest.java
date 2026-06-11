@@ -25,7 +25,12 @@ class BlockKitBuilderTest {
         assertThat(actions.path("type").asText()).isEqualTo("actions");
         JsonNode elements = actions.path("elements");
         assertThat(elements).hasSize(2);
-        assertThat(elements.get(0).path("action_id").asText()).isEqualTo(BlockKitBuilder.ACTION_CREATE_BRANCH);
+        // Slack 은 메시지 내 action_id 유일성을 요구 → repo 마다 고유(prefix + 인덱스), 라우팅은 prefix 로.
+        assertThat(elements.get(0).path("action_id").asText())
+                .startsWith(BlockKitBuilder.ACTION_CREATE_BRANCH).isEqualTo(BlockKitBuilder.ACTION_CREATE_BRANCH + "_0");
+        assertThat(elements.get(1).path("action_id").asText()).isEqualTo(BlockKitBuilder.ACTION_CREATE_BRANCH + "_1");
+        assertThat(elements.get(0).path("action_id").asText())
+                .isNotEqualTo(elements.get(1).path("action_id").asText());
         assertThat(elements.get(0).path("value").asText()).isEqualTo("ES2-1|envector-msa|feature/ES2-1-foo");
         assertThat(elements.get(1).path("value").asText()).isEqualTo("ES2-1|evi|feature/ES2-1-foo");
     }
