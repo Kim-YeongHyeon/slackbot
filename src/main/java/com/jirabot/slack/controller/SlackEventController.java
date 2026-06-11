@@ -603,7 +603,8 @@ public class SlackEventController {
         //        @Async가 아닌 이유: 결과 메시지를 바로 받아야 하므로.
         //        다만 Slack 3초 ack는 이미 200을 반환했으므로 블로킹해도 무방.
         slackExecutor.execute(() -> {
-            String result = jiraSyncService.syncActiveSprint();
+            // STUDY: 수동 동기화도 전체 동기화(활성+백로그+삭제 정리)로 처리.
+            String result = jiraSyncService.fullSync();
             if (event.channel() != null && event.ts() != null) {
                 slackNotifier.postThreadReply(event.channel(), event.ts(), result);
             }

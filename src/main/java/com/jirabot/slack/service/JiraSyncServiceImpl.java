@@ -4,10 +4,14 @@ import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.dto.SprintInfo;
 import com.jirabot.slack.client.dto.SprintIssue;
 import com.jirabot.slack.entity.IssueEntity;
+import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.repository.IssueRepository;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -35,8 +39,49 @@ public class JiraSyncServiceImpl implements JiraSyncService {
     @Scheduled(cron = "0 0 8 * * *", zone = "Asia/Seoul")
     public void scheduledSync() {
         log.info("Daily scheduled sync started");
-        syncActiveSprint();
-        syncBacklog();
+        log.info(fullSync());
+    }
+
+    @Override
+    public String fullSync() {
+        String active = syncActiveSprint();
+        String backlog = syncBacklog();
+        int pruned = pruneDeletedIssues();
+        String prune = pruned > 0 ? String.format("\n:wastebasket: Jira 에서 삭제된 이슈 %d건 정리", pruned) : "";
+        return active + "\n" + backlog + prune;
+    }
+
+    // STUDY: Jira 에서 삭제된 이슈 정리. 활성 스프린트+백로그 fetch 에 없는 "미완료" 로컬 이슈만 후보로 보고,
+    //        Jira 에 직접 조회해 404 인 것만 삭제. 완료 이슈는 리포트/이력용으로 보존하므로 제외한다.
+    //        fetch 가 maxResults 로 잘려도 존재 확인(issueExists)이 200 을 주면 보존돼 오삭제를 막는다.
+    @Override
+    public int pruneDeletedIssues() {
+        Set<String> seen = new HashSet<>();
+        Optional<SprintInfo> active = jira.getActiveSprint();
+        active.ifPresent(s -> jira.getSprintIssues(s.id()).forEach(i -> seen.add(i.key())));
+        jira.getBacklogIssues().forEach(i -> seen.add(i.key()));
+        if (seen.isEmpty()) {
+            // 활성 스프린트도 없고 백로그도 비었음 → 비정상/일시 오류 가능. mass-delete 방지 위해 skip.
+            log.warn("Prune skipped: no issues seen from Jira (active+backlog empty)");
+            return 0;
+        }
+
+        List<IssueEntity> openIssues = issueRepository.findByStatusCategoryNot(StatusCategory.DONE);
+        List<String> toDelete = new ArrayList<>();
+        for (IssueEntity issue : openIssues) {
+            if (seen.contains(issue.getIssueKey())) {
+                continue;  // 현재 Jira 에 존재(활성/백로그)
+            }
+            // 후보: fetch 에 없음 → Jira 직접 확인. 404 만 삭제, 200/불확실은 보존.
+            if (!jira.issueExists(issue.getIssueKey())) {
+                toDelete.add(issue.getIssueKey());
+            }
+        }
+        if (!toDelete.isEmpty()) {
+            issueRepository.deleteByIssueKeyIn(toDelete);
+            log.info("Pruned {} Jira-deleted issues: {}", toDelete.size(), toDelete);
+        }
+        return toDelete.size();
     }
 
     @Override

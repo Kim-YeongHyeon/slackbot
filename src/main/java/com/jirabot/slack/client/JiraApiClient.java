@@ -37,6 +37,12 @@ public interface JiraApiClient {
     boolean transitionIssue(String issueKey, String targetStatusName);
 
     /**
+     * Jira 에 해당 이슈가 존재하는지. 404 면 false(삭제됨), 200 이면 true.
+     * 불확실(네트워크/5xx)하면 보존을 위해 true 를 반환한다(삭제 prune 의 오삭제 방지).
+     */
+    boolean issueExists(String issueKey);
+
+    /**
      * Create a sub-task under a parent issue.
      *
      * @param jiraAccountId 보고자/담당자 Jira accountId (null이면 API 토큰 소유자가 기본값)

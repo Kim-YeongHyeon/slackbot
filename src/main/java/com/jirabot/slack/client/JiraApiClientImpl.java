@@ -275,6 +275,26 @@ public class JiraApiClientImpl implements JiraApiClient {
     }
 
     @Override
+    public boolean issueExists(String issueKey) {
+        try {
+            jiraWebClient.get()
+                    .uri("/rest/api/3/issue/{key}?fields=key", issueKey)
+                    .retrieve().bodyToMono(String.class).block();
+            return true;
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                return false;  // 삭제됨
+            }
+            // 불확실(권한/5xx 등) → 오삭제 방지 위해 존재로 간주.
+            log.warn("issueExists {} unexpected {} — treating as exists", issueKey, e.getStatusCode());
+            return true;
+        } catch (Exception e) {
+            log.warn("issueExists {} error: {} — treating as exists", issueKey, e.toString());
+            return true;
+        }
+    }
+
+    @Override
     public boolean transitionIssue(String issueKey, String targetStatusName) {
         try {
             // STUDY: Jira 상태 전환은 2단계 — (1) 가능한 transition 목록 조회 (2) transition 실행.

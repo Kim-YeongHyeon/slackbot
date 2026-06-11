@@ -27,6 +27,9 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
 
     List<IssueEntity> findByStatusCategoryNot(String statusCategory);
 
+    // STUDY: Jira 에서 삭제 확인된 이슈를 키 목록으로 일괄 삭제 (prune). 파생 delete 쿼리.
+    long deleteByIssueKeyIn(java.util.Collection<String> issueKeys);
+
     // STUDY: 현재 스프린트의 미완료 이슈 — 일일 리마인더(스프린트 범위) 용. statusCategory <> '완료' AND sprint_id = ?.
     List<IssueEntity> findByStatusCategoryNotAndSprintId(String statusCategory, Integer sprintId);
 

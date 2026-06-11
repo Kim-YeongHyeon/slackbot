@@ -85,4 +85,25 @@ class JiraApiClientImplTest {
                 new IssueClassification(IssueClassification.IssueType.OTHER, 1, "t", "s"), "U", null))
                 .isInstanceOf(JiraTransientException.class);
     }
+
+    @Test
+    void issueExists_returnsTrueOn200() {
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody("{\"key\":\"PROJ-1\"}"));
+        assertThat(client.issueExists("PROJ-1")).isTrue();
+    }
+
+    @Test
+    void issueExists_returnsFalseOn404() {
+        server.enqueue(new MockResponse().setResponseCode(404).setBody("{\"errorMessages\":[\"not found\"]}"));
+        assertThat(client.issueExists("PROJ-9")).isFalse();
+    }
+
+    @Test
+    void issueExists_treatsServerErrorAsExists() {
+        // 불확실(5xx)하면 오삭제 방지 위해 존재로 간주.
+        server.enqueue(new MockResponse().setResponseCode(500).setBody("boom"));
+        assertThat(client.issueExists("PROJ-2")).isTrue();
+    }
 }
