@@ -31,6 +31,16 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 - **인덱스**: `issues(status_category)`, `issues(sprint_id)`, `issues(completed_at)`.
 - **운영 설정**: `show-sql` off, 로깅 INFO(트러블슈팅 시 `LOG_LEVEL_APP=DEBUG`), HikariCP `maximum-pool-size: 15`.
 
+### 스키마 마이그레이션 — Flyway (v0.0.24)
+
+- 스키마는 **`src/main/resources/db/migration/V<N>__*.sql` 마이그레이션으로만 변경**한다. `ddl-auto=validate` 라
+  엔티티만 고치면 기동이 실패한다(의도된 동작 — 조용한 드리프트 차단).
+- 컬럼/테이블 추가 절차: ① `V2__add_xxx.sql` 작성 ② 엔티티 동기 수정 ③ 테스트 ④ 배포(기동 시 자동 적용).
+- 기존 운영 DB 는 `baseline-on-migrate` 로 V1(2026-06-11 스냅샷)이 적용된 것으로 처리됐고,
+  신규(빈) DB 는 V1 부터 실행되어 전체 스키마가 만들어진다 (신규 설치 경로 검증 완료).
+- 테스트(H2)는 Flyway 를 끄고 기존 create-drop 유지 (`application-test.yml`).
+- 백업: 전환 직전 풀 백업 `~/backups/jirabot-pre-flyway-*.dump` (복원: `pg_restore -U jirabot -d jirabot <dump>`).
+
 ### Jira 웹훅 수신 경로 (v0.0.23)
 
 Jira → ngrok 터널(:3000) → **Go 봇 `/api/jira/webhook` 프록시** → Spring `/api/jira/webhook`.

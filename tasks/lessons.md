@@ -134,7 +134,8 @@
   `\d <table>` 로 컬럼 실재 여부를 검증. WARN 은 안 보면 묻힌다.
 - 이미 깨진 운영 DB 복구는 `ALTER TABLE <t> ADD COLUMN IF NOT EXISTS <c> <type> NOT NULL DEFAULT <v>;`
   (앱 재시작 불필요 — 떠있는 앱 쿼리가 즉시 통과).
-- 근본 해결: `application.yml` 주석대로 Flyway + `ddl-auto=validate`.
+- 근본 해결: `application.yml` 주석대로 Flyway + `ddl-auto=validate`. **→ v0.0.24 에서 적용 완료**
+  (V1 baseline + baseline-on-migrate, 이후 스키마 변경은 V<N> 마이그레이션으로만. 이 함정 자체가 구조적으로 제거됨).
 
 **How to apply**: 엔티티에 NOT NULL 컬럼을 추가하는 PR 을 만들거나 리뷰할 때, 대상 테이블에 데이터가 있을 수 있으면
 columnDefinition DEFAULT 가 있는지 먼저 확인. 없으면 이 함정. 그리고 "column does not exist" 런타임 에러는

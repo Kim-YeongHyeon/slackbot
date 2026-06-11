@@ -6,6 +6,10 @@ spring:
     driver-class-name: org.h2.Driver
     username: sa
     password: ""
+  # STUDY: V1 baseline 은 PG 방언이라 H2 에서 돌리지 않는다. 테스트는 기존대로
+  #        Hibernate create-drop 으로 스키마를 만들고, Flyway 는 운영(PG) 전용.
+  flyway:
+    enabled: false
   jpa:
     hibernate:
       ddl-auto: create-drop

@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'com.jirabot'
-version = '0.0.23-SNAPSHOT'
+version = '0.0.24-SNAPSHOT'
 description = 'Jira Slack Bot Server'
 
 java {
@@ -35,6 +35,10 @@ dependencies {
 	//        활성 스프린트처럼 "자주 읽고 드물게 바뀌는" 외부 API 응답을 짧은 TTL 로 흡수한다.
 	implementation 'org.springframework.boot:spring-boot-starter-cache'
 	implementation 'com.github.ben-manes.caffeine:caffeine'
+	// STUDY: Flyway 10.x 부터 DB 별 지원이 모듈로 분리 — PG 는 flyway-database-postgresql 필수.
+	//        스키마는 V<N>__*.sql 마이그레이션으로만 변경하고 Hibernate 는 validate 로 검증만 한다 (레슨 L8 근본 해결).
+	implementation 'org.flywaydb:flyway-core'
+	implementation 'org.flywaydb:flyway-database-postgresql'
 	runtimeOnly 'org.postgresql:postgresql'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'io.projectreactor:reactor-test'
