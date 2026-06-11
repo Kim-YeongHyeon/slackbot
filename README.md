@@ -22,6 +22,24 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
+### 성능/안정성 (v0.0.21)
+
+- **검색 선행 sync TTL**: 검색 전 freshness 용 Jira sync(2~3초)를 60초 TTL로 게이트 — 연속 검색은 첫 번째만 지연.
+- **활성 스프린트 캐시**: `getActiveSprint()` 를 Caffeine 5분 TTL 캐시로 — 호출마다 Jira 왕복 2회(보드+스프린트) 제거.
+- **fullSync 공유 fetch**: sync 와 삭제-정리(prune)가 sprint/backlog 목록을 1회만 조회 (기존 2배 왕복 제거).
+- **DB 쿼리 최적화**: `내작업`·시맨틱 검색의 `findAll()` 전체 로드 제거(전용 쿼리/상한 150건), 중복 감지 키워드별 N회 LIKE → 1회 조회 + 집계.
+- **인덱스**: `issues(status_category)`, `issues(sprint_id)`, `issues(completed_at)`.
+- **운영 설정**: `show-sql` off, 로깅 INFO(트러블슈팅 시 `LOG_LEVEL_APP=DEBUG`), HikariCP `maximum-pool-size: 15`.
+
+### Claude CLI 최적화 (v0.0.22)
+
+- **프롬프트 skill 파일 외부화**: 분류/검색/해결요약/브랜치슬러그 시스템 프롬프트를 디스크 `prompts/*.md` 로 분리하고
+  `--system-prompt-file` 로 전달 (headless 권장 패턴, stdin 은 순수 사용자 입력만). 프롬프트 수정에 재빌드 불필요,
+  파일 없으면 기존 인라인 방식으로 자동 폴백.
+- **모델 계층화**: 브랜치 슬러그 같은 단순 변환은 `claude.fast-model`(기본 Haiku 4.5)로 — Sonnet 대비 수 초 단축.
+  품질이 중요한 이슈 분류·시맨틱 검색·버그 해결 요약은 Sonnet 유지.
+- **검색 컨텍스트 상한**: 시맨틱 검색이 Claude 에게 보내는 이슈 목록을 최근 갱신순 150건으로 제한 — 토큰/지연 절감.
+
 ## 아키텍처
 
 ```

@@ -88,4 +88,44 @@ class JiraSyncServiceImplTest {
         assertThat(pruned).isZero();
         verify(issueRepository, never()).deleteByIssueKeyIn(anyCollection());
     }
+
+    // --- syncIfStale (검색 선행 sync 의 TTL 게이트) ---
+
+    @Test
+    void syncIfStale_firstCallSyncs_secondWithinTtlSkips() {
+        when(jira.getActiveSprint()).thenReturn(Optional.empty());
+        when(jira.getBacklogIssues()).thenReturn(List.of());
+
+        service.syncIfStale(java.time.Duration.ofSeconds(60));
+        service.syncIfStale(java.time.Duration.ofSeconds(60));
+
+        // 첫 호출만 Jira 왕복, TTL 내 두 번째 호출은 생략된다.
+        verify(jira, org.mockito.Mockito.times(1)).getActiveSprint();
+        verify(jira, org.mockito.Mockito.times(1)).getBacklogIssues();
+    }
+
+    @Test
+    void syncIfStale_zeroTtl_alwaysSyncs() {
+        when(jira.getActiveSprint()).thenReturn(Optional.empty());
+        when(jira.getBacklogIssues()).thenReturn(List.of());
+
+        service.syncIfStale(java.time.Duration.ZERO);
+        service.syncIfStale(java.time.Duration.ZERO);
+
+        verify(jira, org.mockito.Mockito.times(2)).getActiveSprint();
+    }
+
+    @Test
+    void fullSync_refreshesTtl_soFollowingSyncIfStaleSkips() {
+        when(jira.getActiveSprint()).thenReturn(Optional.empty());
+        when(jira.getBacklogIssues()).thenReturn(List.of());
+
+        service.fullSync();              // 수동/스케줄 sync — TTL 타임스탬프 갱신
+        service.syncIfStale(java.time.Duration.ofSeconds(60));
+
+        // fullSync 는 공유-fetch 로 sprint/backlog 를 각 1회만 조회하고(sync+prune 공용),
+        // 이후 TTL 내 syncIfStale 은 통째로 생략된다.
+        verify(jira, org.mockito.Mockito.times(1)).getActiveSprint();
+        verify(jira, org.mockito.Mockito.times(1)).getBacklogIssues();
+    }
 }

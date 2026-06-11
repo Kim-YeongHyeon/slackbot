@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'com.jirabot'
-version = '0.0.20-SNAPSHOT'
+version = '0.0.21-SNAPSHOT'
 description = 'Jira Slack Bot Server'
 
 java {
@@ -31,6 +31,10 @@ dependencies {
 	//        Boot 버전 업그레이드 시 자동으로 호환 버전으로 따라간다. 명시 버전을 박지 않는 것은 의도된 정책.
 	implementation 'org.springframework.retry:spring-retry'
 	implementation 'org.springframework:spring-aspects'
+	// STUDY: Spring Cache 추상화(@Cacheable) + Caffeine 구현체. 버전은 Boot BOM 이 관리.
+	//        활성 스프린트처럼 "자주 읽고 드물게 바뀌는" 외부 API 응답을 짧은 TTL 로 흡수한다.
+	implementation 'org.springframework.boot:spring-boot-starter-cache'
+	implementation 'com.github.ben-manes.caffeine:caffeine'
 	runtimeOnly 'org.postgresql:postgresql'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'io.projectreactor:reactor-test'

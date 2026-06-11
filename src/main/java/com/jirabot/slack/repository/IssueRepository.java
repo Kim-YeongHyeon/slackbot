@@ -17,15 +17,24 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
 
     Optional<IssueEntity> findByIssueKey(String issueKey);
 
-    // STUDY: JPQL의 LOWER + LIKE로 대소문자 무시 키워드 검색.
-    //        완료된 이슈는 제외하여 활성 이슈만 비교 대상으로 삼는다.
-    @Query("SELECT i FROM IssueEntity i WHERE LOWER(i.summary) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-           "AND i.statusCategory <> '완료'")
-    List<IssueEntity> findBySummaryContaining(@Param("keyword") String keyword);
-
     List<IssueEntity> findByAssigneeContaining(String name);
 
     List<IssueEntity> findByStatusCategoryNot(String statusCategory);
+
+    // STUDY: 내작업 조회 — 기존 findAll() 전체 로드 + Java 필터를 DB 쿼리로 대체 (메모리/지연 절감).
+    //        의미는 ScrumReportServiceImpl.isMyIssue 와 동일: reporter 가 Slack ID 와 정확히 일치(봇 생성 직후)
+    //        OR reporter/assignee 가 Jira displayName 을 포함(LIKE — 기존 contains() 와 동일하게 대소문자 구분).
+    @Query("SELECT i FROM IssueEntity i WHERE i.reporter = :slackUserId " +
+           "OR i.reporter LIKE CONCAT('%', :jiraName, '%') " +
+           "OR i.assignee LIKE CONCAT('%', :jiraName, '%')")
+    List<IssueEntity> findMyIssues(@Param("slackUserId") String slackUserId,
+                                   @Param("jiraName") String jiraName);
+
+    // 내작업 — Jira 이름 미해석(매핑 없음) 시 봇 생성 이슈(reporter=Slack ID)만.
+    List<IssueEntity> findByReporter(String reporter);
+
+    // STUDY: 시맨틱 검색의 Claude 컨텍스트 상한용 — 최근 갱신순 상위 N건만 (findAll 전체 로드 대체).
+    List<IssueEntity> findAllByOrderByJiraUpdatedDesc(Pageable pageable);
 
     // STUDY: Jira 에서 삭제 확인된 이슈를 키 목록으로 일괄 삭제 (prune). 파생 delete 쿼리.
     long deleteByIssueKeyIn(java.util.Collection<String> issueKeys);

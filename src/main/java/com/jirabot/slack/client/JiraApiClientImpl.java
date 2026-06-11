@@ -133,7 +133,12 @@ public class JiraApiClientImpl implements JiraApiClient {
         }
     }
 
+    // STUDY: @Cacheable — 호출마다 Jira 왕복 2회(보드+스프린트)를 5분 TTL 캐시(CacheConfig)로 흡수.
+    //        스프린트는 2주 주기로 바뀌므로 5분 staleness 는 무해. Optional 자체가 캐시되므로
+    //        "활성 스프린트 없음"(empty) 도 5분간 재조회하지 않는다.
+    //        주의: 같은 클래스 내부 호출(self-invocation)은 프록시를 우회해 캐시를 타지 않는다.
     @Override
+    @org.springframework.cache.annotation.Cacheable(com.jirabot.slack.config.CacheConfig.ACTIVE_SPRINT_CACHE)
     public Optional<SprintInfo> getActiveSprint() {
         try {
             // STUDY: Jira Agile API로 프로젝트의 보드를 찾고, 활성 스프린트를 조회한다.

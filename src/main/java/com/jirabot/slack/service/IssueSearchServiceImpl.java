@@ -26,6 +26,13 @@ public class IssueSearchServiceImpl implements IssueSearchService {
     static final int MAX_SEARCH_RESULTS = 50;
     private static final int SEARCH_MAX_DISPLAY = 10;
 
+    // STUDY: 시맨틱 검색에서 Claude 에게 보내는 이슈 수 상한 — 최근 갱신순 우선.
+    //        전체(findAll)를 보내면 이슈가 늘수록 프롬프트 토큰/지연이 선형 증가한다.
+    static final int SEMANTIC_MAX_ISSUES = 150;
+
+    // STUDY: 검색 선행 sync 의 TTL. 이 시간 내 재검색이면 Jira 왕복(2~3s)을 생략하고 로컬 DB 로 즉시 응답.
+    static final java.time.Duration PREFETCH_TTL = java.time.Duration.ofSeconds(60);
+
     private final IssueRepository issueRepository;
     private final ClaudeApiClient claudeApiClient;
     private final JiraSyncService jiraSyncService;
@@ -42,13 +49,12 @@ public class IssueSearchServiceImpl implements IssueSearchService {
         this.jiraBaseUrl = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
     }
 
-    // STUDY: 검색 freshness 를 위해 sync 를 먼저 돌린다. 매 호출 2~3s 지연이 추가되지만 사용자가
-    //        Jira 에서 방금 만든 이슈/변경된 상태도 결과에 반영됨. sync 실패는 검색을 막지 않는다
-    //        (있는 로컬 데이터로라도 응답).
+    // STUDY: 검색 freshness 를 위해 sync 를 먼저 돌리되, TTL(60s) 내 재검색이면 생략한다.
+    //        연속 검색에서 매번 2~3s Jira 왕복을 반복하던 것을 첫 검색에만 지불하도록 개선.
+    //        sync 실패는 검색을 막지 않는다 (있는 로컬 데이터로라도 응답).
     private void prefetchFromJira() {
         try {
-            jiraSyncService.syncActiveSprint();
-            jiraSyncService.syncBacklog();
+            jiraSyncService.syncIfStale(PREFETCH_TTL);
         } catch (Exception e) {
             log.warn("Pre-search sync failed, proceeding with current DB state: {}", e.toString());
         }
@@ -71,10 +77,15 @@ public class IssueSearchServiceImpl implements IssueSearchService {
         log.info("Semantic search requested: query='{}' fallback='{}'", userQuery, fallbackKeyword);
         prefetchFromJira();
         try {
-            List<IssueEntity> allIssues = issueRepository.findAll();
+            // STUDY: findAll() 대신 최근 갱신순 상한 — Claude 컨텍스트(토큰·지연)와 메모리를 동시에 제한.
+            List<IssueEntity> allIssues = issueRepository.findAllByOrderByJiraUpdatedDesc(
+                    PageRequest.of(0, SEMANTIC_MAX_ISSUES));
             if (allIssues.isEmpty()) {
                 return CompletableFuture.completedFuture(
                         ":mag: 검색할 이슈가 없습니다. `@지라 sync`로 먼저 동기화해주세요.");
+            }
+            if (allIssues.size() == SEMANTIC_MAX_ISSUES) {
+                log.info("Semantic search context capped at {} most-recently-updated issues", SEMANTIC_MAX_ISSUES);
             }
 
             List<IssueSearchEntry> entries = allIssues.stream()

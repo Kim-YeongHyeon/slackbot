@@ -1,9 +1,9 @@
 package com.jirabot.slack.service;
 
 import com.jirabot.slack.entity.IssueEntity;
+import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.repository.IssueRepository;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -52,24 +52,21 @@ public class DuplicateDetectionServiceImpl implements DuplicateDetectionService 
             return List.of();
         }
 
-        // 각 키워드로 DB 검색 → 이슈별 매칭 키워드 수 집계
-        java.util.Map<Long, IssueEntity> issueMap = new java.util.LinkedHashMap<>();
-        java.util.Map<Long, Integer> matchCount = new java.util.HashMap<>();
+        // STUDY: 기존엔 키워드마다 LIKE 쿼리(5~10회 풀스캔)를 날렸다. 미완료 이슈를 1회만 가져와
+        //        Java 에서 키워드 포함 수를 집계 — 쿼리 1회로 동일 결과(LOWER LIKE = lowercase contains).
+        List<IssueEntity> candidates = issueRepository.findByStatusCategoryNot(StatusCategory.DONE);
 
-        for (String keyword : keywords) {
-            List<IssueEntity> matches = issueRepository.findBySummaryContaining(keyword);
-            for (IssueEntity issue : matches) {
-                issueMap.putIfAbsent(issue.getId(), issue);
-                matchCount.merge(issue.getId(), 1, Integer::sum);
-            }
-        }
-
-        // 2개 이상 키워드가 겹치는 이슈만 필터링, 매칭 수 내림차순 정렬
-        List<IssueEntity> result = matchCount.entrySet().stream()
-                .filter(e -> e.getValue() >= MIN_KEYWORD_MATCHES)
-                .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+        record Scored(IssueEntity issue, int matches) {}
+        List<IssueEntity> result = candidates.stream()
+                .map(issue -> {
+                    String summaryLower = issue.getSummary() == null ? "" : issue.getSummary().toLowerCase();
+                    int matches = (int) keywords.stream().filter(summaryLower::contains).count();
+                    return new Scored(issue, matches);
+                })
+                .filter(s -> s.matches() >= MIN_KEYWORD_MATCHES)
+                .sorted((a, b) -> Integer.compare(b.matches(), a.matches()))
                 .limit(MAX_RESULTS)
-                .map(e -> issueMap.get(e.getKey()))
+                .map(Scored::issue)
                 .toList();
 
         log.debug("Duplicate check for '{}': keywords={} candidates={}", title, keywords, result.size());

@@ -44,11 +44,41 @@ public class JiraSyncServiceImpl implements JiraSyncService {
 
     @Override
     public String fullSync() {
-        String active = syncActiveSprint();
-        String backlog = syncBacklog();
-        int pruned = pruneDeletedIssues();
+        // STUDY: sprint/backlog 를 한 번만 fetch 해서 sync 와 prune 이 공유한다.
+        //        기존엔 pruneDeletedIssues 가 같은 목록을 다시 fetch 해 Jira 왕복이 2배(페이지네이션 포함)였다.
+        Optional<SprintInfo> active = jira.getActiveSprint();
+        List<SprintIssue> sprintIssues = active.map(s -> jira.getSprintIssues(s.id())).orElse(List.of());
+        List<SprintIssue> backlogIssues = jira.getBacklogIssues();
+
+        String activeMsg = active.isEmpty()
+                ? "활성 스프린트가 없어 동기화를 건너뜁니다."
+                : syncActiveSprint(active.get(), sprintIssues);
+        String backlogMsg = syncBacklog(backlogIssues);
+
+        Set<String> seen = new HashSet<>();
+        sprintIssues.forEach(i -> seen.add(i.key()));
+        backlogIssues.forEach(i -> seen.add(i.key()));
+        int pruned = pruneDeletedIssues(seen);
+
+        lastSyncAt = Instant.now();
         String prune = pruned > 0 ? String.format("\n:wastebasket: Jira 에서 삭제된 이슈 %d건 정리", pruned) : "";
-        return active + "\n" + backlog + prune;
+        return activeMsg + "\n" + backlogMsg + prune;
+    }
+
+    // STUDY: 검색 선행 sync 의 TTL 게이트용 타임스탬프. volatile — 스케줄러/검색이 서로 다른 스레드에서
+    //        읽고 쓰므로 가시성만 보장하면 된다. 동시에 두 검색이 둘 다 sync 해도 멱등이라 락은 불필요.
+    private volatile Instant lastSyncAt;
+
+    @Override
+    public void syncIfStale(java.time.Duration maxAge) {
+        Instant last = lastSyncAt;
+        if (last != null && Instant.now().isBefore(last.plus(maxAge))) {
+            log.debug("Sync skipped — last sync {} is within TTL {}", last, maxAge);
+            return;
+        }
+        syncActiveSprint();
+        syncBacklog();
+        lastSyncAt = Instant.now();
     }
 
     // STUDY: Jira 에서 삭제된 이슈 정리. 활성 스프린트+백로그 fetch 에 없는 "미완료" 로컬 이슈만 후보로 보고,
@@ -60,6 +90,11 @@ public class JiraSyncServiceImpl implements JiraSyncService {
         Optional<SprintInfo> active = jira.getActiveSprint();
         active.ifPresent(s -> jira.getSprintIssues(s.id()).forEach(i -> seen.add(i.key())));
         jira.getBacklogIssues().forEach(i -> seen.add(i.key()));
+        return pruneDeletedIssues(seen);
+    }
+
+    // fullSync 가 이미 fetch 한 키 집합을 재사용하는 내부 경로 (Jira 재왕복 없음).
+    int pruneDeletedIssues(Set<String> seen) {
         if (seen.isEmpty()) {
             // 활성 스프린트도 없고 백로그도 비었음 → 비정상/일시 오류 가능. mass-delete 방지 위해 skip.
             log.warn("Prune skipped: no issues seen from Jira (active+backlog empty)");
@@ -90,10 +125,12 @@ public class JiraSyncServiceImpl implements JiraSyncService {
         if (activeSprint.isEmpty()) {
             return "활성 스프린트가 없어 동기화를 건너뜁니다.";
         }
-
         SprintInfo sprint = activeSprint.get();
-        List<SprintIssue> jiraIssues = jira.getSprintIssues(sprint.id());
+        return syncActiveSprint(sprint, jira.getSprintIssues(sprint.id()));
+    }
 
+    // fullSync 의 공유-fetch 경로용 내부 구현.
+    String syncActiveSprint(SprintInfo sprint, List<SprintIssue> jiraIssues) {
         int created = 0;
         int updated = 0;
 
@@ -134,11 +171,13 @@ public class JiraSyncServiceImpl implements JiraSyncService {
 
     @Override
     public String syncBacklog() {
-        // STUDY: Jira 보드의 백로그 뷰와 로컬 DB 의 sprint_id IS NULL 집합을 일치시킨다.
-        //        - 기존 entity 가 옛 sprint_id 를 들고 있더라도 clearSprint 로 NULL 화 (sprint→backlog 이동 케이스)
-        //        - 이번 sync 에 안 잡힌 sprint_id IS NULL 항목은 stale 로 간주해 삭제 (보드 필터 제외/완료 이동 등)
-        List<SprintIssue> backlogIssues = jira.getBacklogIssues();
+        return syncBacklog(jira.getBacklogIssues());
+    }
 
+    // STUDY: Jira 보드의 백로그 뷰와 로컬 DB 의 sprint_id IS NULL 집합을 일치시킨다.
+    //        - 기존 entity 가 옛 sprint_id 를 들고 있더라도 clearSprint 로 NULL 화 (sprint→backlog 이동 케이스)
+    //        - 이번 sync 에 안 잡힌 sprint_id IS NULL 항목은 stale 로 간주해 삭제 (보드 필터 제외/완료 이동 등)
+    String syncBacklog(List<SprintIssue> backlogIssues) {
         int created = 0;
         int updated = 0;
 

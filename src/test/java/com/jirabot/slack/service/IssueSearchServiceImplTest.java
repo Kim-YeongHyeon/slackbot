@@ -83,7 +83,7 @@ class IssueSearchServiceImplTest {
         IssueEntity issue2 = new IssueEntity("SLAC-8", "결제 금액 표시", "Bug", "완료", "완료",
                 "최아록", 2.0, "reporter", null, Instant.now(), Instant.now());
 
-        when(issueRepository.findAll()).thenReturn(List.of(issue1, issue2));
+        when(issueRepository.findAllByOrderByJiraUpdatedDesc(any())).thenReturn(List.of(issue1, issue2));
         when(claudeApiClient.searchIssues(any(), any())).thenReturn(List.of("SLAC-7"));
 
         String result = service.searchSemantic("로그인 에러 알려줘", "로그인").get();
@@ -97,7 +97,7 @@ class IssueSearchServiceImplTest {
         IssueEntity issue = new IssueEntity("SLAC-7", "로그인 에러", "Bug", "진행 중", "진행 중",
                 "김영현", 3.0, "reporter", null, Instant.now(), Instant.now());
 
-        when(issueRepository.findAll()).thenReturn(List.of(issue));
+        when(issueRepository.findAllByOrderByJiraUpdatedDesc(any())).thenReturn(List.of(issue));
         when(claudeApiClient.searchIssues(any(), any())).thenReturn(Collections.emptyList());
         when(issueRepository.searchByKeyword(eq("로그인"), any())).thenReturn(List.of(issue));
 
@@ -112,7 +112,7 @@ class IssueSearchServiceImplTest {
         IssueEntity issue = new IssueEntity("SLAC-7", "로그인 에러", "Bug", "진행 중", "진행 중",
                 "김영현", 3.0, "reporter", null, Instant.now(), Instant.now());
 
-        when(issueRepository.findAll()).thenReturn(List.of(issue));
+        when(issueRepository.findAllByOrderByJiraUpdatedDesc(any())).thenReturn(List.of(issue));
         when(claudeApiClient.searchIssues(any(), any())).thenThrow(new RuntimeException("Sonnet timeout"));
         when(issueRepository.searchByKeyword(eq("로그인"), any())).thenReturn(List.of(issue));
 
@@ -124,12 +124,24 @@ class IssueSearchServiceImplTest {
 
     @Test
     void searchSemantic_noIssuesInDb_showsSyncMessage() throws ExecutionException, InterruptedException {
-        when(issueRepository.findAll()).thenReturn(Collections.emptyList());
+        when(issueRepository.findAllByOrderByJiraUpdatedDesc(any())).thenReturn(Collections.emptyList());
 
         String result = service.searchSemantic("로그인", "로그인").get();
 
         assertThat(result).contains("sync");
         verify(claudeApiClient, never()).searchIssues(any(), any());
+    }
+
+    @Test
+    void search_prefetchUsesTtlGatedSync_notFullSyncEveryCall() throws ExecutionException, InterruptedException {
+        when(issueRepository.searchByKeyword(any(), any())).thenReturn(Collections.emptyList());
+
+        service.searchByKeyword("로그인").get();
+
+        // 매 검색마다 무조건 sync(2~3s) 하지 않고 TTL 게이트를 통과한다.
+        verify(jiraSyncService).syncIfStale(IssueSearchServiceImpl.PREFETCH_TTL);
+        verify(jiraSyncService, never()).syncActiveSprint();
+        verify(jiraSyncService, never()).syncBacklog();
     }
 
     @Test

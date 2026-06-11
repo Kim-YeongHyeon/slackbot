@@ -10,14 +10,20 @@ spring:
     username: ${POSTGRES_USER:jirabot}
     password: ${POSTGRES_PASSWORD:jirabot}
     driver-class-name: org.postgresql.Driver
+    # STUDY: HikariCP 기본 풀(10)은 slackTaskExecutor(max 10) + 스케줄러/웹훅이 겹치면 빠듯하다.
+    #        명시적으로 늘려 커넥션 대기 지연을 예방 (Postgres 기본 max_connections=100 내 여유).
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:15}
   jpa:
     # STUDY: ddl-auto=update는 개발용. 운영에서는 Flyway/Liquibase + validate 권장 (Phase 5).
     hibernate:
       ddl-auto: update
-    show-sql: true
+    # STUDY: show-sql 은 매 쿼리를 stdout 에 찍어 운영 성능/로그 용량을 갉아먹는다. 기본 끄고
+    #        디버깅 시에만 JPA_SHOW_SQL=true 로 켠다.
+    show-sql: ${JPA_SHOW_SQL:false}
     properties:
       hibernate:
-        format_sql: true
+        format_sql: false
         jdbc:
           time_zone: UTC
 
@@ -33,6 +39,8 @@ slack:
 claude:
   cli-path: ${CLAUDE_CLI_PATH:claude}
   model: claude-sonnet-4-6
+  # STUDY: 단순 변환 작업(브랜치 슬러그)용 경량 모델 — 지연 수 초 단축, 품질 동등.
+  fast-model: ${CLAUDE_FAST_MODEL:claude-haiku-4-5}
   timeout-seconds: 60
   permission-mode: plan
   max-turns: 1
@@ -109,7 +117,9 @@ management:
       exposure:
         include: health,info
 
+# STUDY: 운영 기본 INFO — DEBUG 는 Slack/Jira 페이로드까지 찍어 로그가 비대해진다.
+#        트러블슈팅 시 LOG_LEVEL_APP=DEBUG 만 바꿔 재시작.
 logging:
   level:
-    com.jirabot.slack: DEBUG
-    org.springframework.security: DEBUG
+    com.jirabot.slack: ${LOG_LEVEL_APP:INFO}
+    org.springframework.security: ${LOG_LEVEL_SECURITY:WARN}

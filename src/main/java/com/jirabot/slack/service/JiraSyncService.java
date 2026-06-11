@@ -29,4 +29,10 @@ public interface JiraSyncService {
      * 전체 동기화: 활성 스프린트 + 백로그 + 삭제 이슈 정리. 결과 요약 메시지 반환.
      */
     String fullSync();
+
+    /**
+     * 마지막 동기화가 maxAge 보다 오래됐을 때만 활성 스프린트+백로그를 동기화한다.
+     * 검색 등 "freshness 보장용 선행 sync" 가 매 호출 2~3초의 Jira 왕복을 반복하지 않도록 하는 TTL 게이트.
+     */
+    void syncIfStale(java.time.Duration maxAge);
 }

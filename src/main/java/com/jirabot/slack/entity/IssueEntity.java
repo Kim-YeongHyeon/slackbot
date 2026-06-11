@@ -9,9 +9,16 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 // STUDY: @Entity는 JPA가 관리하는 영속 객체. @Table로 테이블명을 명시하면 클래스명과 분리 가능.
-// STUDY: ddl-auto=update 상태에서는 이 Entity 추가 시 테이블이 자동 생��된다.
+// STUDY: ddl-auto=update 상태에서는 이 Entity 추가 시 테이블이 자동 생성된다.
+// STUDY: @Index — 자주 쓰는 필터/정렬 컬럼에 인덱스. ddl-auto=update 가 기존 테이블에도 생성해주지만
+//        실패는 WARN 으로만 남으므로 배포 후 \d issues 로 실재 확인(레슨 L8).
+//        status_category(미완료 필터), sprint_id(스프린트 리포트), completed_at(버그 조회 정렬) 커버.
 @Entity
-@Table(name = "issues")
+@Table(name = "issues", indexes = {
+        @jakarta.persistence.Index(name = "idx_issues_status_category", columnList = "status_category"),
+        @jakarta.persistence.Index(name = "idx_issues_sprint_id", columnList = "sprint_id"),
+        @jakarta.persistence.Index(name = "idx_issues_completed_at", columnList = "completed_at")
+})
 public class IssueEntity {
 
     @Id
