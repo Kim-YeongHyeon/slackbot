@@ -28,6 +28,12 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 @TestPropertySource(properties = {
         "slack.signing-secret=test-signing-secret",
+        // StartupEnvValidator(필수 키 fail-fast) 통과용 더미 — 이 테스트는 test 프로필을 안 쓰므로 직접 주입.
+        "slack.bot-token=xoxb-test",
+        "jira.base-url=http://localhost:9999",
+        "jira.email=test@example.com",
+        "jira.api-token=test-token",
+        "jira.project-key=TEST",
         "spring.autoconfigure.exclude=" +
                 "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration," +
                 "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration"

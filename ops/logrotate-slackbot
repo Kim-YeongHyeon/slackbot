@@ -1,0 +1,14 @@
+# slackbot bare-metal 운영 로그 로테이션.
+# 설치: sudo cp ops/logrotate-slackbot /etc/logrotate.d/slackbot
+# copytruncate — nohup 리다이렉트로 열린 fd 를 유지한 채 잘라낸다 (프로세스 재시작 불필요).
+/tmp/slackbot.log /tmp/gobot.log {
+    # /tmp 는 world-writable 이라 logrotate 가 기본 거부 → 로그 소유자(ubuntu)로 회전 명시.
+    su ubuntu ubuntu
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

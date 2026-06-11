@@ -17,6 +17,8 @@ spring:
 
 slack:
   signing-secret: test-signing-secret
+  # StartupEnvValidator(필수 키 fail-fast)가 컨텍스트 테스트에서도 통과하도록 더미 주입.
+  bot-token: xoxb-test-token
 
 claude:
   # /bin/true = 컨텍스트 부팅 시 실제 claude 바이너리가 설치되어 있지 않아도 통과.

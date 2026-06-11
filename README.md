@@ -117,7 +117,20 @@ GITHUB_BRANCH_REPOS=<버튼에 띄울 repo, 콤마 구분 (기본 envector-msa,e
 
 > **GitHub 토큰 발급**: GitHub → Settings → Developer settings → Fine-grained tokens → Resource owner=조직, 대상 repo 선택, Repository permissions의 **Contents: Read and write**. 발급한 토큰을 `GITHUB_BRANCH_TOKEN`에 넣으면 "진행 중" 전환 시 repo 선택 버튼이 활성화됩니다.
 
-### 2. 서비스 기동 (4개 터미널)
+### 2-A. 서비스 기동 — Docker Compose (권장, v0.0.25)
+
+```bash
+# 사전 조건: .env 작성 + 호스트에서 claude login (CLI 인증을 컨테이너 볼륨으로 재사용)
+docker-compose --profile full up -d --build   # Postgres + Spring(:8080) + Go봇(:3000)
+ngrok http 3000                                # 터널만 호스트에서
+```
+
+- `--profile full` 없이 `up -d` 하면 **Postgres만** 기동 (bare-metal 운영 호스트와 포트 충돌 방지용 안전장치).
+- 필수 환경변수(SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, JIRA_BASE_URL/EMAIL/API_TOKEN/PROJECT_KEY)가 비어 있으면
+  서버가 **기동 시점에 누락 키 목록과 함께 즉시 실패**합니다 (fail-fast — 모호한 첫-호출 실패 대신).
+- bare-metal 운영 로그 로테이션: `sudo cp ops/logrotate-slackbot /etc/logrotate.d/slackbot` (일 1회, 7일 보관).
+
+### 2-B. 서비스 기동 — 수동 (4개 터미널)
 
 ```bash
 # Terminal 1: PostgreSQL

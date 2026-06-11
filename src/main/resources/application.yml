@@ -6,7 +6,8 @@ spring:
     name: slackbot-server
   # STUDY: Spring Boot는 application.yml/properties에서 ${VAR:default} 로 env var 주입 가능.
   datasource:
-    url: jdbc:postgresql://localhost:5432/${POSTGRES_DB:jirabot}
+    # STUDY: 호스트를 변수화 — bare-metal 은 기본 localhost, docker-compose 에서는 POSTGRES_HOST=postgres 주입.
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:jirabot}
     username: ${POSTGRES_USER:jirabot}
     password: ${POSTGRES_PASSWORD:jirabot}
     driver-class-name: org.postgresql.Driver

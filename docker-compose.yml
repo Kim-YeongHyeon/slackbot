@@ -1,5 +1,11 @@
-# Phase 1에서는 PostgreSQL만 띄움. Phase 2에서 이슈 로컬 캐시 테이블이 실제 사용됨.
-# 실행: `docker compose up -d`
+# 전체 스택: PostgreSQL + Spring 서버 + Go 봇.
+#
+#   기본(postgres 만):        docker-compose up -d
+#   전체 스택(컨테이너 배포):  docker-compose --profile full up -d --build
+#
+# server/gobot 은 `full` 프로필 뒤에 둔다 — 이 호스트처럼 Spring/Go 를 bare-metal 로 돌리는
+# 환경에서 무심코 `up -d` 했을 때 호스트 8080/3000 과 충돌하지 않도록 하는 안전장치.
+# 사전 조건(전체 스택): .env 작성 + 호스트에서 `claude login` (Claude CLI 인증을 볼륨으로 재사용).
 services:
   postgres:
     image: postgres:16-alpine
@@ -18,6 +24,37 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  server:
+    build: .
+    container_name: jirabot-server
+    restart: unless-stopped
+    profiles: ["full"]
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres        # 컨테이너 네트워크에서 DB 호스트 오버라이드
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${HOME}/.claude:/root/.claude   # Claude CLI 구독 인증 재사용 (호스트에서 claude login 선행)
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gobot:
+    build: ./bot
+    container_name: jirabot-gobot
+    restart: unless-stopped
+    profiles: ["full"]
+    env_file: .env
+    environment:
+      SPRING_EVENT_URL: http://server:8080/api/slack/event
+      SPRING_INTERACTION_URL: http://server:8080/api/slack/interaction
+      SPRING_JIRA_WEBHOOK_URL: http://server:8080/api/jira/webhook
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
 
 volumes:
   postgres-data:
