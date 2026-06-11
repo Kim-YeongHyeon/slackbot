@@ -3,9 +3,12 @@ package com.jirabot.slack.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jirabot.slack.client.ClaudeApiClient;
+import com.jirabot.slack.client.GitHubApiClient;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
+import com.jirabot.slack.client.dto.BranchResult;
 import com.jirabot.slack.config.AsyncConfig;
+import com.jirabot.slack.config.GitHubProperties;
 import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.dto.SlackInteractionPayload;
 import com.jirabot.slack.filter.CachedBodyFilter;
@@ -42,6 +45,8 @@ public class SlackInteractionController {
     private final SlackNotifier slackNotifier;
     private final IssueRepository issueRepository;
     private final ClaudeApiClient claudeApiClient;
+    private final GitHubApiClient gitHubApiClient;
+    private final GitHubProperties gitHubProps;
     private final JiraProperties jiraProps;
     private final Executor slackExecutor;
 
@@ -50,6 +55,8 @@ public class SlackInteractionController {
                                       SlackNotifier slackNotifier,
                                       IssueRepository issueRepository,
                                       ClaudeApiClient claudeApiClient,
+                                      GitHubApiClient gitHubApiClient,
+                                      GitHubProperties gitHubProps,
                                       JiraProperties jiraProps,
                                       @Qualifier(AsyncConfig.SLACK_EXECUTOR) Executor slackExecutor) {
         this.objectMapper = objectMapper;
@@ -57,6 +64,8 @@ public class SlackInteractionController {
         this.slackNotifier = slackNotifier;
         this.issueRepository = issueRepository;
         this.claudeApiClient = claudeApiClient;
+        this.gitHubApiClient = gitHubApiClient;
+        this.gitHubProps = gitHubProps;
         this.jiraProps = jiraProps;
         this.slackExecutor = slackExecutor;
     }
@@ -125,6 +134,9 @@ public class SlackInteractionController {
                             userName, channelId, messageTs, originalBlocks, false);
             case BlockKitBuilder.ACTION_QUICK_DONE ->
                     handleQuickDone(issueKey, userName, channelId, messageTs, originalBlocks);
+            case BlockKitBuilder.ACTION_CREATE_BRANCH ->
+                    // STUDY: value = "issueKey|repo|branch" 가 issueKey 자리로 들어온다.
+                    handleCreateBranch(issueKey, channelId, messageTs);
             default -> log.warn("Unknown action_id: {}", actionId);
         }
     }
@@ -153,9 +165,9 @@ public class SlackInteractionController {
                             BlockKitBuilder.ACTION_IN_REVIEW, "\ud83d\udd0d 검토 중", originalBlocks);
                     slackNotifier.updateMessage(channelId, messageTs, resultText, updatedBlocks);
                 }
-                // STUDY: 진행 중 전환 후 브랜치 만들기를 안내한다. 실제 생성은 Jira 개발 패널의 "브랜치 만들기"가
-                //        연결된 GitHub 로 위임 — 봇은 규칙 기반 권장 브랜치명과 이슈 링크만 제공한다(GitHub API 직접 호출 X).
-                postBranchHint(issueKey, channelId, messageTs);
+                // STUDY: 진행 중 전환 후 브랜치 만들기 안내. github 토큰이 설정돼 있으면 repo 선택 버튼을,
+                //        아니면 기존 Jira 개발 패널 힌트를 게시한다.
+                postBranchOptions(issueKey, channelId, messageTs);
             } else {
                 notifyFailure(channelId, messageTs, issueKey, "진행 중");
             }
@@ -173,7 +185,7 @@ public class SlackInteractionController {
     //        실제 생성은 사용자가 Jira 개발 패널의 "브랜치 만들기"에서 대상 레포·base 를 선택해 수행한다.
     //        브랜치명은 영어로 통일: 한글 요약은 Claude(englishBranchSlug)로 영어 슬러그를 만들어 사용하고,
     //        변환 실패 시 issueKey 만으로 브랜치명을 만든다.
-    private void postBranchHint(String issueKey, String channelId, String messageTs) {
+    private void postBranchOptions(String issueKey, String channelId, String messageTs) {
         if (channelId == null || messageTs == null) {
             return;
         }
@@ -181,15 +193,51 @@ public class SlackInteractionController {
             Optional<IssueEntity> found = issueRepository.findByIssueKey(issueKey);
             String issueType = found.map(IssueEntity::getIssueType).orElse(null);
             String summary = found.map(IssueEntity::getSummary).orElse(null);
-            String englishSlug = claudeApiClient.englishBranchSlug(summary);
-            String branch = BranchNameBuilder.build(issueType, issueKey, englishSlug);
-            String message = String.format(
-                    ":herb: 브랜치 만들기: <%s|%s> 우측 *개발(Development)* 패널 → \"브랜치 만들기\"\n"
-                            + "권장 브랜치명: `%s`",
-                    issueLink(issueKey), issueKey, branch);
-            slackNotifier.postThreadReply(channelId, messageTs, message);
+            // STUDY: 영어 브랜치명은 여기서 1회 계산해 버튼 value 에 실어 보낸다 → 클릭 시 Claude 재호출 없음.
+            String branch = BranchNameBuilder.build(issueType, issueKey, claudeApiClient.englishBranchSlug(summary));
+
+            if (gitHubProps.enabled()) {
+                String blocks = BlockKitBuilder.buildBranchRepoButtons(
+                        issueKey, branch, gitHubProps.branchRepos());
+                slackNotifier.postBlockMessage(channelId, messageTs,
+                        ":herb: 브랜치를 만들 repo를 선택하세요", blocks);
+            } else {
+                // 폴백: GitHub 토큰 미설정 → 기존 Jira 개발 패널 힌트.
+                String message = String.format(
+                        ":herb: 브랜치 만들기: <%s|%s> 우측 *개발(Development)* 패널 → \"브랜치 만들기\"\n"
+                                + "권장 브랜치명: `%s`",
+                        issueLink(issueKey), issueKey, branch);
+                slackNotifier.postThreadReply(channelId, messageTs, message);
+            }
         } catch (Exception e) {
-            log.warn("Branch hint failed for {}: {}", issueKey, e.toString());
+            log.warn("Branch options failed for {}: {}", issueKey, e.toString());
+        }
+    }
+
+    // STUDY: repo 버튼 클릭 → GitHub API 로 브랜치 생성. value = "issueKey|repo|branch".
+    private void handleCreateBranch(String value, String channelId, String messageTs) {
+        if (channelId == null || messageTs == null) {
+            return;
+        }
+        String[] parts = value == null ? new String[0] : value.split("\\|", 3);
+        if (parts.length < 3) {
+            log.warn("Bad create-branch value: {}", value);
+            return;
+        }
+        String repo = parts[1];
+        String branch = parts[2];
+        try {
+            BranchResult result = gitHubApiClient.createBranch(repo, branch);
+            String msg = switch (result.status()) {
+                case CREATED -> String.format(":herb: 브랜치 생성 완료: <%s|%s/%s>", result.htmlUrl(), repo, branch);
+                case ALREADY_EXISTS -> String.format(":information_source: 이미 있는 브랜치예요: <%s|%s/%s>",
+                        result.htmlUrl(), repo, branch);
+                case FAILED -> String.format(":x: 브랜치 생성 실패 (%s): %s", repo, result.message());
+            };
+            slackNotifier.postThreadReply(channelId, messageTs, msg);
+        } catch (Exception e) {
+            log.error("Create-branch error value={}: {}", value, e.toString(), e);
+            slackNotifier.postThreadReply(channelId, messageTs, ":x: 브랜치 생성 중 오류가 발생했어요.");
         }
     }
 

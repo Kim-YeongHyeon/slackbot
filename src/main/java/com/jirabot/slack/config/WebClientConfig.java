@@ -18,7 +18,8 @@ import reactor.netty.http.client.HttpClient;
 // STUDY: WebClient는 reactive HTTP client. block()을 호출하면 동기처럼 쓸 수 있다 (@Async 안에서 block 안전).
 @Configuration
 @EnableConfigurationProperties({ClaudeProperties.class, JiraProperties.class, IntentProperties.class,
-        JiraWebhookProperties.class, NotifyProperties.class, ReminderProperties.class, NotionProperties.class})
+        JiraWebhookProperties.class, NotifyProperties.class, ReminderProperties.class, NotionProperties.class,
+        GitHubProperties.class})
 public class WebClientConfig {
 
     // STUDY: HttpClient 레벨에서 connect/read timeout을 별도로 설정해야 한다.
@@ -41,5 +42,20 @@ public class WebClientConfig {
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                 .clientConnector(new ReactorClientHttpConnector(httpClient(30)))
                 .build();
+    }
+
+    // STUDY: GitHub REST 용 WebClient. 토큰 없으면 Authorization 헤더 생략(기능 비활성 상태로도 빈 생성은 됨).
+    //        fine-grained PAT 는 "Bearer <token>" 형식. api 버전 헤더는 GitHub 권장.
+    @Bean
+    public WebClient githubWebClient(GitHubProperties props) {
+        WebClient.Builder builder = WebClient.builder()
+                .baseUrl(props.apiBaseUrl())
+                .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json")
+                .defaultHeader("X-GitHub-Api-Version", "2022-11-28")
+                .clientConnector(new ReactorClientHttpConnector(httpClient(15)));
+        if (props.token() != null && !props.token().isBlank()) {
+            builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + props.token());
+        }
+        return builder.build();
     }
 }

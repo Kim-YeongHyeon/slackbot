@@ -62,6 +62,15 @@ jira:
     # STATUS | STATUS_CATEGORY | DONE_ONLY | STATUS_AND_ASSIGNEE
     notify-on: ${JIRA_WEBHOOK_NOTIFY_ON:STATUS_AND_ASSIGNEE}
 
+# GitHub 브랜치 생성 — "진행 중" 전환 시 Slack repo 버튼 → 선택 repo에 브랜치 생성.
+# token 이 비어 있으면 기능 비활성(앱 기동 영향 없음, 기존 Jira UI 힌트로 폴백).
+github:
+  token: ${GITHUB_BRANCH_TOKEN:}
+  org: ${GITHUB_ORG:CryptoLabInc}
+  # 콤마 구분 → List 바인딩. 버튼으로 띄울 repo (org 하위 이름만).
+  branch-repos: ${GITHUB_BRANCH_REPOS:envector-msa,evi}
+  api-base-url: ${GITHUB_API_BASE_URL:https://api.github.com}
+
 # Notion 연동 — 버그 해결 기록(resolution-db) + 버그 현황(status-db).
 # token 이 비어 있으면 기능 비활성(앱 기동에는 영향 없음).
 notion:

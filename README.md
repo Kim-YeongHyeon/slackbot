@@ -15,7 +15,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 이슈 검색 | 키워드로 이슈 제목 검색 (모든 상태 포함) |
 | 리마인더 | opt-in 사용자에게 미해결 이슈 DM. **일일**(평일 09:00, 현재 스프린트) + **격주**(월 09:30, 전체 미해결). 소유 기준 = 담당자, 없으면 보고자 |
 | 인터랙티브 버튼 | 이슈 생성 알림에 "진행 중" / "완료" 버튼 → 클릭으로 Jira 상태 전환 |
-| 브랜치 만들기 안내 | "진행 중" 전환 시 이슈 개발 패널 링크 + 규칙 기반 권장 브랜치명(`feature/`·`bugfix/`)을 스레드에 안내 (실제 생성은 Jira 개발 패널 → 연결된 GitHub) |
+| 브랜치 만들기 | "진행 중" 전환 시 **repo 선택 버튼**을 띄워 클릭하면 봇이 GitHub API로 브랜치 직접 생성(브랜치명은 Claude가 한글 요약→영어 슬러그, `feature/`·`bugfix/`). 브랜치명에 이슈키가 있어 Jira 개발 패널에 자동 연결. `github.token` 미설정 시 Jira 개발 패널 링크 안내로 폴백 |
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
@@ -65,7 +65,14 @@ JIRA_PROJECT_KEY=<프로젝트 키 (예: PROJ)>
 POSTGRES_DB=jirabot
 POSTGRES_USER=jirabot
 POSTGRES_PASSWORD=<임의 비밀번호>
+
+# GitHub 브랜치 생성 (선택) — 비우면 "진행 중" 시 Jira 개발 패널 링크 안내로 폴백
+GITHUB_BRANCH_TOKEN=<fine-grained PAT, 대상 repo Contents: Read & Write>
+GITHUB_ORG=<조직 (기본 CryptoLabInc)>
+GITHUB_BRANCH_REPOS=<버튼에 띄울 repo, 콤마 구분 (기본 envector-msa,evi)>
 ```
+
+> **GitHub 토큰 발급**: GitHub → Settings → Developer settings → Fine-grained tokens → Resource owner=조직, 대상 repo 선택, Repository permissions의 **Contents: Read and write**. 발급한 토큰을 `GITHUB_BRANCH_TOKEN`에 넣으면 "진행 중" 전환 시 repo 선택 버튼이 활성화됩니다.
 
 ### 2. 서비스 기동 (4개 터미널)
 

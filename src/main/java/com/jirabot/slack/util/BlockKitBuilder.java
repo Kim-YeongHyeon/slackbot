@@ -22,8 +22,32 @@ public final class BlockKitBuilder {
     public static final String ACTION_IN_REVIEW = "jira_transition_in_review";
     public static final String ACTION_DONE = "jira_transition_done";
     public static final String ACTION_QUICK_DONE = "jira_quick_done";
+    public static final String ACTION_CREATE_BRANCH = "jira_create_branch";
 
     private BlockKitBuilder() {}
+
+    /**
+     * "진행 중" 전환 후 브랜치를 만들 repo 선택 버튼 블록을 생성한다.
+     * Section(권장 브랜치명) + Actions(repo 버튼들). 버튼 value = "issueKey|repo|branch"
+     * (issueKey/repo/슬러그에 '|' 가 없으므로 클릭 시 앞 2개 '|' 로 안전하게 분리).
+     */
+    public static String buildBranchRepoButtons(String issueKey, String branchName, List<String> repos) {
+        ArrayNode blocks = MAPPER.createArrayNode();
+        blocks.add(buildMrkdwnSection(
+                ":herb: *브랜치 만들기* — 어느 repo에 만들까요?\n권장 브랜치명: `" + branchName + "`"));
+
+        ArrayNode elements = MAPPER.createArrayNode();
+        for (String repo : repos) {
+            elements.add(buildButton(repo, ACTION_CREATE_BRANCH,
+                    issueKey + "|" + repo + "|" + branchName, null, null));
+        }
+        ObjectNode actions = MAPPER.createObjectNode();
+        actions.put("type", "actions");
+        actions.set("elements", elements);
+        blocks.add(actions);
+
+        return serialize(blocks);
+    }
 
     /**
      * 이슈 생성 완료 메시지용 Block Kit JSON을 생성한다.

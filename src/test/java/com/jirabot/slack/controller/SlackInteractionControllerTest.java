@@ -11,8 +11,11 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jirabot.slack.client.GitHubApiClient;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
+import com.jirabot.slack.client.dto.BranchResult;
+import com.jirabot.slack.config.GitHubProperties;
 import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.filter.CachedBodyFilter;
 import com.jirabot.slack.repository.IssueRepository;
@@ -21,6 +24,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.nio.charset.StandardCharsets;
 import java.net.URLEncoder;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +40,7 @@ class SlackInteractionControllerTest {
     private final IssueRepository issueRepository = mock(IssueRepository.class);
     private final com.jirabot.slack.client.ClaudeApiClient claudeApiClient =
             mock(com.jirabot.slack.client.ClaudeApiClient.class);
+    private final GitHubApiClient gitHubApiClient = mock(GitHubApiClient.class);
     private final com.jirabot.slack.config.JiraProperties jiraProps =
             new com.jirabot.slack.config.JiraProperties(
                     "https://test.atlassian.net", "e@test.com", "token", "PROJ", null, null);
@@ -43,11 +48,16 @@ class SlackInteractionControllerTest {
 
     private SlackInteractionController controller;
 
-    @BeforeEach
-    void setUp() {
+    // 기본은 GitHub 비활성(토큰 없음) → 기존 Jira UI 힌트 폴백.
+    private void buildController(GitHubProperties githubProps) {
         controller = new SlackInteractionController(
                 objectMapper, jiraApiClient, slackNotifier, issueRepository, claudeApiClient,
-                jiraProps, directExecutor);
+                gitHubApiClient, githubProps, jiraProps, directExecutor);
+    }
+
+    @BeforeEach
+    void setUp() {
+        buildController(new GitHubProperties(null, null, null, null)); // token 없음 → disabled
     }
 
     private HttpServletRequest mockRequest(String payloadJson) {
@@ -116,12 +126,51 @@ class SlackInteractionControllerTest {
                 anyString(), blocksCaptor.capture());
         assertThat(blocksCaptor.getValue()).contains("jira_transition_in_review");
 
-        // 진행 중 전환 시 브랜치 만들기 안내(이슈 개발 패널 링크 + 규칙 기반 권장 브랜치명)가 스레드에 게시된다.
+        // GitHub 비활성(토큰 없음) → 기존 Jira 개발 패널 힌트(링크 + 권장 브랜치명)로 폴백.
         ArgumentCaptor<String> hintCaptor = ArgumentCaptor.forClass(String.class);
         verify(slackNotifier).postThreadReply(eq("C456"), eq("1234567890.123456"), hintCaptor.capture());
         assertThat(hintCaptor.getValue())
                 .contains("feature/PROJ-1-test")
                 .contains("/browse/PROJ-1");
+    }
+
+    @Test
+    void inProgress_withGithubEnabled_postsRepoButtons() {
+        buildController(new GitHubProperties("tok", "CryptoLabInc", List.of("envector-msa", "evi"), null));
+        when(jiraApiClient.transitionIssue("PROJ-1", "진행 중")).thenReturn(true);
+        when(jiraApiClient.moveToActiveSprint("PROJ-1")).thenReturn(true);
+        IssueEntity issue = new IssueEntity("PROJ-1", "Test", "Task", "해야 할 일", "해야 할 일",
+                null, 3.0, "reporter", "desc", Instant.now(), Instant.now());
+        when(issueRepository.findByIssueKey("PROJ-1")).thenReturn(Optional.of(issue));
+        when(claudeApiClient.englishBranchSlug("Test")).thenReturn("test");
+
+        controller.onInteraction(
+                mockRequest(buildPayload(BlockKitBuilder.ACTION_IN_PROGRESS, "PROJ-1")));
+
+        // 텍스트 힌트가 아니라 repo 선택 버튼(블록)이 스레드에 게시된다.
+        ArgumentCaptor<String> blocks = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postBlockMessage(eq("C456"), eq("1234567890.123456"), anyString(), blocks.capture());
+        assertThat(blocks.getValue())
+                .contains("jira_create_branch")
+                .contains("envector-msa")
+                .contains("evi")
+                .contains("PROJ-1|evi|feature/PROJ-1-test");
+    }
+
+    @Test
+    void createBranchAction_createsBranchAndReplies() {
+        buildController(new GitHubProperties("tok", "CryptoLabInc", List.of("envector-msa", "evi"), null));
+        when(gitHubApiClient.createBranch("evi", "feature/PROJ-1-test"))
+                .thenReturn(BranchResult.created("feature/PROJ-1-test",
+                        "https://github.com/CryptoLabInc/evi/tree/feature/PROJ-1-test"));
+
+        controller.onInteraction(
+                mockRequest(buildPayload(BlockKitBuilder.ACTION_CREATE_BRANCH, "PROJ-1|evi|feature/PROJ-1-test")));
+
+        verify(gitHubApiClient).createBranch("evi", "feature/PROJ-1-test");
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(eq("C456"), eq("1234567890.123456"), reply.capture());
+        assertThat(reply.getValue()).contains("생성 완료").contains("evi/feature/PROJ-1-test");
     }
 
     @Test
