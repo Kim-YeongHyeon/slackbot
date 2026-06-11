@@ -13,4 +13,16 @@ public interface ReminderSubscriptionService {
 
     /** 현재 상태와 다음 발송 일정 응답. */
     String status(String slackUserId);
+
+    /**
+     * Jira 할당 DM 알림(assignDmEnabled)을 켠다. 매핑이 없으면 안내 메시지 반환.
+     * @return Slack 스레드 회신용 메시지
+     */
+    String enableAssignDm(String slackUserId);
+
+    /** 할당 DM 알림을 끈다. 매핑이 없어도 멱등 처리. */
+    String disableAssignDm(String slackUserId);
+
+    /** 할당 DM 알림 현재 상태 응답. */
+    String assignDmStatus(String slackUserId);
 }

@@ -69,6 +69,9 @@ public class SlackEventController {
               `@지라 작업 김영현` — 특정 팀원의 작업 조회
               `@지라 등록 <Jira 사용자명>` — 내 Slack ↔ Jira 계정 연결
               `@지라 검색 <키워드>` — 이슈 제목/설명으로 검색 (예: `@지라 검색 preset`)
+              `@지라 ES2-123` — 이슈 키로 상세 카드 조회 (상태 전환 버튼 포함)
+              `@지라 할당 ES2-123 홍길동` — 이슈 담당자 지정 (@멘션도 가능)
+              `@지라 할당알림 on` / `off` / `상태` — 이슈가 나에게 할당되면 DM 알림 (기본 ON)
               `@지라 리마인더 on` / `off` / `상태` — 평일 09:00 미해결 이슈 DM 알림 토글
               `@지라 notion백필` — Jira 전체 버그를 Notion '버그 현황' DB로 동기화
               `@지라 버그` — 최근 7일간 해결된 버그 조회
@@ -81,6 +84,7 @@ public class SlackEventController {
               `@지라 하위작업 <내용>` — 하위작업 생성
               `@지라 댓글 <내용>` — Jira 코멘트 추가
               `@지라 수정 <내용>` — Jira 설명에 내용 추가
+              `@지라 담당자 <이름>` — 이 이슈의 담당자 지정
               또는 자연어로 입력하면 AI가 액션을 판단합니다.
 
             *자연어 입력 (AI 분류 → Jira 이슈 생성):*
@@ -189,13 +193,14 @@ public class SlackEventController {
     }
 
     // STUDY: Slack app_mention 이벤트의 text 는 "<@U0AT5U95C4T> 버그 내용" 형태.
-    //        멘션 태그를 제거해야 Claude 가 순수 내용만 분류할 수 있다.
+    //        선두(봇 호출) 멘션만 제거한다 — 본문 속 멘션은 내용이다.
+    //        (예: `할당 ES2-1 <@U5>` 의 할당 대상 멘션을 전부 제거하면 명령이 깨진다.)
     private static final java.util.regex.Pattern MENTION_PATTERN =
-            java.util.regex.Pattern.compile("<@[A-Z0-9]+>\\s*");
+            java.util.regex.Pattern.compile("^\\s*<@[A-Z0-9]+>\\s*");
 
     static String stripMention(String text) {
         if (text == null) return "";
-        return MENTION_PATTERN.matcher(text).replaceAll("").strip();
+        return MENTION_PATTERN.matcher(text).replaceFirst("").strip();
     }
 
     // STUDY: 하이브리드 라우팅.
@@ -268,6 +273,20 @@ public class SlackEventController {
             handleNotionBackfill(event);
             return;
         }
+        // STUDY: 담당자 지정 — 명시적 `할당 <KEY> <이름|@멘션>` 은 스레드 안에서도 키워드 1차에서 잡혀
+        //        스레드 root 이슈가 아닌 지정한 이슈에 적용된다 (스레드에 하위작업 논의가 섞여도 모호성 없음).
+        if (lower.startsWith("할당 ") || lower.startsWith("assign ")) {
+            handleAssign(event, cleaned.substring(cleaned.indexOf(' ') + 1).strip());
+            return;
+        }
+        if (lower.equals("할당알림") || lower.equals("assign-dm")) {
+            replyThread(event, ":warning: 사용법: `@지라 할당알림 on` / `off` / `상태`");
+            return;
+        }
+        if (lower.startsWith("할당알림 ") || lower.startsWith("assign-dm ")) {
+            handleAssignDm(event, cleaned.substring(cleaned.indexOf(' ') + 1).strip().toLowerCase());
+            return;
+        }
         if (lower.equals("검색") || lower.equals("search")) {
             replyThread(event, ":mag: 검색어를 입력해주세요. 예: `@지라 검색 로그인`");
             return;
@@ -281,6 +300,14 @@ public class SlackEventController {
                         replyThread(event, ":x: 검색 중 오류가 발생했어요.");
                         return null;
                     });
+            return;
+        }
+
+        // 1.4차: 이슈 키 조회 카드 — `ES2-123` 단독(또는 조회/이슈 + 짧은 접미어)이면 상세 카드.
+        //        키를 언급만 하는 서술문("ES2-123 때문에 빌드가 깨져요")은 null 이 반환돼 기존 흐름 유지.
+        String cardKey = extractCardIssueKey(cleaned);
+        if (cardKey != null) {
+            handleIssueCard(event, cardKey);
             return;
         }
 
@@ -326,6 +353,13 @@ public class SlackEventController {
         if (lower.startsWith("수정 ") || lower.startsWith("modify ")) {
             String content = cleaned.substring(cleaned.indexOf(' ') + 1).strip();
             executeModify(event, parentIssue, content);
+            return;
+        }
+        // STUDY: 스레드 단축형 담당자 지정 — 항상 스레드 root 이슈에 적용된다(응답에 이슈 키 명시).
+        //        다른 이슈를 지정하려면 명시형 `할당 <KEY> <이름>` 사용 (routeCommand 1차에서 우선 매칭).
+        if (lower.startsWith("담당자 ") || lower.startsWith("assignee ")) {
+            String name = cleaned.substring(cleaned.indexOf(' ') + 1).strip();
+            executeAssign(event, parentIssue.getIssueKey(), name);
             return;
         }
 
@@ -706,6 +740,157 @@ public class SlackEventController {
             default -> ":warning: 사용법: `@지라 리마인더 on` / `off` / `상태`";
         };
         replyThread(event, result);
+    }
+
+    // STUDY: 할당알림 명령 — handleReminder 와 동일 패턴. Jira 할당 DM 수신(assignDmEnabled) 토글.
+    private void handleAssignDm(SlackEventInner event, String arg) {
+        log.info("Assign-DM command requested arg='{}' user={}", arg, event.user());
+        String userId = event.user();
+        if (userId == null || userId.isBlank()) {
+            replyThread(event, ":warning: 호출자 정보를 식별할 수 없습니다.");
+            return;
+        }
+        String result = switch (arg) {
+            case "on" -> reminderSubscriptionService.enableAssignDm(userId);
+            case "off" -> reminderSubscriptionService.disableAssignDm(userId);
+            case "상태", "status" -> reminderSubscriptionService.assignDmStatus(userId);
+            default -> ":warning: 사용법: `@지라 할당알림 on` / `off` / `상태`";
+        };
+        replyThread(event, result);
+    }
+
+    // STUDY: 이슈 키 카드 트리거 판정. 메시지에서 이슈 키 1개를 찾고, 키를 뺀 나머지가
+    //        비어있거나 조회성 단어(보여줘/상세/조회/show...)뿐이면 그 키를 반환한다.
+    //        나머지에 다른 내용이 있으면(서술문) null — 이슈 생성/검색 흐름을 가로채지 않는다.
+    private static final java.util.regex.Pattern ISSUE_KEY_PATTERN =
+            java.util.regex.Pattern.compile("[A-Z][A-Z0-9]*-\\d+");
+    private static final java.util.regex.Pattern CARD_FILLER_PATTERN = java.util.regex.Pattern.compile(
+            "(?i)^(이슈|조회|카드|보여줘|알려줘|상세|정보|상태|확인|show|info|detail|status|[\\s!?.~,]+)*$");
+
+    static String extractCardIssueKey(String cleaned) {
+        if (cleaned == null || cleaned.isBlank()) {
+            return null;
+        }
+        Matcher m = ISSUE_KEY_PATTERN.matcher(cleaned);
+        if (!m.find()) {
+            return null;
+        }
+        String key = m.group();
+        if (m.find()) {
+            return null; // 키가 2개 이상이면 의도가 불분명 — 가로채지 않는다.
+        }
+        String remainder = cleaned.replace(key, " ");
+        return CARD_FILLER_PATTERN.matcher(remainder).matches() ? key : null;
+    }
+
+    private void handleIssueCard(SlackEventInner event, String issueKey) {
+        log.info("Issue card requested key={} by user={}", issueKey, event.user());
+        slackExecutor.execute(() -> {
+            try {
+                String url = issueLink(issueKey);
+                Optional<IssueEntity> local = issueRepository.findByIssueKey(issueKey);
+                String blocksJson;
+                if (local.isPresent()) {
+                    IssueEntity i = local.get();
+                    blocksJson = com.jirabot.slack.util.BlockKitBuilder.buildIssueCardBlocks(
+                            i.getIssueKey(), url, i.getSummary(), i.getIssueType(),
+                            i.getStatus(), i.getStatusCategory(), i.getAssignee(), i.getReporter(),
+                            i.getStoryPoint(), i.getSprintName(), i.getDescription());
+                } else {
+                    // STUDY: 로컬 미보유(다른 보드/이미 prune 된 완료 이슈 등) → Jira 라이브 단건 조회 폴백.
+                    var live = jiraApiClient.getIssue(issueKey);
+                    if (live.isEmpty()) {
+                        replyThread(event, String.format(":mag: *%s* 이슈를 찾을 수 없어요. 키를 확인해주세요.", issueKey));
+                        return;
+                    }
+                    var s = live.get();
+                    blocksJson = com.jirabot.slack.util.BlockKitBuilder.buildIssueCardBlocks(
+                            s.key(), url, s.summary(), s.issueType(), s.status(), s.statusCategory(),
+                            s.assignee(), s.reporter(), s.storyPoint(), null, null);
+                }
+                slackNotifier.postBlockMessage(event.channel(), event.ts(),
+                        String.format("[%s] 이슈 카드", issueKey), blocksJson);
+            } catch (Exception e) {
+                log.warn("Issue card failed key={}: {}", issueKey, e.toString());
+                replyThread(event, ":x: 이슈 조회 중 오류가 발생했어요.");
+            }
+        });
+    }
+
+    // STUDY: 명시형 담당자 지정 파싱 — "<KEY> <이름|@멘션>". 형식이 어긋나면 사용법 안내.
+    private static final java.util.regex.Pattern ASSIGN_ARGS_PATTERN =
+            java.util.regex.Pattern.compile("^([A-Z][A-Z0-9]*-\\d+)\\s+(.+)$");
+    private static final java.util.regex.Pattern SLACK_MENTION_PATTERN =
+            java.util.regex.Pattern.compile("^<@([A-Z0-9]+)>$");
+
+    private void handleAssign(SlackEventInner event, String args) {
+        Matcher m = ASSIGN_ARGS_PATTERN.matcher(args);
+        if (!m.matches()) {
+            replyThread(event, ":warning: 사용법: `@지라 할당 <이슈키> <이름 또는 @멘션>`\n예: `@지라 할당 ES2-123 홍길동`");
+            return;
+        }
+        executeAssign(event, m.group(1), m.group(2).strip());
+    }
+
+    private void executeAssign(SlackEventInner event, String issueKey, String assigneeText) {
+        log.info("Assign requested key={} assignee='{}' by user={}", issueKey, assigneeText, event.user());
+        slackExecutor.execute(() -> {
+            try {
+                String accountId;
+                String displayName;
+                Matcher mention = SLACK_MENTION_PATTERN.matcher(assigneeText);
+                if (mention.matches()) {
+                    var mapping = userMappingRepository.findBySlackUserId(mention.group(1));
+                    if (mapping.isEmpty() || mapping.get().getJiraAccountId() == null) {
+                        reply(event, String.format(
+                                ":warning: <@%s> 님의 Jira 매핑이 없습니다. 본인이 `@지라 등록 <Jira 사용자명>` 으로 먼저 등록해야 해요.",
+                                mention.group(1)));
+                        return;
+                    }
+                    accountId = mapping.get().getJiraAccountId();
+                    displayName = mapping.get().getJiraDisplayName();
+                } else {
+                    // STUDY: 이름 해석 — 등록된 매핑(정확 일치) 우선, 없으면 Jira user search 폴백.
+                    var mapping = userMappingRepository.findByJiraDisplayName(assigneeText);
+                    if (mapping.isPresent() && mapping.get().getJiraAccountId() != null) {
+                        accountId = mapping.get().getJiraAccountId();
+                        displayName = mapping.get().getJiraDisplayName();
+                    } else {
+                        accountId = jiraApiClient.findAccountId(assigneeText);
+                        displayName = assigneeText;
+                        if (accountId == null) {
+                            reply(event, String.format(
+                                    ":x: Jira에서 *%s* 사용자를 찾을 수 없습니다. Jira에 표시되는 이름으로 다시 시도해주세요.",
+                                    assigneeText));
+                            return;
+                        }
+                    }
+                }
+
+                boolean ok = jiraApiClient.assignIssue(issueKey, accountId);
+                if (!ok) {
+                    reply(event, String.format(":x: *%s* 담당자 변경에 실패했습니다. 이슈 키를 확인해주세요.", issueKey));
+                    return;
+                }
+                // 로컬 DB 즉시 반영 (추적 중인 이슈만 — 다음 sync 전까지의 gap 메움)
+                String finalName = displayName;
+                issueRepository.findByIssueKey(issueKey).ifPresent(i -> {
+                    i.setAssignee(finalName);
+                    issueRepository.save(i);
+                });
+                // STUDY: 응답에 항상 대상 이슈 키를 명시 — 스레드 단축형이 의도와 다른 이슈를 바꿨다면 즉시 보이게.
+                reply(event, String.format(":bust_in_silhouette: *%s* 담당자를 *%s* 님으로 지정했어요.",
+                        issueKey, displayName));
+            } catch (Exception e) {
+                log.error("Assign failed key={}: {}", issueKey, e.toString());
+                reply(event, ":x: 담당자 지정 중 오류가 발생했어요.");
+            }
+        });
+    }
+
+    private String issueLink(String key) {
+        String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl().replaceAll("/+$", "");
+        return base.isEmpty() ? key : base + "/browse/" + key;
     }
 
     // STUDY: Jira 전체 버그를 Notion '버그 현황' DB 로 백필. 건수가 많아 비동기로 실행하고 결과만 회신.

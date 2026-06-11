@@ -73,4 +73,50 @@ public class ReminderSubscriptionServiceImpl implements ReminderSubscriptionServ
         }
         return ":no_bell: 리마인더 OFF.";
     }
+
+    // STUDY: 할당 DM 알림 토글 — reminder 토글과 동일 패턴(멱등, 상태 변경 시에만 save).
+    //        다른 점: 기본값이 ON 이므로 매핑 미등록자에게는 "등록하면 자동으로 켜진다"고 안내한다.
+
+    @Override
+    public String enableAssignDm(String slackUserId) {
+        Optional<UserMappingEntity> mapping = userMappingRepository.findBySlackUserId(slackUserId);
+        if (mapping.isEmpty()) {
+            return ":warning: 먼저 `@지라 등록 <Jira 사용자명>` 으로 본인 매핑을 등록해주세요. (등록하면 할당 알림은 기본으로 켜집니다)";
+        }
+        UserMappingEntity m = mapping.get();
+        if (m.isAssignDmEnabled()) {
+            return ":bell: 할당 알림이 이미 켜져 있습니다.";
+        }
+        m.setAssignDmEnabled(true);
+        userMappingRepository.save(m);
+        log.info("Assign DM enabled slackUserId={}", slackUserId);
+        return ":bell: 할당 알림이 켜졌습니다. Jira에서 이슈가 본인에게 할당되면 DM으로 알려드립니다.";
+    }
+
+    @Override
+    public String disableAssignDm(String slackUserId) {
+        Optional<UserMappingEntity> mapping = userMappingRepository.findBySlackUserId(slackUserId);
+        if (mapping.isEmpty()) {
+            return ":no_bell: 할당 알림이 꺼져 있습니다. (매핑 미등록 — 어차피 DM 대상이 아닙니다)";
+        }
+        UserMappingEntity m = mapping.get();
+        if (!m.isAssignDmEnabled()) {
+            return ":no_bell: 할당 알림이 꺼져 있습니다.";
+        }
+        m.setAssignDmEnabled(false);
+        userMappingRepository.save(m);
+        log.info("Assign DM disabled slackUserId={}", slackUserId);
+        return ":no_bell: 할당 알림이 꺼졌습니다.";
+    }
+
+    @Override
+    public String assignDmStatus(String slackUserId) {
+        Optional<UserMappingEntity> mapping = userMappingRepository.findBySlackUserId(slackUserId);
+        if (mapping.isEmpty()) {
+            return ":no_bell: 할당 알림 OFF — 매핑 미등록 상태입니다. `@지라 등록 <Jira 사용자명>` 으로 먼저 등록하세요.";
+        }
+        return mapping.get().isAssignDmEnabled()
+                ? ":bell: 할당 알림 ON — 이슈가 본인에게 할당되면 DM을 받습니다."
+                : ":no_bell: 할당 알림 OFF.";
+    }
 }

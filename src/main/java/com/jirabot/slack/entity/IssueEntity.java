@@ -161,6 +161,8 @@ public class IssueEntity {
     public String getStatus() { return status; }
     public String getStatusCategory() { return statusCategory; }
     public String getAssignee() { return assignee; }
+    // STUDY: Slack `할당` 명령 성공 직후 로컬 일관성 유지용 (다음 sync/webhook 전까지의 gap 메움).
+    public void setAssignee(String assignee) { this.assignee = assignee; }
     public Double getStoryPoint() { return storyPoint; }
     public String getReporter() { return reporter; }
     // STUDY: 동기화 시 Jira 의 reporter(displayName)로 갱신. 봇 생성 이슈는 초기엔 Slack ID 가 들어있으나

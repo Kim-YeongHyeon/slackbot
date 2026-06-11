@@ -35,6 +35,12 @@ public class UserMappingEntity {
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean reminderEnabled = false;
 
+    // STUDY: Jira 에서 본인에게 이슈가 할당될 때 DM 알림 수신 여부 (공식 앱의 personal notifications 대응).
+    //        본인 대상 알림이라 노이즈가 낮아 기본 ON. `할당알림 off` 로 끌 수 있다.
+    //        reminderEnabled 와 동일하게 columnDefinition 으로 DEFAULT 명시 — 기존 row 백필 보장 (위 STUDY 참고).
+    @Column(nullable = false, columnDefinition = "boolean default true")
+    private boolean assignDmEnabled = true;
+
     protected UserMappingEntity() {}
 
     public UserMappingEntity(String slackUserId, String slackDisplayName, String jiraDisplayName) {
@@ -57,6 +63,7 @@ public class UserMappingEntity {
     public String getJiraDisplayName() { return jiraDisplayName; }
     public String getJiraAccountId() { return jiraAccountId; }
     public boolean isReminderEnabled() { return reminderEnabled; }
+    public boolean isAssignDmEnabled() { return assignDmEnabled; }
 
     public void setJiraDisplayName(String jiraDisplayName) {
         this.jiraDisplayName = jiraDisplayName;
@@ -72,5 +79,9 @@ public class UserMappingEntity {
 
     public void setReminderEnabled(boolean reminderEnabled) {
         this.reminderEnabled = reminderEnabled;
+    }
+
+    public void setAssignDmEnabled(boolean assignDmEnabled) {
+        this.assignDmEnabled = assignDmEnabled;
     }
 }

@@ -129,4 +129,54 @@ class ReminderSubscriptionServiceImplTest {
 
         assertThat(reply).contains("OFF").contains("매핑 미등록");
     }
+
+    // --- 할당 DM 알림 토글 (assignDmEnabled, 기본 ON) ---
+
+    @Test
+    void assignDm_defaultOn_forNewMapping() {
+        UserMappingEntity mapping = new UserMappingEntity("U1", "alice", "Alice");
+        when(repository.findBySlackUserId("U1")).thenReturn(Optional.of(mapping));
+
+        // 새 매핑은 기본 ON — enable 은 멱등으로 save 없이 응답.
+        assertThat(mapping.isAssignDmEnabled()).isTrue();
+        String reply = service.enableAssignDm("U1");
+        assertThat(reply).contains("이미 켜져");
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void assignDm_disable_thenEnable_togglesAndSaves() {
+        UserMappingEntity mapping = new UserMappingEntity("U1", "alice", "Alice");
+        when(repository.findBySlackUserId("U1")).thenReturn(Optional.of(mapping));
+
+        String off = service.disableAssignDm("U1");
+        assertThat(mapping.isAssignDmEnabled()).isFalse();
+        assertThat(off).contains("꺼졌습니다");
+
+        String on = service.enableAssignDm("U1");
+        assertThat(mapping.isAssignDmEnabled()).isTrue();
+        assertThat(on).contains("켜졌습니다");
+    }
+
+    @Test
+    void assignDm_unmappedUser_enableGuides_disableIdempotent() {
+        when(repository.findBySlackUserId("U-NEW")).thenReturn(Optional.empty());
+
+        assertThat(service.enableAssignDm("U-NEW")).contains("등록");
+        assertThat(service.disableAssignDm("U-NEW")).contains("꺼져");
+        verify(repository, never()).save(any());
+    }
+
+    @Test
+    void assignDm_status_reportsOnOff() {
+        UserMappingEntity mapping = new UserMappingEntity("U1", "alice", "Alice");
+        when(repository.findBySlackUserId("U1")).thenReturn(Optional.of(mapping));
+
+        assertThat(service.assignDmStatus("U1")).contains("ON");
+        mapping.setAssignDmEnabled(false);
+        assertThat(service.assignDmStatus("U1")).contains("OFF");
+
+        when(repository.findBySlackUserId("U-NEW")).thenReturn(Optional.empty());
+        assertThat(service.assignDmStatus("U-NEW")).contains("OFF").contains("매핑 미등록");
+    }
 }

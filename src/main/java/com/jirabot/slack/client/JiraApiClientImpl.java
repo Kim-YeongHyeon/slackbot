@@ -295,6 +295,50 @@ public class JiraApiClientImpl implements JiraApiClient {
     }
 
     @Override
+    public Optional<SprintIssue> getIssue(String issueKey) {
+        try {
+            // STUDY: sync 와 동일한 필드 집합으로 단건 조회 — parseSprintIssue 를 그대로 재사용한다.
+            String json = jiraWebClient.get()
+                    .uri("/rest/api/3/issue/{key}?fields={fields}", issueKey, sprintFields)
+                    .retrieve().bodyToMono(String.class).block();
+            return Optional.of(parseSprintIssue(objectMapper.readTree(json)));
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode().value() == 404) {
+                log.info("getIssue {}: not found (404)", issueKey);
+            } else {
+                log.warn("getIssue {} failed: {}", issueKey, e.getStatusCode());
+            }
+            return Optional.empty();
+        } catch (Exception e) {
+            log.warn("getIssue {} error: {}", issueKey, e.toString());
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public boolean assignIssue(String issueKey, String accountId) {
+        try {
+            // STUDY: PUT /issue/{key}/assignee — body 의 accountId 가 null 이면 담당자 해제.
+            //        성공 시 204 No Content (본문 없음) → bodyToMono(Void.class) 대신 toBodilessEntity.
+            java.util.Map<String, String> body = new java.util.HashMap<>();
+            body.put("accountId", accountId);
+            jiraWebClient.put()
+                    .uri("/rest/api/3/issue/{key}/assignee", issueKey)
+                    .bodyValue(body)
+                    .retrieve().toBodilessEntity().block();
+            log.info("Assigned {} to accountId={}", issueKey, accountId);
+            return true;
+        } catch (WebClientResponseException e) {
+            log.warn("assignIssue {} failed: {} body={}", issueKey, e.getStatusCode(),
+                    e.getResponseBodyAsString());
+            return false;
+        } catch (Exception e) {
+            log.warn("assignIssue {} error: {}", issueKey, e.toString());
+            return false;
+        }
+    }
+
+    @Override
     public boolean transitionIssue(String issueKey, String targetStatusName) {
         try {
             // STUDY: Jira 상태 전환은 2단계 — (1) 가능한 transition 목록 조회 (2) transition 실행.

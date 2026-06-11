@@ -236,4 +236,85 @@ class JiraWebhookServiceImplTest {
 
         verify(issueRepository).save(issue);
     }
+
+    // --- 개인 할당 DM 알림 ---
+
+    // STUDY: assignee 변경 항목에 to(accountId) 를 포함하는 페이로드 — 할당 DM 경로 전용 빌더.
+    private String assignPayload(String changelogId, String issueKey, String actorAccountId,
+                                 String newAssigneeAccountId, String newAssigneeDisplay) {
+        return String.format("""
+                {"webhookEvent":"jira:issue_updated",
+                 "user":{"accountId":"%s","displayName":"변경자"},
+                 "issue":{"key":"%s","fields":{
+                   "summary":"할당 테스트 이슈",
+                   "status":{"name":"해야 할 일","statusCategory":{"name":"To Do"}},
+                   "assignee":{"displayName":%s},
+                   "issuetype":{"name":"작업"},
+                   "updated":"2025-12-31T01:23:45.000+0900"
+                 }},
+                 "changelog":{"id":"%s","items":[
+                   {"field":"assignee","fromString":null,"toString":%s,"to":%s}
+                 ]}}
+                """, actorAccountId, issueKey, jsonString(newAssigneeDisplay),
+                changelogId, jsonString(newAssigneeDisplay), jsonString(newAssigneeAccountId));
+    }
+
+    @Test
+    void assigneeChange_sendsDmToMappedUser_evenWithoutSlackThread() {
+        rebuild(NotifyTrigger.STATUS_AND_ASSIGNEE, MentionMode.MENTION);
+        // 로컬 미추적 이슈(스레드 없음)에도 DM 은 발송돼야 한다.
+        when(issueRepository.findByIssueKey("ES2-500")).thenReturn(Optional.empty());
+        when(userMappingRepository.findByJiraAccountId("acc-kim"))
+                .thenReturn(Optional.of(new UserMappingEntity("U-kim", "김슬랙", "김영현", "acc-kim")));
+
+        service.process(assignPayload("clog-20", "ES2-500", "acc-actor", "acc-kim", "김영현"));
+
+        verify(slackNotifier).sendDirectMessage(eq("U-kim"),
+                argThat(text -> text.contains("ES2-500") && text.contains("할당")));
+    }
+
+    @Test
+    void assigneeChange_noDm_whenUserDisabledIt() {
+        rebuild(NotifyTrigger.STATUS_AND_ASSIGNEE, MentionMode.MENTION);
+        UserMappingEntity mapping = new UserMappingEntity("U-kim", "김슬랙", "김영현", "acc-kim");
+        mapping.setAssignDmEnabled(false);
+        when(userMappingRepository.findByJiraAccountId("acc-kim")).thenReturn(Optional.of(mapping));
+
+        service.process(assignPayload("clog-21", "ES2-500", "acc-actor", "acc-kim", "김영현"));
+
+        verify(slackNotifier, never()).sendDirectMessage(anyString(), anyString());
+    }
+
+    @Test
+    void assigneeChange_noDm_whenNoMapping() {
+        rebuild(NotifyTrigger.STATUS_AND_ASSIGNEE, MentionMode.MENTION);
+        when(userMappingRepository.findByJiraAccountId("acc-unknown")).thenReturn(Optional.empty());
+        when(userMappingRepository.findByJiraDisplayName("미등록자")).thenReturn(Optional.empty());
+
+        service.process(assignPayload("clog-22", "ES2-500", "acc-actor", "acc-unknown", "미등록자"));
+
+        verify(slackNotifier, never()).sendDirectMessage(anyString(), anyString());
+    }
+
+    @Test
+    void selfAssignment_noDm() {
+        rebuild(NotifyTrigger.STATUS_AND_ASSIGNEE, MentionMode.MENTION);
+        when(userMappingRepository.findByJiraAccountId("acc-kim"))
+                .thenReturn(Optional.of(new UserMappingEntity("U-kim", "김슬랙", "김영현", "acc-kim")));
+
+        // 변경자 == 새 담당자 (본인이 본인에게 할당)
+        service.process(assignPayload("clog-23", "ES2-500", "acc-kim", "acc-kim", "김영현"));
+
+        verify(slackNotifier, never()).sendDirectMessage(anyString(), anyString());
+    }
+
+    @Test
+    void statusOnlyChange_noAssignDm() {
+        rebuild(NotifyTrigger.STATUS_AND_ASSIGNEE, MentionMode.MENTION);
+        when(issueRepository.findByIssueKey("ES2-100")).thenReturn(Optional.of(botIssue()));
+
+        service.process(payload("clog-24", "ES2-100", "요약", "해야 할 일", "진행 중", null, null, "Bob"));
+
+        verify(slackNotifier, never()).sendDirectMessage(anyString(), anyString());
+    }
 }

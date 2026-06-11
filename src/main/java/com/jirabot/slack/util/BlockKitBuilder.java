@@ -53,6 +53,67 @@ public final class BlockKitBuilder {
     }
 
     /**
+     * 이슈 키 조회 카드 Block Kit JSON 을 생성한다 (공식 Jira-Slack 앱의 /jira KEY 카드 대응).
+     * Section(제목+링크) + Section(fields 2열: 유형/상태/담당자/보고자/SP/스프린트)
+     * + [Section(설명 일부)] + 상태별 다음 단계 버튼(완료 이슈는 버튼 없음).
+     * 버튼은 기존 전환 action_id 재사용 — SlackInteractionController.handleTransition 이 그대로 처리한다.
+     *
+     * @param statusCategory 한국어 상태 카테고리 ("해야 할 일"/"진행 중"/"완료"), 그 외/null 은 버튼 없음
+     */
+    public static String buildIssueCardBlocks(String key, String url, String summary,
+                                              String issueType, String status, String statusCategory,
+                                              String assignee, String reporter,
+                                              Double storyPoint, String sprintName,
+                                              String description) {
+        ArrayNode blocks = MAPPER.createArrayNode();
+
+        blocks.add(buildMrkdwnSection(String.format(":card_index: *<%s|[%s] %s>*", url, key, summary)));
+
+        // STUDY: section.fields — Slack 이 2열 그리드로 렌더링한다 (최대 10개).
+        ObjectNode fieldsSection = MAPPER.createObjectNode();
+        fieldsSection.put("type", "section");
+        ArrayNode fields = MAPPER.createArrayNode();
+        fields.add(mrkdwnText("*유형*\n" + orDash(issueType)));
+        fields.add(mrkdwnText("*상태*\n" + orDash(status)));
+        fields.add(mrkdwnText("*담당자*\n" + orDash(assignee)));
+        fields.add(mrkdwnText("*보고자*\n" + orDash(reporter)));
+        fields.add(mrkdwnText("*Story Point*\n"
+                + (storyPoint == null || storyPoint == 0 ? "-" : String.valueOf(storyPoint.intValue()))));
+        fields.add(mrkdwnText("*스프린트*\n" + orDash(sprintName)));
+        fieldsSection.set("fields", fields);
+        blocks.add(fieldsSection);
+
+        if (description != null && !description.isBlank()) {
+            String snippet = description.length() > 200 ? description.substring(0, 200) + "…" : description;
+            blocks.add(buildMrkdwnSection("*설명*\n" + snippet));
+        }
+
+        // 상태 카테고리에 맞는 다음 단계 버튼 (완료/미상은 버튼 없음)
+        ArrayNode elements = MAPPER.createArrayNode();
+        if ("해야 할 일".equals(statusCategory)) {
+            elements.add(buildButton("🔨 진행 중", ACTION_IN_PROGRESS, key, null, null));
+            elements.add(buildButton("⚡ 바로 완료", ACTION_QUICK_DONE, key, "primary",
+                    buildConfirm("확인", "해야 할 일 → 진행 중 → 완료를 한번에 처리합니다. 계속하시겠습니까?", "실행", "취소")));
+        } else if ("진행 중".equals(statusCategory)) {
+            elements.add(buildButton("🔍 검토 중", ACTION_IN_REVIEW, key, null, null));
+            elements.add(buildButton("✅ 완료", ACTION_DONE, key, "primary",
+                    buildConfirm("확인", "정말 완료 처리하시겠습니까?", "완료", "취소")));
+        }
+        if (!elements.isEmpty()) {
+            ObjectNode actions = MAPPER.createObjectNode();
+            actions.put("type", "actions");
+            actions.set("elements", elements);
+            blocks.add(actions);
+        }
+
+        return serialize(blocks);
+    }
+
+    private static String orDash(String value) {
+        return (value == null || value.isBlank()) ? "-" : value;
+    }
+
+    /**
      * 이슈 생성 완료 메시지용 Block Kit JSON을 생성한다.
      * Section(이슈 정보) + [Section(유사 이슈 경고)] + Divider + Actions(해야 할 일/진행 중/바로 완료 버튼)
      */

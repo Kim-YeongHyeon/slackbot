@@ -99,19 +99,24 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
                 return;
             }
 
+            List<JiraChangelog> items = parseChangelogItems(root.path("changelog").path("items"));
+            if (items.isEmpty()) {
+                return;
+            }
+
+            // STUDY: 개인 할당 DM 은 봇 생성(스레드 보유) 이슈 여부와 무관하게 발송해야 하므로
+            //        로컬 추적/스레드 가드보다 먼저 처리한다 (공식 앱의 personal notifications 대응).
+            //        실패해도 스레드 알림 흐름을 깨지 않도록 내부에서 예외를 흡수한다.
+            notifyAssigneeDm(root, issueKey, items);
+
             Optional<IssueEntity> found = issueRepository.findByIssueKey(issueKey);
             if (found.isEmpty()) {
-                log.debug("Webhook ignored: issue {} not tracked locally", issueKey);
+                log.debug("Webhook thread-notify skipped: issue {} not tracked locally", issueKey);
                 return;
             }
             IssueEntity issue = found.get();
             if (issue.getSlackChannel() == null || issue.getSlackThreadTs() == null) {
-                log.debug("Webhook ignored: issue {} has no Slack thread", issueKey);
-                return;
-            }
-
-            List<JiraChangelog> items = parseChangelogItems(root.path("changelog").path("items"));
-            if (items.isEmpty()) {
+                log.debug("Webhook thread-notify skipped: issue {} has no Slack thread", issueKey);
                 return;
             }
 
@@ -144,9 +149,59 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
             items.add(new JiraChangelog(
                     item.path("field").asText(""),
                     item.path("fromString").isNull() ? null : item.path("fromString").asText(null),
-                    item.path("toString").isNull() ? null : item.path("toString").asText(null)));
+                    item.path("toString").isNull() ? null : item.path("toString").asText(null),
+                    item.path("to").isNull() ? null : item.path("to").asText(null)));
         }
         return items;
+    }
+
+    // STUDY: Jira 에서 이슈가 누군가에게 할당되면 그 사람에게 DM 발송.
+    //        조건: assignee 변경 항목 존재 && 새 담당자 매핑 등록됨 && assignDmEnabled && 셀프할당 아님.
+    //        봇의 `할당` 명령으로 바꿔도 Jira webhook 이 돌아와 같은 경로로 DM — 알림 경로 일원화.
+    void notifyAssigneeDm(JsonNode root, String issueKey, List<JiraChangelog> items) {
+        try {
+            JiraChangelog assigneeItem = items.stream()
+                    .filter(i -> "assignee".equals(i.field())).findFirst().orElse(null);
+            if (assigneeItem == null || (assigneeItem.toId() == null && assigneeItem.toValue() == null)) {
+                return; // 할당 변경 아님 또는 담당자 해제
+            }
+
+            // 매핑 조회 — accountId 우선, displayName 폴백 (L4: 저장된 식별자가 진실).
+            Optional<UserMappingEntity> mapping = Optional.empty();
+            if (assigneeItem.toId() != null && !assigneeItem.toId().isBlank()) {
+                mapping = userMappingRepository.findByJiraAccountId(assigneeItem.toId());
+            }
+            if (mapping.isEmpty() && assigneeItem.toValue() != null && !assigneeItem.toValue().isBlank()) {
+                mapping = userMappingRepository.findByJiraDisplayName(assigneeItem.toValue());
+            }
+            if (mapping.isEmpty()) {
+                log.debug("Assign DM skipped: no mapping for assignee '{}' ({})",
+                        assigneeItem.toValue(), assigneeItem.toId());
+                return;
+            }
+            if (!mapping.get().isAssignDmEnabled()) {
+                log.debug("Assign DM skipped: disabled for {}", mapping.get().getSlackUserId());
+                return;
+            }
+
+            // 셀프할당(변경자 본인에게 할당)은 DM 생략 — 본인이 한 행동이라 알림 가치가 없다.
+            String actorAccountId = root.path("user").path("accountId").asText(null);
+            if (actorAccountId != null && actorAccountId.equals(assigneeItem.toId())) {
+                log.debug("Assign DM skipped: self-assignment by {}", actorAccountId);
+                return;
+            }
+
+            String summary = root.path("issue").path("fields").path("summary").asText("");
+            String actorDisplay = root.path("user").path("displayName").asText(null);
+            String actor = (actorDisplay == null || actorDisplay.isBlank()) ? "자동화/시스템" : actorDisplay;
+            String message = String.format(
+                    ":bell: <%s|%s> %s\n회원님에게 할당되었습니다. (변경: %s)\n_알림 끄기: `@지라 할당알림 off`_",
+                    issueLink(issueKey), issueKey, summary, actor);
+            slackNotifier.sendDirectMessage(mapping.get().getSlackUserId(), message);
+            log.info("Assign DM sent key={} to={}", issueKey, mapping.get().getSlackUserId());
+        } catch (Exception e) {
+            log.warn("Assign DM failed key={}: {}", issueKey, e.toString());
+        }
     }
 
     boolean shouldNotify(List<JiraChangelog> items) {

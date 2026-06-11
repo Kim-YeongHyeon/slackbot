@@ -592,4 +592,137 @@ class SlackEventControllerTest {
         assertThat(
                 SlackEventController.stripMention(null)).isEmpty();
     }
+
+    // --- 이슈 키 조회 카드 ---
+
+    @Test
+    void extractCardIssueKey_matchesKeyAloneAndWithFillers() {
+        assertThat(SlackEventController.extractCardIssueKey("ES2-123")).isEqualTo("ES2-123");
+        assertThat(SlackEventController.extractCardIssueKey("ES2-123 보여줘")).isEqualTo("ES2-123");
+        assertThat(SlackEventController.extractCardIssueKey("이슈 ES2-123 상세")).isEqualTo("ES2-123");
+        assertThat(SlackEventController.extractCardIssueKey("조회 ES2-123")).isEqualTo("ES2-123");
+        assertThat(SlackEventController.extractCardIssueKey("ES2-123 status?")).isEqualTo("ES2-123");
+    }
+
+    @Test
+    void extractCardIssueKey_rejectsSentencesAndMultipleKeys() {
+        // 키를 언급만 하는 서술문 — 이슈 생성/검색 흐름을 가로채면 안 된다.
+        assertThat(SlackEventController.extractCardIssueKey("ES2-123 때문에 빌드가 깨져요")).isNull();
+        assertThat(SlackEventController.extractCardIssueKey("ES2-1 ES2-2 비교해줘")).isNull();
+        assertThat(SlackEventController.extractCardIssueKey("로그인 페이지 500 에러")).isNull();
+        assertThat(SlackEventController.extractCardIssueKey("")).isNull();
+        assertThat(SlackEventController.extractCardIssueKey(null)).isNull();
+    }
+
+    @Test
+    void issueKeyCommand_localIssue_postsCardBlocks() throws Exception {
+        var issue = new com.jirabot.slack.entity.IssueEntity(
+                "SLAC-7", "로그인 500 에러", "버그", "진행 중", "진행 중",
+                "Alice", 2.0, null, "상세 설명", java.time.Instant.now(), java.time.Instant.now());
+        when(issueRepository.findByIssueKey("SLAC-7")).thenReturn(java.util.Optional.of(issue));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> SLAC-7", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> blocks = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postBlockMessage(org.mockito.ArgumentMatchers.eq("C1"),
+                any(), any(), blocks.capture());
+        assertThat(blocks.getValue()).contains("SLAC-7").contains("진행 중").contains("Alice");
+        // 진행 중 카드 → 검토/완료 버튼 노출
+        assertThat(blocks.getValue()).contains(com.jirabot.slack.util.BlockKitBuilder.ACTION_IN_REVIEW);
+        verify(jiraApiClient, never()).getIssue(any());
+    }
+
+    @Test
+    void issueKeyCommand_unknownIssue_fallsBackToLiveThenNotFound() throws Exception {
+        when(issueRepository.findByIssueKey("SLAC-99")).thenReturn(java.util.Optional.empty());
+        when(jiraApiClient.getIssue("SLAC-99")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> SLAC-99", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).getIssue("SLAC-99");
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("찾을 수 없");
+    }
+
+    // --- 담당자 지정 ---
+
+    @Test
+    void assignCommand_byName_assignsAndRepliesWithIssueKey() throws Exception {
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U9", "홍길동S", "홍길동", "acc-77");
+        when(userMappingRepository.findByJiraDisplayName("홍길동")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.assignIssue("SLAC-7", "acc-77")).thenReturn(true);
+        when(issueRepository.findByIssueKey("SLAC-7")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 할당 SLAC-7 홍길동", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).assignIssue("SLAC-7", "acc-77");
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postMessage(any(), msg.capture());
+        // 응답은 항상 대상 이슈 키를 명시한다 (스레드 모호성 안전장치).
+        assertThat(msg.getValue()).contains("SLAC-7").contains("홍길동");
+    }
+
+    @Test
+    void assignCommand_unregisteredMention_warnsWithoutAssigning() throws Exception {
+        when(userMappingRepository.findBySlackUserId("U5")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 할당 SLAC-7 <@U5>", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).assignIssue(any(), any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postMessage(any(), msg.capture());
+        assertThat(msg.getValue()).contains("매핑이 없습니다");
+    }
+
+    @Test
+    void assignCommand_badFormat_showsUsage() throws Exception {
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 할당 홍길동", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).assignIssue(any(), any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("사용법");
+    }
+
+    // --- 할당알림 토글 ---
+
+    @Test
+    void assignDmOnCommand_callsEnable() throws Exception {
+        when(reminderSubscriptionService.enableAssignDm("U1")).thenReturn(":bell: 할당 알림이 켜졌습니다.");
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 할당알림 on", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(reminderSubscriptionService).enableAssignDm("U1");
+    }
+
+    @Test
+    void assignDmOffCommand_callsDisable() throws Exception {
+        when(reminderSubscriptionService.disableAssignDm("U1")).thenReturn(":no_bell: 할당 알림이 꺼졌습니다.");
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 할당알림 off", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(reminderSubscriptionService).disableAssignDm("U1");
+    }
 }

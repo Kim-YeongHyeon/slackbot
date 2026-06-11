@@ -43,6 +43,20 @@ public interface JiraApiClient {
     boolean issueExists(String issueKey);
 
     /**
+     * 단건 이슈를 라이브 조회한다 (이슈 키 조회 카드의 로컬 DB 미보유 폴백).
+     * 404(삭제/권한 없음) 또는 실패 시 empty.
+     */
+    Optional<SprintIssue> getIssue(String issueKey);
+
+    /**
+     * 이슈의 담당자를 변경한다.
+     *
+     * @param accountId 새 담당자 Jira accountId (null 이면 담당자 해제)
+     * @return 성공 여부 (204)
+     */
+    boolean assignIssue(String issueKey, String accountId);
+
+    /**
      * Create a sub-task under a parent issue.
      *
      * @param jiraAccountId 보고자/담당자 Jira accountId (null이면 API 토큰 소유자가 기본값)
