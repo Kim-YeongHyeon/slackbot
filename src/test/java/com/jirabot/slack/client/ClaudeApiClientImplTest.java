@@ -27,7 +27,7 @@ class ClaudeApiClientImplTest {
     @BeforeEach
     void setUp() {
         runner = mock(ProcessRunner.class);
-        ClaudeProperties props = new ClaudeProperties("claude", "claude-sonnet-4-6", 5, "plan", 1);
+        ClaudeProperties props = new ClaudeProperties("claude", "claude-sonnet-4-6", "claude-haiku-4-5", 5, "plan", 1);
         client = new ClaudeApiClientImpl(runner, props, new ObjectMapper());
     }
 
@@ -274,5 +274,69 @@ class ClaudeApiClientImplTest {
     void englishBranchSlug_blankSummary_skipsCliCall() {
         assertThat(client.englishBranchSlug("  ")).isEmpty();
         verify(runner, never()).run(any(), anyString(), any(Duration.class));
+    }
+
+    // --- 프롬프트 skill 파일 외부화 (--system-prompt-file) ---
+    // STUDY: Gradle test 워커의 working dir = 프로젝트 루트 → 리포의 prompts/*.md 가 실재해
+    //        promptFileExists 분기가 실제 운영 경로(파일 사용)와 동일하게 동작한다.
+
+    @SuppressWarnings("unchecked")
+    private List<String> capturedCommand() {
+        org.mockito.ArgumentCaptor<List<String>> cmd = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(runner).run(cmd.capture(), anyString(), any(Duration.class));
+        return cmd.getValue();
+    }
+
+    @Test
+    void classify_usesSystemPromptFile_andStdinHasOnlyUserContent() {
+        String inner = "{\"type\":\"BUG\",\"storyPoint\":2,\"title\":\"T\",\"summary\":\"S\"}";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, envelope(inner, false), "", false));
+
+        client.classify("로그인 500 에러");
+
+        org.mockito.ArgumentCaptor<String> stdin = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.ArgumentCaptor<List<String>> cmd = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(runner).run(cmd.capture(), stdin.capture(), any(Duration.class));
+        assertThat(cmd.getValue()).containsSequence("--system-prompt-file", ClaudeApiClientImpl.CLASSIFIER_PROMPT_FILE);
+        // 시스템 프롬프트는 파일로 빠지고 stdin 은 사용자 입력만 담는다.
+        assertThat(stdin.getValue()).doesNotContain("Jira triage assistant");
+        assertThat(stdin.getValue()).contains("USER INPUT:").contains("로그인 500 에러");
+    }
+
+    @Test
+    void englishBranchSlug_usesFastModelAndSkillFile() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, envelope("fix-login-error", false), "", false));
+
+        client.englishBranchSlug("로그인 에러 수정");
+
+        List<String> cmd = capturedCommand();
+        // 단순 변환은 Sonnet 이 아닌 fastModel(Haiku) 로.
+        assertThat(cmd).contains("claude-haiku-4-5").doesNotContain("claude-sonnet-4-6");
+        assertThat(cmd).containsSequence("--system-prompt-file", ClaudeApiClientImpl.BRANCH_SLUG_PROMPT_FILE);
+    }
+
+    @Test
+    void searchIssues_usesSkillFile_andStdinSkipsSystemPrompt() {
+        String inner = "[\"SLAC-7\"]";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, searchEnvelope(inner, false), "", false));
+
+        client.searchIssues("로그인", sampleIssues());
+
+        org.mockito.ArgumentCaptor<String> stdin = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.ArgumentCaptor<List<String>> cmd = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(runner).run(cmd.capture(), stdin.capture(), any(Duration.class));
+        assertThat(cmd.getValue()).containsSequence("--system-prompt-file", ClaudeApiClientImpl.SEARCH_PROMPT_FILE);
+        assertThat(stdin.getValue()).startsWith("[사용자 질문]");
+    }
+
+    @Test
+    void buildSearchStdin_nullSystemPrompt_omitsPrefix() {
+        String stdin = client.buildSearchStdin(null, "질문", sampleIssues());
+
+        assertThat(stdin).startsWith("[사용자 질문]");
+        assertThat(stdin).contains("[이슈 목록]");
     }
 }

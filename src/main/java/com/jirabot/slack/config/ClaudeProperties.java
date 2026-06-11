@@ -8,6 +8,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record ClaudeProperties(
         String cliPath,
         String model,
+        // STUDY: 단순 변환성 작업(브랜치 슬러그 등)용 경량 모델. 품질이 중요한 분류/검색/요약은 model(Sonnet),
+        //        형식이 단순하고 지연이 중요한 작업은 fastModel(Haiku) — 작업별 모델 계층화.
+        String fastModel,
         int timeoutSeconds,
         String permissionMode,
         int maxTurns
@@ -15,6 +18,9 @@ public record ClaudeProperties(
     public ClaudeProperties {
         if (cliPath == null || cliPath.isBlank()) {
             cliPath = "claude";
+        }
+        if (fastModel == null || fastModel.isBlank()) {
+            fastModel = "claude-haiku-4-5";
         }
         if (permissionMode == null || permissionMode.isBlank()) {
             permissionMode = "plan";

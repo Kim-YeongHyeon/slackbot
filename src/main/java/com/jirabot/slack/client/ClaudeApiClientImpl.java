@@ -72,6 +72,23 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
 
     private static final String STDIN_DELIMITER = "\n\n---\nUSER INPUT:\n";
 
+    // STUDY: 시스템 프롬프트를 디스크 skill 파일(prompts/)로 분리해 --system-prompt-file 로 전달한다
+    //        (headless 권장 패턴, IntentClassifierImpl 과 동일). 효과: (1) system 롤 배치로 지시 준수율 향상,
+    //        (2) stdin 은 순수 사용자 입력만 — 프롬프트 인젝션 경계 명확, (3) 프롬프트 수정에 재빌드 불필요.
+    //        파일이 없으면(부분 배포 등) 기존 인라인 상수 + stdin 합본 방식으로 폴백해 무중단을 보장한다.
+    static final String CLASSIFIER_PROMPT_FILE = "prompts/sonnet-classifier.md";
+    static final String RESOLUTION_PROMPT_FILE = "prompts/sonnet-resolution.md";
+    static final String BRANCH_SLUG_PROMPT_FILE = "prompts/haiku-branch-slug.md";
+    static final String SEARCH_PROMPT_FILE = "prompts/sonnet-issue-search.md";
+
+    private static boolean promptFileExists(String path) {
+        try {
+            return java.nio.file.Files.isReadable(java.nio.file.Path.of(path));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private final ProcessRunner processRunner;
     private final ClaudeProperties props;
     private final ObjectMapper objectMapper;
@@ -97,17 +114,18 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         try {
             // STUDY: stdin 으로 프롬프트 전달 — argv 는 shell 이스케이프/플랫폼별 길이 제한 이슈 회피.
             //        한국어/개행/따옴표가 섞여도 byte-safe.
-            List<String> command = buildCommand();
+            //        skill 파일이 있으면 시스템 프롬프트는 --system-prompt-file 로, stdin 은 사용자 입력만.
+            boolean useFile = promptFileExists(CLASSIFIER_PROMPT_FILE);
+            List<String> command = buildCommand(props.model(), useFile ? CLASSIFIER_PROMPT_FILE : null);
 
             // STUDY: intentHint 가 있으면 INTENT HINT 블록을 삽입하여 Haiku 분류 결과를 Sonnet 에게 전달한다.
             //        confidence 가 낮거나 hint 가 없으면 기존 포맷 유지.
-            String stdin;
-            if (intentHint != null && intentHint.intent() != null && !intentHint.intent().isBlank()) {
-                stdin = SYSTEM_PROMPT + "\n\n---\nINTENT HINT: " + intentHint.intent()
-                        + " (confidence: " + intentHint.confidence() + ")\n---\nUSER INPUT:\n" + rawText;
-            } else {
-                stdin = SYSTEM_PROMPT + STDIN_DELIMITER + rawText;
-            }
+            String hintBlock = (intentHint != null && intentHint.intent() != null && !intentHint.intent().isBlank())
+                    ? "INTENT HINT: " + intentHint.intent() + " (confidence: " + intentHint.confidence() + ")\n---\n"
+                    : "";
+            String stdin = useFile
+                    ? hintBlock + "USER INPUT:\n" + rawText
+                    : SYSTEM_PROMPT + "\n\n---\n" + hintBlock + "USER INPUT:\n" + rawText;
 
             Duration timeout = Duration.ofSeconds(props.timeoutSeconds());
 
@@ -142,11 +160,12 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
             return Collections.emptyList();
         }
         try {
-            String systemPrompt = loadSearchPrompt();
-            String stdin = buildSearchStdin(systemPrompt, userQuery, issues);
+            // STUDY: 디스크 skill 파일 우선(--system-prompt-file), 없으면 classpath 리소스를 stdin 에 합본(폴백).
+            boolean useFile = promptFileExists(SEARCH_PROMPT_FILE);
+            String stdin = buildSearchStdin(useFile ? null : loadSearchPrompt(), userQuery, issues);
 
             // STUDY: Sonnet 모델로 호출. 기존 classify와 동일한 CLI 패턴이지만 model은 props.model() (Sonnet).
-            List<String> command = buildCommand();
+            List<String> command = buildCommand(props.model(), useFile ? SEARCH_PROMPT_FILE : null);
             Duration timeout = Duration.ofSeconds(props.timeoutSeconds());
 
             ProcessRunner.Result result = processRunner.run(command, stdin, timeout);
@@ -185,10 +204,13 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         }
     }
 
-    // STUDY: 패키지-프라이빗으로 테스트에서 직접 호출 가능.
+    // STUDY: 패키지-프라이빗으로 테스트에서 직접 호출 가능. systemPrompt 가 null 이면
+    //        시스템 프롬프트는 --system-prompt-file 로 전달된 것 — stdin 에는 사용자 콘텐츠만 담는다.
     String buildSearchStdin(String systemPrompt, String userQuery, List<IssueSearchEntry> issues) {
         StringBuilder sb = new StringBuilder();
-        sb.append(systemPrompt).append("\n\n");
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            sb.append(systemPrompt).append("\n\n");
+        }
         sb.append("[사용자 질문]\n").append(userQuery).append("\n\n");
         sb.append("[이슈 목록]\n");
         for (IssueSearchEntry entry : issues) {
@@ -272,7 +294,8 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
     public BugResolutionSummary summarizeBugResolution(String issueKey, String description,
                                                        List<String> comments, List<String> threadMessages) {
         try {
-            StringBuilder sb = new StringBuilder(RESOLUTION_PROMPT);
+            boolean useFile = promptFileExists(RESOLUTION_PROMPT_FILE);
+            StringBuilder sb = new StringBuilder(useFile ? "" : RESOLUTION_PROMPT);
             sb.append("\n\n---\nISSUE: ").append(issueKey == null ? "" : issueKey).append("\n");
             sb.append("DESCRIPTION:\n").append(description == null || description.isBlank() ? "(none)" : description).append("\n\n");
             sb.append("COMMENTS:\n");
@@ -293,7 +316,8 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
             }
 
             ProcessRunner.Result result = processRunner.run(
-                    buildCommand(), sb.toString(), Duration.ofSeconds(props.timeoutSeconds()));
+                    buildCommand(props.model(), useFile ? RESOLUTION_PROMPT_FILE : null),
+                    sb.toString(), Duration.ofSeconds(props.timeoutSeconds()));
             if (result.timedOut() || result.exitCode() != 0
                     || result.stdout() == null || result.stdout().isBlank()) {
                 log.warn("Claude resolution summary failed for {} (timeout={}, exit={})",
@@ -332,9 +356,12 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
             return "";
         }
         try {
-            String stdin = BRANCH_SLUG_PROMPT + STDIN_DELIMITER + summary;
+            // STUDY: 단순 변환 작업이라 Haiku(fastModel)로 처리 — Sonnet 대비 수 초 빠르고 품질 차이 없음.
+            boolean useFile = promptFileExists(BRANCH_SLUG_PROMPT_FILE);
+            String stdin = useFile ? summary : BRANCH_SLUG_PROMPT + STDIN_DELIMITER + summary;
             ProcessRunner.Result result = processRunner.run(
-                    buildCommand(), stdin, Duration.ofSeconds(props.timeoutSeconds()));
+                    buildCommand(props.fastModel(), useFile ? BRANCH_SLUG_PROMPT_FILE : null),
+                    stdin, Duration.ofSeconds(props.timeoutSeconds()));
             if (result.timedOut() || result.exitCode() != 0
                     || result.stdout() == null || result.stdout().isBlank()) {
                 log.warn("Claude branch slug failed (timeout={}, exit={})",
@@ -355,17 +382,23 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         }
     }
 
-    private List<String> buildCommand() {
+    private List<String> buildCommand(String model, String systemPromptFile) {
         // STUDY: --output-format json → { type, subtype, result, is_error, ... } envelope 로 감싸져서 machine-parseable.
         // STUDY: --max-turns 1 → 모델이 단 한 번의 응답만 내놓도록 보장 (도구 반복 호출 루프 차단).
         // STUDY: --permission-mode plan → CLI 자체가 파일/쉘 도구 실행을 거부. 분류 전용 호출에 적합.
-        return List.of(
+        // STUDY: --system-prompt-file → 디스크 skill 파일을 system 롤로 전달 (IntentClassifierImpl 과 동일 패턴).
+        List<String> cmd = new java.util.ArrayList<>(List.of(
                 props.cliPath(), "-p",
                 "--output-format", "json",
                 "--permission-mode", props.permissionMode(),
                 "--max-turns", String.valueOf(props.maxTurns()),
-                "--model", props.model()
-        );
+                "--model", model
+        ));
+        if (systemPromptFile != null) {
+            cmd.add("--system-prompt-file");
+            cmd.add(systemPromptFile);
+        }
+        return cmd;
     }
 
     private IssueClassification parseEnvelope(String stdout, String rawText) {
