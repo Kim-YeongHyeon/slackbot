@@ -20,6 +20,7 @@ import com.jirabot.slack.client.dto.IssueClassification;
 import com.jirabot.slack.client.dto.JiraCreateResponse;
 import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.dto.IssueCreateCommand;
+import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.entity.UserMappingEntity;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
@@ -164,6 +165,30 @@ class IssueCreateServiceImplTest {
         assertThat(cap.getValue().type()).isEqualTo(IssueClassification.IssueType.EPIC);
         assertThat(cap.getValue().storyPoint()).isZero();
         assertThat(cap.getValue().title()).isEqualTo("GCP 배포 확장");
+    }
+
+    @Test
+    void savedEntity_reporterIsJiraDisplayName_notSlackUserId() throws Exception {
+        // IssueEntity.reporter 계약: Jira displayName. Slack ID 가 저장되면
+        // webhook DM 의 resolveMention 이 매핑 조회에 실패해 raw ID 가 노출된다.
+        when(userMappingRepository.findBySlackUserId("U03L1TJ0EBB"))
+                .thenReturn(Optional.of(new UserMappingEntity("U03L1TJ0EBB", "Kim", "YeongHyeonKim")));
+
+        var classification = new IssueClassification(
+                IssueClassification.IssueType.FEATURE, 2, "audit log 확인", "요약");
+        when(claude.classify(anyString(), any())).thenReturn(classification);
+        when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
+        when(jira.createIssue(eq(classification), anyString(), any()))
+                .thenReturn(new JiraCreateResponse("10003", "PROJ-3", "https://..."));
+
+        var cmd = new IssueCreateCommand("audit log 확인", "U03L1TJ0EBB", "C1", "1.0");
+        var result = service.createFromSlackText(cmd).get();
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<IssueEntity> cap = ArgumentCaptor.forClass(IssueEntity.class);
+        verify(issueRepository).save(cap.capture());
+        assertThat(cap.getValue().getReporter()).isEqualTo("YeongHyeonKim");
+        assertThat(cap.getValue().getReporter()).isNotEqualTo("U03L1TJ0EBB");
     }
 
     @Test

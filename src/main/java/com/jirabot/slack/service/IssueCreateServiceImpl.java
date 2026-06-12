@@ -101,7 +101,9 @@ public class IssueCreateServiceImpl implements IssueCreateService {
             String url = buildIssueUrl(created.key());
             log.info("Issue created key={} url={} type={} sp={}", created.key(), url,
                     classification.type(), classification.storyPoint());
-            saveToDb(created.key(), classification, command.slackUserId(), command);
+            // STUDY: IssueEntity.reporter 계약은 "Jira displayName" (webhook DM 의 resolveMention 이
+            //        displayName 으로 매핑을 조회). Slack ID 를 넣으면 DM 에 raw ID 가 노출된다.
+            saveToDb(created.key(), classification, reporterName, command);
             notifySlack(command, created.key(), url, classification, similar);
             return CompletableFuture.completedFuture(IssueCreateResult.ok(created.key(), url));
         } catch (Exception e) {

@@ -61,17 +61,24 @@ API: `/api/dashboard/*` (summary·sprint·trends·workload·bugs·issues·intent
 - 테스트(H2)는 Flyway 를 끄고 기존 create-drop 유지 (`application-test.yml`).
 - 백업: 전환 직전 풀 백업 `~/backups/jirabot-pre-flyway-*.dump` (복원: `pg_restore -U jirabot -d jirabot <dump>`).
 
-### Jira 웹훅 수신 경로 (v0.0.23)
+### Jira 웹훅 수신 경로 (v0.0.23, 등록 완료 v0.0.28)
 
 Jira → ngrok 터널(:3000) → **Go 봇 `/api/jira/webhook` 프록시** → Spring `/api/jira/webhook`.
-ngrok 이 Go 봇만 노출하므로 프록시가 필수다. 등록은 Jira **사이트 관리자**가 설정 → 시스템 → 웹훅에서:
+ngrok 이 Go 봇만 노출하므로 프록시가 필수다. 등록은 Jira **사이트 관리자**가 설정 → 시스템 → 웹훅에서
+(또는 관리자 토큰으로 `POST /rest/webhooks/1.0/webhook`):
 
 - URL: `https://<ngrok-domain>/api/jira/webhook?token=<JIRA_WEBHOOK_SECRET>`
 - 이벤트: 이슈 → **업데이트됨** (`jira:issue_updated`)
 - JQL 필터: `project = ES2`
 
-등록이 없으면 할당 DM·스레드 상태변경 알림·버그 완료 Notion 자동 동기화가 모두 동작하지 않는다.
+**2026-06-12 등록 완료** (`webhooks/1.0/webhook/1`, 관리자 `JIRA_ADMIN_EMAIL` 계정) — 할당 DM·스레드
+상태변경 알림·버그 완료 Notion 자동 동기화 라이브 활성. **ngrok 도메인이 바뀌면 웹훅 URL 재등록 필요.**
 수신/할당 DM 판정(발송·생략 사유)은 INFO 로그로 남는다 (`Jira webhook received`, `Assign DM sent/skipped`).
+
+### 버그 수정 (v0.0.28)
+
+- Slack 발 이슈 생성 시 DB `issues.reporter` 에 Slack ID 가 저장되던 버그 수정 — Jira displayName 으로 저장
+  (할당 DM 의 `reporter:` 라인에 raw Slack ID 가 노출되던 원인).
 
 ### Claude CLI 최적화 (v0.0.22)
 
