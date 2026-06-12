@@ -245,6 +245,58 @@ async function loadUsers() {
   });
 }
 
+async function loadFeatures() {
+  const res = await fetch('/api/feature-requests');
+  const d = await res.json();
+  rows('table-features', d.map(f =>
+    `<tr${f.done ? ' style="opacity:.55"' : ''}>` +
+    `<td>${f.done ? '<span class="badge done">완료</span>' : '<span class="badge todo">대기</span>'}</td>` +
+    `<td>${f.done ? '<s>' + esc(f.title) + '</s>' : esc(f.title)}</td>` +
+    `<td class="muted" style="white-space:pre-wrap">${esc(f.content ?? '')}</td>` +
+    `<td>${esc(f.author ?? '익명')}</td>` +
+    `<td class="muted">${fmtDate(f.createdAt)}</td>` +
+    `<td class="muted">${f.completedAt ? fmtDate(f.completedAt) : '-'}</td>` +
+    `<td><button class="btn" data-fr="${f.id}" data-done="${!f.done}">${f.done ? '되돌리기' : '✅ 완료'}</button></td></tr>`).join('')
+    || '<tr><td colspan="7" class="muted">아직 요청이 없습니다 — 첫 기능을 제안해보세요!</td></tr>');
+
+  document.querySelectorAll('#table-features [data-fr]').forEach(b => b.onclick = async () => {
+    await fetch('/api/feature-requests/' + b.dataset.fr, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ done: b.dataset.done === 'true' })
+    });
+    loadFeatures();
+  });
+}
+
+async function addFeature() {
+  const msg = document.getElementById('fr-msg');
+  const title = document.getElementById('fr-title').value.trim();
+  if (!title) { msg.className = 'msg warn'; msg.textContent = '제목을 입력해주세요.'; return; }
+  const btn = document.getElementById('btn-fr-add');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/feature-requests', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        content: document.getElementById('fr-content').value.trim(),
+        author: document.getElementById('fr-author').value.trim()
+      })
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(() => ({}));
+      msg.className = 'msg warn'; msg.textContent = '등록 실패: ' + (e.error ?? res.status);
+      return;
+    }
+    msg.className = 'msg ok'; msg.textContent = '등록되었습니다 — 관리자에게 DM이 전송됐어요.';
+    document.getElementById('fr-title').value = '';
+    document.getElementById('fr-content').value = '';
+    loadFeatures();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function loadBot() {
   let health = '🔴 DOWN';
   try {
@@ -281,7 +333,7 @@ async function loadBot() {
 
 const LOADERS = { overview: loadOverview, sprint: loadSprint, trends: loadTrends,
   workload: loadWorkload, bugs: loadBugs, prs: loadPrs, issues: loadIssues,
-  users: loadUsers, bot: loadBot };
+  users: loadUsers, bot: loadBot, features: loadFeatures };
 
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -293,6 +345,7 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.datas
 document.getElementById('trend-weeks').onchange = loadTrends;
 ['pr-repo', 'pr-author', 'pr-sort'].forEach(id =>
   document.getElementById(id).onchange = renderPrs);
+document.getElementById('btn-fr-add').onclick = addFeature;
 document.getElementById('btn-filter').onclick = loadIssues;
 document.getElementById('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadIssues(); });
 

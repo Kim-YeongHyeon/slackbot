@@ -50,6 +50,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 사용자 관리 | Slack↔Jira 매핑 등록(accountId·Slack 실명 자동 해석)/삭제, 리마인더·할당알림 토글 |
 | PR 현황 | 설정된 repo 전체의 열린 PR + 작성자 + **연결 Jira 이슈**(브랜치명/제목의 이슈 키로 자동 조인 — 상태·담당자·링크). **레포/작성자 필터 + 생성·갱신일 정렬(↑↓)** (v0.0.31, 클라이언트 필터라 refetch 없음), 생성일 컬럼 표시. 5분 캐시. **토큰에 Pull requests: Read-only 권한 필요** (없으면 탭에 안내 표시) |
 | 봇 상태 | 서버 health · 최근 의도분류 실패 로그 |
+| 기능요청 | 게시판 (v0.0.32) — 누구나 제목/내용/이름으로 요청 등록 → **관리자에게 Slack DM** (`FEATURE_REQUEST_NOTIFY_USER`, 비우면 DM 생략). 구현 후 완료 처리(되돌리기 가능, 완료일 기록). `feature_requests` 테이블(Flyway V3), API `/api/feature-requests` (GET/POST/PATCH) |
 
 API: `/api/dashboard/*` (summary·sprint·trends·workload·bugs·issues·intent-failures·actions/sync),
 `/api/user-mappings` (GET/POST/DELETE/PATCH — POST 는 Jira accountId 자동 해석).
@@ -165,6 +166,9 @@ GITHUB_BRANCH_REPOS=<버튼에 띄울 repo, 콤마 구분 (기본 envector-msa,e
 # 터널 경유 대시보드 접근 (선택, v0.0.30) — 둘 다 설정해야 Go봇 프록시가 켜짐
 DASHBOARD_USER=<대시보드 Basic Auth 아이디>
 DASHBOARD_PASSWORD=<대시보드 Basic Auth 비밀번호 (강한 랜덤값)>
+
+# 기능요청 게시판 (선택, v0.0.32) — 새 글 등록 시 DM 받을 Slack user ID (비우면 DM 생략)
+FEATURE_REQUEST_NOTIFY_USER=<관리자 Slack user ID (예: U03L1TJ0EBB)>
 ```
 
 > **GitHub 토큰 발급**: GitHub → Settings → Developer settings → Fine-grained tokens → Resource owner=조직, 대상 repo 선택, Repository permissions의 **Contents: Read and write**. 발급한 토큰을 `GITHUB_BRANCH_TOKEN`에 넣으면 "진행 중" 전환 시 repo 선택 버튼이 활성화됩니다.

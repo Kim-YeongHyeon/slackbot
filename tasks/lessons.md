@@ -176,3 +176,18 @@ columnDefinition DEFAULT 가 있는지 먼저 확인. 없으면 이 함정. 그�
 
 **How to apply**: webhook 류 기능을 만들면 마지막에 `curl <공급자 등록목록 API>` 와 합성 페이로드 E2E 를
 체크리스트로 수행. 터널 구조가 바뀌면(노출 포트 변경 등) 등록 URL 들도 함께 점검.
+
+---
+
+## L11 — 새 JPA 리포지토리를 추가하면 SecurityConfigIntegrationTest 에 @MockitoBean 도 추가
+
+**Context**: v0.0.29(ResponseMetricRepository)와 v0.0.32(FeatureRequestRepository) — 같은 세션에서 두 번 반복.
+`SecurityConfigIntegrationTest` 는 `spring.autoconfigure.exclude` 로 DataSource/JPA 자동설정을 끄고
+모든 리포지토리를 `@MockitoBean` 으로 대체하는 풀-컨텍스트 테스트다. 새 리포지토리가 어떤 빈의
+생성자 의존성에 들어가면 이 테스트가 `NoSuchBeanDefinitionException` 으로 깨진다.
+
+**Rule**: `repository/` 에 인터페이스를 추가하고 그것을 @Service/@RestController 가 주입받게 했다면,
+**같은 커밋에서 `SecurityConfigIntegrationTest` 에 `@MockitoBean private XxxRepository xxx;` 를 추가**한다.
+
+**How to apply**: 새 엔티티+리포지토리 작업의 체크리스트 = ①Flyway V<N> ②엔티티 ③리포지토리
+④주입처 ⑤**SecurityConfigIntegrationTest @MockitoBean** ⑥테스트. ⑤를 빼먹으면 전체 테스트에서 5건이 무더기로 깨진다.

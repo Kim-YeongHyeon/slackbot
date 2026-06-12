@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.jirabot.slack.filter.CachedBodyFilter;
 import com.jirabot.slack.filter.SlackSignatureFilter;
+import com.jirabot.slack.repository.FeatureRequestRepository;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.ProcessedJiraChangelogRepository;
@@ -58,6 +59,9 @@ class SecurityConfigIntegrationTest {
 
     @MockitoBean
     private ResponseMetricRepository responseMetricRepository;
+
+    @MockitoBean
+    private FeatureRequestRepository featureRequestRepository;
 
     @MockitoBean
     private JiraSyncService jiraSyncService;

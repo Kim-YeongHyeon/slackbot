@@ -26,6 +26,7 @@
   <button class="tab" data-tab="issues">이슈 목록</button>
   <button class="tab" data-tab="users">사용자 관리</button>
   <button class="tab" data-tab="bot">봇 상태</button>
+  <button class="tab" data-tab="features">기능요청</button>
 </nav>
 
 <main>
@@ -129,6 +130,21 @@
     <table id="table-metrics"><thead><tr><th>시각</th><th>이슈</th><th>총(체감)</th><th>분류</th><th>중복</th><th>Jira</th><th>DB</th><th>알림</th><th>결과</th></tr></thead><tbody></tbody></table>
     <h3>최근 의도분류 실패 (자연어를 못 알아들은 입력)</h3>
     <table id="table-failures"><thead><tr><th>시각</th><th>유형</th><th>입력</th><th>사용자</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <!-- 기능요청 -->
+  <section id="panel-features" class="panel">
+    <h2>기능요청 게시판 <span class="muted">(등록하면 관리자에게 Slack DM이 갑니다)</span></h2>
+    <div class="filters">
+      <input id="fr-author" type="text" placeholder="작성자 이름">
+      <input id="fr-title" type="text" placeholder="제목 (필수)" style="flex:1;min-width:200px">
+    </div>
+    <div class="filters">
+      <textarea id="fr-content" placeholder="내용 — 어떤 기능이 왜 필요한지 적어주세요" rows="3" style="flex:1;min-width:300px"></textarea>
+      <button id="btn-fr-add" class="btn primary">등록</button>
+    </div>
+    <div id="fr-msg" class="msg"></div>
+    <table id="table-features"><thead><tr><th>상태</th><th>제목</th><th>내용</th><th>작성자</th><th>작성일</th><th>완료일</th><th></th></tr></thead><tbody></tbody></table>
   </section>
 </main>
 
