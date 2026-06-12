@@ -28,6 +28,9 @@ public interface DashboardService {
 
     List<IntentFailureRow> intentFailures(int limit);
 
+    /** 응답 시간 보드 — 최근 7일 통계(성공 건) + 최근 50건 단계별 내역. */
+    com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricBoard responseMetrics();
+
     /** 열린 PR 현황 + 연결 Jira 이슈 (5분 캐시 — CacheConfig.OPEN_PRS_CACHE). */
     com.jirabot.slack.dto.dashboard.DashboardDtos.PrBoard prs();
 }

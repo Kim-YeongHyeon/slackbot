@@ -9,8 +9,10 @@ import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.config.ReminderProperties;
 import com.jirabot.slack.entity.IntentFailureEntity;
 import com.jirabot.slack.entity.IssueEntity;
+import com.jirabot.slack.entity.ResponseMetricEntity;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
+import com.jirabot.slack.repository.ResponseMetricRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -24,6 +26,7 @@ class DashboardServiceImplTest {
     private IssueRepository issueRepository;
     private UserMappingRepository userMappingRepository;
     private IntentFailureRepository intentFailureRepository;
+    private ResponseMetricRepository responseMetricRepository;
     private JiraSyncService jiraSyncService;
     private com.jirabot.slack.client.GitHubApiClient gitHubApiClient;
     private DashboardServiceImpl service;
@@ -34,7 +37,8 @@ class DashboardServiceImplTest {
         JiraProperties jiraProps = new JiraProperties("https://j.example.com", "u@x", "t", "ES2",
                 null, new JiraProperties.IssueTypes("버그", "작업", "하위 작업"));
         return new DashboardServiceImpl(issueRepository, userMappingRepository,
-                intentFailureRepository, jiraSyncService, reminderProps, gitHubApiClient, gitHubProps, jiraProps);
+                intentFailureRepository, responseMetricRepository, jiraSyncService, reminderProps,
+                gitHubApiClient, gitHubProps, jiraProps);
     }
 
     @BeforeEach
@@ -42,6 +46,7 @@ class DashboardServiceImplTest {
         issueRepository = mock(IssueRepository.class);
         userMappingRepository = mock(UserMappingRepository.class);
         intentFailureRepository = mock(IntentFailureRepository.class);
+        responseMetricRepository = mock(ResponseMetricRepository.class);
         jiraSyncService = mock(JiraSyncService.class);
         gitHubApiClient = mock(com.jirabot.slack.client.GitHubApiClient.class);
         when(jiraSyncService.lastSyncAt()).thenReturn(Optional.empty());
@@ -283,6 +288,45 @@ class DashboardServiceImplTest {
         assertThat(board.enabled()).isFalse();
         assertThat(board.prs()).isEmpty();
         org.mockito.Mockito.verifyNoInteractions(gitHubApiClient);
+    }
+
+    @Test
+    void responseMetrics_computesStatsFromSuccessOnly_andListsRecent() {
+        Instant now = Instant.now();
+        // 성공 100/200/300/400/500ms + 실패 9999ms (실패는 통계 제외, failCount 로만 집계)
+        List<ResponseMetricEntity> week = new java.util.ArrayList<>();
+        long[] totals = {300, 100, 500, 200, 400};
+        for (long t : totals) {
+            week.add(new ResponseMetricEntity("issue_create", "ES2-1", "U1", "C1",
+                    true, t, 50L, 10L, 100L, 5L, 20L, null, now));
+        }
+        week.add(new ResponseMetricEntity("issue_create", null, "U1", "C1",
+                false, 9999, 50L, null, null, null, null, "JiraApiException", now));
+        when(responseMetricRepository.findByStartedAtAfter(any())).thenReturn(week);
+        when(responseMetricRepository.findTop50ByOrderByStartedAtDesc()).thenReturn(week);
+
+        var board = service.responseMetrics();
+
+        assertThat(board.weekly().count()).isEqualTo(5);
+        assertThat(board.weekly().failCount()).isEqualTo(1);
+        assertThat(board.weekly().avgMs()).isEqualTo(300);
+        assertThat(board.weekly().p50Ms()).isEqualTo(300);   // nearest-rank: ceil(0.5*5)=3번째
+        assertThat(board.weekly().p95Ms()).isEqualTo(500);
+        assertThat(board.weekly().maxMs()).isEqualTo(500);
+        assertThat(board.recent()).hasSize(6);
+        assertThat(board.recent().get(5).errorType()).isEqualTo("JiraApiException");
+    }
+
+    @Test
+    void responseMetrics_emptyData_returnsZeroStats() {
+        when(responseMetricRepository.findByStartedAtAfter(any())).thenReturn(List.of());
+        when(responseMetricRepository.findTop50ByOrderByStartedAtDesc()).thenReturn(List.of());
+
+        var board = service.responseMetrics();
+
+        assertThat(board.weekly().count()).isZero();
+        assertThat(board.weekly().p95Ms()).isZero();
+        assertThat(board.recent()).isEmpty();
     }
 
     private void setFailedAt(IntentFailureEntity e, Instant at) {

@@ -75,6 +75,17 @@ ngrok 이 Go 봇만 노출하므로 프록시가 필수다. 등록은 Jira **사
 상태변경 알림·버그 완료 Notion 자동 동기화 라이브 활성. **ngrok 도메인이 바뀌면 웹훅 URL 재등록 필요.**
 수신/할당 DM 판정(발송·생략 사유)은 INFO 로그로 남는다 (`Jira webhook received`, `Assign DM sent/skipped`).
 
+### 응답 시간 계측 (v0.0.29)
+
+이슈 생성 응답이 느릴 때 원인 구간을 바로 짚을 수 있도록 매 건 계측한다.
+
+- **DB 적재**: `response_metrics` 테이블 (Flyway V2) — Slack 메시지 ts 기준 **end-to-end total_ms** +
+  Spring 내부 단계별(`classify`/`duplicate`/`jira`/`db`/`notify`) ms, 실패 건도 errorType 과 함께 기록.
+  total 과 단계 합의 차이 ≈ Haiku 의도분류 + Go봇/터널 전달 + async 큐 대기 (Spring 밖 구간).
+- **Slack 표기**: 이슈/에픽 생성 메시지 맨 끝에 `⏱ 응답 시간 N.N초` context 라인.
+- **대시보드**: 봇 상태 탭에 7일 통계 카드(건수/평균/p50/p95/최대) + 최근 50건 단계별 테이블
+  (`GET /api/dashboard/response-metrics`).
+
 ### 버그 수정 (v0.0.28)
 
 - Slack 발 이슈 생성 시 DB `issues.reporter` 에 Slack ID 가 저장되던 버그 수정 — Jira displayName 으로 저장

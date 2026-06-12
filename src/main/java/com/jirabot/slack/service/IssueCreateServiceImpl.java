@@ -9,9 +9,11 @@ import com.jirabot.slack.client.dto.JiraCreateResponse;
 import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.dto.IssueCreateCommand;
 import com.jirabot.slack.entity.IssueEntity;
+import com.jirabot.slack.entity.ResponseMetricEntity;
 import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.entity.UserMappingEntity;
 import com.jirabot.slack.repository.IssueRepository;
+import com.jirabot.slack.repository.ResponseMetricRepository;
 import com.jirabot.slack.util.BlockKitBuilder;
 import java.time.Instant;
 import java.util.List;
@@ -35,12 +37,14 @@ public class IssueCreateServiceImpl implements IssueCreateService {
     private final DuplicateDetectionService duplicateDetection;
     private final IssueRepository issueRepository;
     private final com.jirabot.slack.repository.UserMappingRepository userMappingRepository;
+    private final ResponseMetricRepository responseMetricRepository;
 
     public IssueCreateServiceImpl(ClaudeApiClient claude, JiraApiClient jira,
                                   JiraProperties jiraProps, SlackNotifier slackNotifier,
                                   DuplicateDetectionService duplicateDetection,
                                   IssueRepository issueRepository,
-                                  com.jirabot.slack.repository.UserMappingRepository userMappingRepository) {
+                                  com.jirabot.slack.repository.UserMappingRepository userMappingRepository,
+                                  ResponseMetricRepository responseMetricRepository) {
         this.claude = claude;
         this.jira = jira;
         this.jiraProps = jiraProps;
@@ -48,6 +52,7 @@ public class IssueCreateServiceImpl implements IssueCreateService {
         this.duplicateDetection = duplicateDetection;
         this.issueRepository = issueRepository;
         this.userMappingRepository = userMappingRepository;
+        this.responseMetricRepository = responseMetricRepository;
     }
 
     @Override
@@ -66,6 +71,9 @@ public class IssueCreateServiceImpl implements IssueCreateService {
     @Async("slackTaskExecutor")
     @Override
     public CompletableFuture<IssueCreateResult> createFromSlackText(IssueCreateCommand command, IntentResult intentHint) {
+        long startNanos = System.nanoTime();
+        Instant startedAt = Instant.now();
+        StageTimings timings = new StageTimings();
         try {
             // STUDY: Guard clause 패턴 — 사전 조건(Slack-Jira 매핑)이 충족되지 않으면 빠르게 실패.
             //        이전에는 매핑 없을 때 Slack displayName으로 auto-map했으나,
@@ -80,7 +88,9 @@ public class IssueCreateServiceImpl implements IssueCreateService {
             log.info("Classify request user={} textLen={} intentHint={}", command.slackUserId(),
                     command.rawText() == null ? 0 : command.rawText().length(),
                     intentHint != null ? intentHint.intent() : "none");
+            long stage = System.nanoTime();
             IssueClassification classification = claude.classify(command.rawText(), intentHint);
+            timings.classifyMs = elapsedMs(stage);
             // STUDY: 에픽은 `에픽`/`epic` 키워드로만 진입하는 특이 케이스(register_epic). Sonnet 의 BUG/FEATURE
             //        판단과 SP 추정을 무시하고 EPIC 으로 강제하여 스토리/버그와 확실히 구별한다. 제목/요약은 재사용.
             if (intentHint != null && "register_epic".equals(intentHint.intent())) {
@@ -88,7 +98,9 @@ public class IssueCreateServiceImpl implements IssueCreateService {
             }
 
             // 중복 감지: Jira 생성 전에 DB에서 유사 이슈 검색
+            stage = System.nanoTime();
             List<IssueEntity> similar = duplicateDetection.findSimilar(classification.title());
+            timings.duplicateMs = elapsedMs(stage);
             if (!similar.isEmpty()) {
                 log.info("Found {} similar issues for '{}'", similar.size(), classification.title());
             }
@@ -96,20 +108,75 @@ public class IssueCreateServiceImpl implements IssueCreateService {
             // STUDY: guard clause에서 이미 매핑을 조회했으므로 재사용하여 불필요한 DB 쿼리를 방지한다.
             var mappingEntity = mapping.get();
             String reporterName = mappingEntity.getJiraDisplayName();
+            stage = System.nanoTime();
             String jiraAccountId = resolveJiraAccountId(mappingEntity);
             JiraCreateResponse created = jira.createIssue(classification, reporterName, jiraAccountId);
+            timings.jiraMs = elapsedMs(stage);
             String url = buildIssueUrl(created.key());
             log.info("Issue created key={} url={} type={} sp={}", created.key(), url,
                     classification.type(), classification.storyPoint());
             // STUDY: IssueEntity.reporter 계약은 "Jira displayName" (webhook DM 의 resolveMention 이
             //        displayName 으로 매핑을 조회). Slack ID 를 넣으면 DM 에 raw ID 가 노출된다.
+            stage = System.nanoTime();
             saveToDb(created.key(), classification, reporterName, command);
-            notifySlack(command, created.key(), url, classification, similar);
+            timings.dbMs = elapsedMs(stage);
+            stage = System.nanoTime();
+            notifySlack(command, created.key(), url, classification, similar,
+                    totalElapsedMs(command, startNanos));
+            timings.notifyMs = elapsedMs(stage);
+            recordMetric(command, created.key(), true, null, timings,
+                    totalElapsedMs(command, startNanos), startedAt);
             return CompletableFuture.completedFuture(IssueCreateResult.ok(created.key(), url));
         } catch (Exception e) {
             log.error("Issue creation failed for user={}: {}", command.slackUserId(), e.toString(), e);
             notifyFailure(command, e);
+            recordMetric(command, null, false, e.getClass().getSimpleName(), timings,
+                    totalElapsedMs(command, startNanos), startedAt);
             return CompletableFuture.completedFuture(IssueCreateResult.failure(e.getMessage()));
+        }
+    }
+
+    // 단계별 소요시간 누적용 가변 홀더 (성공/실패 경로 양쪽에서 기록에 사용).
+    private static final class StageTimings {
+        Long classifyMs;
+        Long duplicateMs;
+        Long jiraMs;
+        Long dbMs;
+        Long notifyMs;
+    }
+
+    private static long elapsedMs(long sinceNanos) {
+        return (System.nanoTime() - sinceNanos) / 1_000_000;
+    }
+
+    // STUDY: Slack 메시지 ts(epoch초.마이크로초)가 있으면 사용자가 메시지를 보낸 순간부터의
+    //        end-to-end 소요시간을 계산 — Go봇/터널 전달, Haiku 의도분류, async 큐 대기까지 포함.
+    //        ts 가 없거나 비정상이면 이 서비스 진입 시점 기준으로 폴백.
+    private static long totalElapsedMs(IssueCreateCommand command, long startNanos) {
+        if (command.eventTs() != null) {
+            try {
+                long eventMillis = (long) (Double.parseDouble(command.eventTs()) * 1000);
+                long elapsed = System.currentTimeMillis() - eventMillis;
+                if (elapsed > 0) {
+                    return elapsed;
+                }
+            } catch (NumberFormatException ignored) {
+                // 폴백으로 진행
+            }
+        }
+        return elapsedMs(startNanos);
+    }
+
+    private void recordMetric(IssueCreateCommand command, String issueKey, boolean success,
+                              String errorType, StageTimings t, long totalMs, Instant startedAt) {
+        try {
+            responseMetricRepository.save(new ResponseMetricEntity(
+                    "issue_create", issueKey, command.slackUserId(), command.channel(),
+                    success, totalMs, t.classifyMs, t.duplicateMs, t.jiraMs, t.dbMs, t.notifyMs,
+                    errorType, startedAt));
+        } catch (Exception e) {
+            // 계측 실패가 본 기능을 깨면 안 된다 — 기록만 남기고 무시.
+            log.warn("Failed to record response metric (non-fatal): {}", e.toString());
         }
     }
 
@@ -126,7 +193,8 @@ public class IssueCreateServiceImpl implements IssueCreateService {
     }
 
     private void notifySlack(IssueCreateCommand command, String key, String url,
-                             IssueClassification classification, List<IssueEntity> similar) {
+                             IssueClassification classification, List<IssueEntity> similar,
+                             long elapsedMs) {
         if (command.channel() == null || command.eventTs() == null) {
             return;
         }
@@ -143,8 +211,8 @@ public class IssueCreateServiceImpl implements IssueCreateService {
                         classification.storyPoint(), url);
 
         String blocksJson = isEpic
-                ? BlockKitBuilder.buildEpicCreatedBlocks(key, url, classification, similar)
-                : BlockKitBuilder.buildIssueCreatedBlocks(key, url, classification, similar);
+                ? BlockKitBuilder.buildEpicCreatedBlocks(key, url, classification, similar, elapsedMs)
+                : BlockKitBuilder.buildIssueCreatedBlocks(key, url, classification, similar, elapsedMs);
 
         slackNotifier.postBlockMessage(command.channel(), command.eventTs(), fallbackText, blocksJson);
     }

@@ -81,6 +81,11 @@ public class DashboardController {
         return dashboardService.intentFailures(limit);
     }
 
+    @GetMapping("/response-metrics")
+    public com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricBoard responseMetrics() {
+        return dashboardService.responseMetrics();
+    }
+
     // STUDY: 수동 동기화 — fullSync 는 2~5초 동기 실행. 대시보드 버튼 1회성 호출 용도라
     //        비동기로 빼지 않는다 (브라우저가 결과 메시지를 바로 보여줄 수 있음).
     @PostMapping("/actions/sync")

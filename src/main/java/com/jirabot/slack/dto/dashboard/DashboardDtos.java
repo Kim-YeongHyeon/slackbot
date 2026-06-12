@@ -67,4 +67,17 @@ public final class DashboardDtos {
     /** PR 현황 보드 — GET /api/dashboard/prs.
      *  enabled=false: GITHUB_BRANCH_TOKEN 미설정. inaccessibleRepos: 토큰 권한 부족(PR Read 필요) repo. */
     public record PrBoard(boolean enabled, List<PullRequestRow> prs, List<String> inaccessibleRepos) {}
+
+    /** 응답 시간 한 줄 — total 은 Slack 메시지 ts 기준 end-to-end, 단계 *Ms 는 Spring 내부 구간 */
+    public record ResponseMetricRow(Instant startedAt, String action, String issueKey,
+                                    boolean success, long totalMs, Long classifyMs,
+                                    Long duplicateMs, Long jiraMs, Long dbMs, Long notifyMs,
+                                    String errorType) {}
+
+    /** 최근 7일 응답 시간 통계 (성공 건 기준) */
+    public record ResponseMetricStats(long count, long failCount, long avgMs,
+                                      long p50Ms, long p95Ms, long maxMs) {}
+
+    /** 응답 시간 보드 — GET /api/dashboard/response-metrics */
+    public record ResponseMetricBoard(ResponseMetricStats weekly, List<ResponseMetricRow> recent) {}
 }

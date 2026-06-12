@@ -226,6 +226,20 @@ async function loadBot() {
     card('서버 상태', health) +
     card('마지막 동기화', `<span style="font-size:15px">${fmtDate(s.lastSyncAt)}</span>`) +
     card('등록 사용자', s.mappedUsers);
+  const m = await get('/response-metrics');
+  const sec = ms => ms == null ? '-' : (ms / 1000).toFixed(1) + 's';
+  document.getElementById('metric-cards').innerHTML =
+    card('7일 건수', `${m.weekly.count}${m.weekly.failCount ? ` <span style="font-size:13px">(실패 ${m.weekly.failCount})</span>` : ''}`) +
+    card('평균', sec(m.weekly.avgMs)) +
+    card('p50', sec(m.weekly.p50Ms)) +
+    card('p95', sec(m.weekly.p95Ms)) +
+    card('최대', sec(m.weekly.maxMs));
+  rows('table-metrics', m.recent.map(x =>
+    `<tr><td class="muted">${fmtDate(x.startedAt)}</td><td>${esc(x.issueKey ?? '-')}</td>` +
+    `<td><b>${sec(x.totalMs)}</b></td><td>${sec(x.classifyMs)}</td><td>${sec(x.duplicateMs)}</td>` +
+    `<td>${sec(x.jiraMs)}</td><td>${sec(x.dbMs)}</td><td>${sec(x.notifyMs)}</td>` +
+    `<td>${x.success ? '✅' : '❌ ' + esc(x.errorType ?? '')}</td></tr>`).join('')
+    || '<tr><td colspan="9" class="muted">계측 기록 없음 (이슈 생성 시 자동 적재)</td></tr>');
   const f = await get('/intent-failures?limit=50');
   rows('table-failures', f.map(x =>
     `<tr><td class="muted">${fmtDate(x.failedAt)}</td><td>${esc(x.errorType)}</td>` +

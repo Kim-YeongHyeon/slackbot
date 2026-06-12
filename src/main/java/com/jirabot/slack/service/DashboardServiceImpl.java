@@ -14,9 +14,11 @@ import com.jirabot.slack.dto.dashboard.DashboardDtos.WeekBucket;
 import com.jirabot.slack.dto.dashboard.DashboardDtos.WeekResolution;
 import com.jirabot.slack.entity.IntentFailureEntity;
 import com.jirabot.slack.entity.IssueEntity;
+import com.jirabot.slack.entity.ResponseMetricEntity;
 import com.jirabot.slack.entity.StatusCategory;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
+import com.jirabot.slack.repository.ResponseMetricRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
 import java.time.Duration;
 import java.time.Instant;
@@ -46,6 +48,7 @@ public class DashboardServiceImpl implements DashboardService {
     private final IssueRepository issueRepository;
     private final UserMappingRepository userMappingRepository;
     private final IntentFailureRepository intentFailureRepository;
+    private final ResponseMetricRepository responseMetricRepository;
     private final JiraSyncService jiraSyncService;
     private final ReminderProperties reminderProps;
     private final com.jirabot.slack.client.GitHubApiClient gitHubApiClient;
@@ -56,6 +59,7 @@ public class DashboardServiceImpl implements DashboardService {
     public DashboardServiceImpl(IssueRepository issueRepository,
                                 UserMappingRepository userMappingRepository,
                                 IntentFailureRepository intentFailureRepository,
+                                ResponseMetricRepository responseMetricRepository,
                                 JiraSyncService jiraSyncService,
                                 ReminderProperties reminderProps,
                                 com.jirabot.slack.client.GitHubApiClient gitHubApiClient,
@@ -64,6 +68,7 @@ public class DashboardServiceImpl implements DashboardService {
         this.issueRepository = issueRepository;
         this.userMappingRepository = userMappingRepository;
         this.intentFailureRepository = intentFailureRepository;
+        this.responseMetricRepository = responseMetricRepository;
         this.jiraSyncService = jiraSyncService;
         this.reminderProps = reminderProps;
         this.gitHubApiClient = gitHubApiClient;
@@ -274,6 +279,43 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(f -> new IntentFailureRow(f.getFailedAt(), f.getErrorType(),
                         f.getRawInput(), f.getSlackUserId()))
                 .toList();
+    }
+
+    // --- 응답 시간 계측 ---
+
+    // STUDY: 백분위는 최근 7일 성공 건을 정렬해 인덱스로 뽑는다. 건수가 수백 수준이라
+    //        DB 집계 함수 대신 Java 계산이 단순하고 충분하다 (percentile_cont 는 JPQL 미지원).
+    @Override
+    public com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricBoard responseMetrics() {
+        List<ResponseMetricEntity> week =
+                responseMetricRepository.findByStartedAtAfter(Instant.now().minus(Duration.ofDays(7)));
+        long[] sorted = week.stream().filter(ResponseMetricEntity::isSuccess)
+                .mapToLong(ResponseMetricEntity::getTotalMs).sorted().toArray();
+        long failCount = week.stream().filter(m -> !m.isSuccess()).count();
+        com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricStats stats =
+                sorted.length == 0
+                        ? new com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricStats(
+                                0, failCount, 0, 0, 0, 0)
+                        : new com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricStats(
+                                sorted.length, failCount,
+                                Math.round(java.util.Arrays.stream(sorted).average().orElse(0)),
+                                percentile(sorted, 50), percentile(sorted, 95),
+                                sorted[sorted.length - 1]);
+
+        List<com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricRow> recent =
+                responseMetricRepository.findTop50ByOrderByStartedAtDesc().stream()
+                        .map(m -> new com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricRow(
+                                m.getStartedAt(), m.getAction(), m.getIssueKey(), m.isSuccess(),
+                                m.getTotalMs(), m.getClassifyMs(), m.getDuplicateMs(),
+                                m.getJiraMs(), m.getDbMs(), m.getNotifyMs(), m.getErrorType()))
+                        .toList();
+        return new com.jirabot.slack.dto.dashboard.DashboardDtos.ResponseMetricBoard(stats, recent);
+    }
+
+    // nearest-rank 백분위 (sorted 는 오름차순, 비어있지 않음)
+    private static long percentile(long[] sorted, int p) {
+        int idx = (int) Math.ceil(p / 100.0 * sorted.length) - 1;
+        return sorted[Math.max(0, Math.min(idx, sorted.length - 1))];
     }
 
     // --- PR 현황 ---

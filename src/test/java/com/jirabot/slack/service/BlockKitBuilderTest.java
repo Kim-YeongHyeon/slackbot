@@ -41,6 +41,51 @@ class BlockKitBuilderTest {
     }
 
     @Test
+    void buildIssueCreatedBlocks_withElapsed_appendsContextAsLastBlock() throws Exception {
+        var classification = new IssueClassification(
+                IssueClassification.IssueType.BUG, 3, "Login 500 error", "summary");
+
+        String json = BlockKitBuilder.buildIssueCreatedBlocks(
+                "PROJ-1", "https://jira.example.com/browse/PROJ-1",
+                classification, List.of(), 12_340);
+
+        JsonNode blocks = mapper.readTree(json);
+        JsonNode last = blocks.get(blocks.size() - 1);
+        assertThat(last.path("type").asText()).isEqualTo("context");
+        assertThat(last.path("elements").get(0).path("text").asText()).contains("12.3초");
+    }
+
+    @Test
+    void buildIssueCreatedBlocks_withoutElapsed_hasNoContextBlock() throws Exception {
+        var classification = new IssueClassification(
+                IssueClassification.IssueType.BUG, 3, "Login 500 error", "summary");
+
+        String json = BlockKitBuilder.buildIssueCreatedBlocks(
+                "PROJ-1", "https://jira.example.com/browse/PROJ-1",
+                classification, List.of(), -1);
+
+        JsonNode blocks = mapper.readTree(json);
+        for (JsonNode b : blocks) {
+            assertThat(b.path("type").asText()).isNotEqualTo("context");
+        }
+    }
+
+    @Test
+    void buildEpicCreatedBlocks_withElapsed_appendsContext() throws Exception {
+        var classification = new IssueClassification(
+                IssueClassification.IssueType.EPIC, 0, "GCP 확장", "summary");
+
+        String json = BlockKitBuilder.buildEpicCreatedBlocks(
+                "PROJ-2", "https://jira.example.com/browse/PROJ-2",
+                classification, List.of(), 5_000);
+
+        JsonNode blocks = mapper.readTree(json);
+        JsonNode last = blocks.get(blocks.size() - 1);
+        assertThat(last.path("type").asText()).isEqualTo("context");
+        assertThat(last.path("elements").get(0).path("text").asText()).contains("5.0초");
+    }
+
+    @Test
     void buildIssueCreatedBlocks_withSimilar_includesWarningSection() throws Exception {
         var classification = new IssueClassification(
                 IssueClassification.IssueType.FEATURE, 5, "Dark mode", "summary");

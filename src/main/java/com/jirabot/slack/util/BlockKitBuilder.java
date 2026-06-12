@@ -120,6 +120,15 @@ public final class BlockKitBuilder {
     public static String buildIssueCreatedBlocks(String key, String url,
                                                   IssueClassification classification,
                                                   List<IssueEntity> similar) {
+        return buildIssueCreatedBlocks(key, url, classification, similar, -1);
+    }
+
+    /**
+     * @param elapsedMs Slack 메시지 수신부터의 응답 소요시간(ms). 0 이하면 표기 생략.
+     */
+    public static String buildIssueCreatedBlocks(String key, String url,
+                                                  IssueClassification classification,
+                                                  List<IssueEntity> similar, long elapsedMs) {
         ArrayNode blocks = MAPPER.createArrayNode();
 
         // Section: 이슈 정보
@@ -164,6 +173,8 @@ public final class BlockKitBuilder {
         actions.set("elements", elements);
         blocks.add(actions);
 
+        appendElapsedContext(blocks, elapsedMs);
+
         return serialize(blocks);
     }
 
@@ -175,6 +186,15 @@ public final class BlockKitBuilder {
     public static String buildEpicCreatedBlocks(String key, String url,
                                                 IssueClassification classification,
                                                 List<IssueEntity> similar) {
+        return buildEpicCreatedBlocks(key, url, classification, similar, -1);
+    }
+
+    /**
+     * @param elapsedMs Slack 메시지 수신부터의 응답 소요시간(ms). 0 이하면 표기 생략.
+     */
+    public static String buildEpicCreatedBlocks(String key, String url,
+                                                IssueClassification classification,
+                                                List<IssueEntity> similar, long elapsedMs) {
         ArrayNode blocks = MAPPER.createArrayNode();
 
         String sectionText = String.format(
@@ -197,7 +217,23 @@ public final class BlockKitBuilder {
             blocks.add(buildMrkdwnSection(warning.toString()));
         }
 
+        appendElapsedContext(blocks, elapsedMs);
+
         return serialize(blocks);
+    }
+
+    // STUDY: context 블록 — section 보다 작은 회색 보조 텍스트로 렌더링된다.
+    //        응답 소요시간을 메시지 맨 끝에 표기 (원인 파악/최적화용, response_metrics 와 동일 기준).
+    private static void appendElapsedContext(ArrayNode blocks, long elapsedMs) {
+        if (elapsedMs <= 0) {
+            return;
+        }
+        ObjectNode context = MAPPER.createObjectNode();
+        context.put("type", "context");
+        ArrayNode elements = MAPPER.createArrayNode();
+        elements.add(mrkdwnText(String.format(":stopwatch: 응답 시간 %.1f초", elapsedMs / 1000.0)));
+        context.set("elements", elements);
+        blocks.add(context);
     }
 
     /**
