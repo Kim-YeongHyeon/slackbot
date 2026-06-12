@@ -31,6 +31,25 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 - **인덱스**: `issues(status_category)`, `issues(sprint_id)`, `issues(completed_at)`.
 - **운영 설정**: `show-sql` off, 로깅 INFO(트러블슈팅 시 `LOG_LEVEL_APP=DEBUG`), HikariCP `maximum-pool-size: 15`.
 
+### 웹 대시보드 (v0.0.26)
+
+`http://<호스트IP>:8080/dashboard/` — **사내망 전용** (ngrok 터널은 봇(:3000)만 노출하므로 외부 인터넷 접근 불가).
+
+| 탭 | 내용 |
+|---|---|
+| 개요 | KPI 카드(전체/미해결/진행 중/스프린트 SP 완료율/정체/등록 사용자) + 마지막 동기화 + [지금 동기화] |
+| 스프린트 | 상태 분포 도넛 · 담당자별 미해결 SP · 정체(7일+) 이슈 목록 |
+| 추이 | 주간 생성 vs 해결 라인(4~26주) · 주별 평균 해결 소요시간 |
+| 담당자 부하 | 담당자별 미해결 수/SP/정체 (미배정 포함) |
+| 버그 | 버그 비율 · 주간 발생 vs 해결 · 미해결 버그 목록 |
+| 이슈 목록 | 상태/담당자/유형 필터 + 키워드 검색 (최근 갱신순 200건) |
+| 사용자 관리 | Slack↔Jira 매핑 등록(accountId·Slack 실명 자동 해석)/삭제, 리마인더·할당알림 토글 |
+| 봇 상태 | 서버 health · 최근 의도분류 실패 로그 |
+
+API: `/api/dashboard/*` (summary·sprint·trends·workload·bugs·issues·intent-failures·actions/sync),
+`/api/user-mappings` (GET/POST/DELETE/PATCH — POST 는 Jira accountId 자동 해석).
+데이터는 전부 로컬 DB — 새로고침해도 Jira API 호출 없음.
+
 ### 스키마 마이그레이션 — Flyway (v0.0.24)
 
 - 스키마는 **`src/main/resources/db/migration/V<N>__*.sql` 마이그레이션으로만 변경**한다. `ddl-auto=validate` 라

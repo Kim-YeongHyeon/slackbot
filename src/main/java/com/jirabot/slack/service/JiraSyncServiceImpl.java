@@ -70,6 +70,11 @@ public class JiraSyncServiceImpl implements JiraSyncService {
     private volatile Instant lastSyncAt;
 
     @Override
+    public java.util.Optional<Instant> lastSyncAt() {
+        return java.util.Optional.ofNullable(lastSyncAt);
+    }
+
+    @Override
     public void syncIfStale(java.time.Duration maxAge) {
         Instant last = lastSyncAt;
         if (last != null && Instant.now().isBefore(last.plus(maxAge))) {

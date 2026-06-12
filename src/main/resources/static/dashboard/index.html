@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>지라봇 대시보드</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<header>
+  <h1>🤖 지라봇 대시보드</h1>
+  <div class="header-right">
+    <span id="last-sync" class="muted">마지막 동기화: -</span>
+    <button id="btn-sync" class="btn primary">지금 동기화</button>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button class="tab active" data-tab="overview">개요</button>
+  <button class="tab" data-tab="sprint">스프린트</button>
+  <button class="tab" data-tab="trends">추이</button>
+  <button class="tab" data-tab="workload">담당자 부하</button>
+  <button class="tab" data-tab="bugs">버그</button>
+  <button class="tab" data-tab="issues">이슈 목록</button>
+  <button class="tab" data-tab="users">사용자 관리</button>
+  <button class="tab" data-tab="bot">봇 상태</button>
+</nav>
+
+<main>
+  <!-- 개요 -->
+  <section id="panel-overview" class="panel active">
+    <div class="cards" id="kpi-cards"></div>
+  </section>
+
+  <!-- 스프린트 -->
+  <section id="panel-sprint" class="panel">
+    <h2 id="sprint-title">스프린트</h2>
+    <div class="grid-2">
+      <div class="chart-box"><h3>상태 분포</h3><canvas id="chart-sprint-status"></canvas></div>
+      <div class="chart-box"><h3>담당자별 미해결 SP</h3><canvas id="chart-sprint-assignee"></canvas></div>
+    </div>
+    <h3>⚠️ 정체 이슈 (진행 중 7일+)</h3>
+    <table id="table-stale"><thead><tr><th>키</th><th>요약</th><th>담당자</th><th>SP</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <!-- 추이 -->
+  <section id="panel-trends" class="panel">
+    <h2>추이 <select id="trend-weeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="12">12주</option><option value="26">26주</option></select></h2>
+    <div class="grid-2">
+      <div class="chart-box"><h3>주간 생성 vs 해결</h3><canvas id="chart-created-resolved"></canvas></div>
+      <div class="chart-box"><h3>평균 해결 소요시간 (시간)</h3><canvas id="chart-resolution"></canvas></div>
+    </div>
+  </section>
+
+  <!-- 담당자 부하 -->
+  <section id="panel-workload" class="panel">
+    <h2>담당자별 미해결 부하</h2>
+    <div class="grid-2">
+      <div class="chart-box"><canvas id="chart-workload"></canvas></div>
+      <table id="table-workload"><thead><tr><th>담당자</th><th>미해결</th><th>SP</th><th>정체</th></tr></thead><tbody></tbody></table>
+    </div>
+  </section>
+
+  <!-- 버그 -->
+  <section id="panel-bugs" class="panel">
+    <h2>버그 통계</h2>
+    <div class="cards" id="bug-cards"></div>
+    <div class="grid-2">
+      <div class="chart-box"><h3>주간 버그 발생 vs 해결</h3><canvas id="chart-bugs-weekly"></canvas></div>
+      <div>
+        <h3>미해결 버그</h3>
+        <table id="table-open-bugs"><thead><tr><th>키</th><th>요약</th><th>상태</th><th>담당자</th></tr></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 이슈 목록 -->
+  <section id="panel-issues" class="panel">
+    <h2>이슈 목록</h2>
+    <div class="filters">
+      <select id="f-status"><option value="">상태 전체</option><option>해야 할 일</option><option>진행 중</option><option>완료</option></select>
+      <select id="f-assignee"><option value="">담당자 전체</option></select>
+      <select id="f-type"><option value="">유형 전체</option></select>
+      <input id="f-q" type="text" placeholder="키워드/이슈키 검색">
+      <button id="btn-filter" class="btn">검색</button>
+    </div>
+    <table id="table-issues"><thead><tr><th>키</th><th>요약</th><th>유형</th><th>상태</th><th>담당자</th><th>SP</th><th>스프린트</th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <!-- 사용자 관리 -->
+  <section id="panel-users" class="panel">
+    <h2>사용자 매핑 관리</h2>
+    <div class="form-row">
+      <input id="u-slack" type="text" placeholder="Slack 사용자 ID (예: U03L1TJ0EBB)">
+      <input id="u-jira" type="text" placeholder="Jira 표시 이름 (예: 홍길동)">
+      <button id="btn-user-add" class="btn primary">등록 / 갱신</button>
+      <span class="muted">Jira accountId·Slack 실명은 자동 조회됩니다</span>
+    </div>
+    <div id="user-msg" class="msg"></div>
+    <table id="table-users"><thead><tr><th>Slack</th><th>Jira 이름</th><th>accountId</th><th>리마인더</th><th>할당알림</th><th></th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <!-- 봇 상태 -->
+  <section id="panel-bot" class="panel">
+    <h2>봇 운영 상태</h2>
+    <div class="cards" id="bot-cards"></div>
+    <h3>최근 의도분류 실패 (자연어를 못 알아들은 입력)</h3>
+    <table id="table-failures"><thead><tr><th>시각</th><th>유형</th><th>입력</th><th>사용자</th></tr></thead><tbody></tbody></table>
+  </section>
+</main>
+
+<footer class="muted">사내망 전용 · 데이터는 로컬 DB 기준 (Jira 와의 차이는 [지금 동기화] 후 새로고침)</footer>
+<script src="app.js"></script>
+</body>
+</html>

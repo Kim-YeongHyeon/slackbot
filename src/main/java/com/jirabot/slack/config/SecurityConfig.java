@@ -39,8 +39,15 @@ public class SecurityConfig {
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // STUDY: ERROR 디스패치 허용 — 미존재 경로가 /error 로 forward 될 때 denyAll 에 걸려
+                        // 404 가 403 으로 둔갑하는 것을 막는다 (Spring Security 6 는 에러 디스패치도 인가 대상).
+                        .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
                         .requestMatchers("/health", "/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers("/api/user-mappings/**").permitAll()
+                        // STUDY: 웹 대시보드(정적 UI + 통계 API) — 사내망 전용 가정으로 permitAll.
+                        // ngrok 터널은 Go봇(:3000)만 노출하므로 외부 인터넷에서는 이 경로에 도달 불가.
+                        // 판매/외부 노출 시 이 지점에 인증(예: 토큰 필터)을 추가할 것.
+                        .requestMatchers("/dashboard/**", "/api/dashboard/**").permitAll()
                         // STUDY: /api/slack/** 는 SlackSignatureFilter 에서 HMAC 검증으로 이미 신원을 확인했으므로
                         // Spring Security 의 authorization 단계에서는 permitAll. 실패 시 필터에서 403 으로 이미 차단됨.
                         .requestMatchers("/api/slack/**").permitAll()

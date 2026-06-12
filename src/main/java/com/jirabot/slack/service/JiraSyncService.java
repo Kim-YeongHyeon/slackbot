@@ -35,4 +35,7 @@ public interface JiraSyncService {
      * 검색 등 "freshness 보장용 선행 sync" 가 매 호출 2~3초의 Jira 왕복을 반복하지 않도록 하는 TTL 게이트.
      */
     void syncIfStale(java.time.Duration maxAge);
+
+    /** 마지막 sync 완료 시각 (재기동 후 아직 sync 전이면 empty). 대시보드 표시용. */
+    java.util.Optional<java.time.Instant> lastSyncAt();
 }
