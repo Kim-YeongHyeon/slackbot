@@ -22,6 +22,7 @@
   <button class="tab" data-tab="trends">추이</button>
   <button class="tab" data-tab="workload">담당자 부하</button>
   <button class="tab" data-tab="bugs">버그</button>
+  <button class="tab" data-tab="prs">PR 현황</button>
   <button class="tab" data-tab="issues">이슈 목록</button>
   <button class="tab" data-tab="users">사용자 관리</button>
   <button class="tab" data-tab="bot">봇 상태</button>
@@ -73,6 +74,14 @@
         <table id="table-open-bugs"><thead><tr><th>키</th><th>요약</th><th>상태</th><th>담당자</th></tr></thead><tbody></tbody></table>
       </div>
     </div>
+  </section>
+
+  <!-- PR 현황 -->
+  <section id="panel-prs" class="panel">
+    <h2>열린 PR 현황 <span class="muted">(최대 5분 지연 캐시)</span></h2>
+    <div id="pr-msg" class="msg"></div>
+    <div class="cards" id="pr-cards"></div>
+    <table id="table-prs"><thead><tr><th>Repo</th><th>PR</th><th>작성자</th><th>브랜치</th><th>연결 Jira</th><th>이슈 담당자</th><th>갱신</th></tr></thead><tbody></tbody></table>
   </section>
 
   <!-- 이슈 목록 -->

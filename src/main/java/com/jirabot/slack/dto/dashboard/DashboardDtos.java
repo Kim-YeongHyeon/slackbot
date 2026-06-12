@@ -56,4 +56,15 @@ public final class DashboardDtos {
     /** 봇 운영 — 의도분류 실패 한 줄 */
     public record IntentFailureRow(Instant failedAt, String errorType, String rawInput,
                                    String slackUserId) {}
+
+    /** PR 현황 한 줄 — issue* 필드는 브랜치명/제목에서 이슈 키를 못 찾으면 null */
+    public record PullRequestRow(String repo, int number, String title, String url,
+                                 String author, boolean draft, String branch,
+                                 Instant createdAt, Instant updatedAt,
+                                 String issueKey, String issueSummary, String issueStatus,
+                                 String issueAssignee, String issueUrl) {}
+
+    /** PR 현황 보드 — GET /api/dashboard/prs.
+     *  enabled=false: GITHUB_BRANCH_TOKEN 미설정. inaccessibleRepos: 토큰 권한 부족(PR Read 필요) repo. */
+    public record PrBoard(boolean enabled, List<PullRequestRow> prs, List<String> inaccessibleRepos) {}
 }

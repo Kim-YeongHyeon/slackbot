@@ -121,6 +121,38 @@ async function loadBugs() {
     || '<tr><td colspan="4" class="muted">미해결 버그 없음 🎉</td></tr>');
 }
 
+async function loadPrs() {
+  const d = await get('/prs');
+  const msg = document.getElementById('pr-msg');
+  if (!d.enabled) {
+    msg.className = 'msg warn';
+    msg.textContent = 'GITHUB_BRANCH_TOKEN 이 설정되지 않아 PR 조회가 비활성 상태입니다.';
+    document.getElementById('pr-cards').innerHTML = '';
+    rows('table-prs', '');
+    return;
+  }
+  if (d.inaccessibleRepos.length > 0) {
+    msg.className = 'msg warn';
+    msg.textContent = `⚠️ 접근 불가 repo ${d.inaccessibleRepos.length}개 — 토큰에 "Pull requests: Read" 권한을 추가하세요: ${d.inaccessibleRepos.join(', ')}`;
+  } else {
+    msg.className = 'msg'; msg.textContent = '';
+  }
+  const drafts = d.prs.filter(p => p.draft).length;
+  const linked = d.prs.filter(p => p.issueKey).length;
+  document.getElementById('pr-cards').innerHTML =
+    card('열린 PR', d.prs.length) + card('Draft', drafts) + card('Jira 연결됨', linked);
+  rows('table-prs', d.prs.map(p =>
+    `<tr><td class="muted">${esc(p.repo)}</td>` +
+    `<td><a href="${p.url}" target="_blank">#${p.number}</a> ${p.draft ? '<span class="badge todo">draft</span> ' : ''}${esc(p.title)}</td>` +
+    `<td>${esc(p.author)}</td><td class="muted">${esc(p.branch)}</td>` +
+    `<td>${p.issueKey
+        ? `<a href="${p.issueUrl}" target="_blank">${p.issueKey}</a> ${p.issueStatus ? badge(p.issueStatus) : ''} ${p.issueSummary ? '<span class="muted">' + esc(p.issueSummary) + '</span>' : ''}`
+        : '<span class="muted">-</span>'}</td>` +
+    `<td>${esc(p.issueAssignee ?? '-')}</td>` +
+    `<td class="muted">${fmtDate(p.updatedAt)}</td></tr>`).join('')
+    || '<tr><td colspan="7" class="muted">열린 PR 없음 🎉</td></tr>');
+}
+
 function badge(cat) {
   const cls = cat === '완료' ? 'done' : cat === '진행 중' ? 'progress' : 'todo';
   return `<span class="badge ${cls}">${esc(cat ?? '-')}</span>`;
@@ -204,7 +236,8 @@ async function loadBot() {
 /* ---------- 탭 전환 / 이벤트 ---------- */
 
 const LOADERS = { overview: loadOverview, sprint: loadSprint, trends: loadTrends,
-  workload: loadWorkload, bugs: loadBugs, issues: loadIssues, users: loadUsers, bot: loadBot };
+  workload: loadWorkload, bugs: loadBugs, prs: loadPrs, issues: loadIssues,
+  users: loadUsers, bot: loadBot };
 
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));

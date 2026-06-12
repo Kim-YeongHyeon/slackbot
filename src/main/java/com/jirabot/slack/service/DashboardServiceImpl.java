@@ -48,6 +48,8 @@ public class DashboardServiceImpl implements DashboardService {
     private final IntentFailureRepository intentFailureRepository;
     private final JiraSyncService jiraSyncService;
     private final ReminderProperties reminderProps;
+    private final com.jirabot.slack.client.GitHubApiClient gitHubApiClient;
+    private final com.jirabot.slack.config.GitHubProperties gitHubProps;
     private final String jiraBaseUrl;
     private final String bugTypeName;
 
@@ -56,17 +58,28 @@ public class DashboardServiceImpl implements DashboardService {
                                 IntentFailureRepository intentFailureRepository,
                                 JiraSyncService jiraSyncService,
                                 ReminderProperties reminderProps,
+                                com.jirabot.slack.client.GitHubApiClient gitHubApiClient,
+                                com.jirabot.slack.config.GitHubProperties gitHubProps,
                                 JiraProperties jiraProps) {
         this.issueRepository = issueRepository;
         this.userMappingRepository = userMappingRepository;
         this.intentFailureRepository = intentFailureRepository;
         this.jiraSyncService = jiraSyncService;
         this.reminderProps = reminderProps;
+        this.gitHubApiClient = gitHubApiClient;
+        this.gitHubProps = gitHubProps;
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl().replaceAll("/+$", "");
         this.jiraBaseUrl = base;
         this.bugTypeName = jiraProps.issueTypes() != null && jiraProps.issueTypes().bug() != null
                 ? jiraProps.issueTypes().bug() : "Bug";
+        // PR 브랜치명에서 이슈 키 추출용 — 프로젝트 키 기반(es2-123 같은 소문자 허용) 우선,
+        // 그 외 대문자 일반 패턴 폴백 (소문자 일반 단어 test-123 의 오탐 방지).
+        String key = jiraProps.projectKey() == null ? "" : jiraProps.projectKey();
+        this.projectKeyPattern = key.isBlank() ? null
+                : java.util.regex.Pattern.compile("(?i)" + java.util.regex.Pattern.quote(key) + "-\\d+");
     }
+
+    private final java.util.regex.Pattern projectKeyPattern;
 
     @Override
     public Summary summary() {
@@ -261,6 +274,72 @@ public class DashboardServiceImpl implements DashboardService {
                 .map(f -> new IntentFailureRow(f.getFailedAt(), f.getErrorType(),
                         f.getRawInput(), f.getSlackUserId()))
                 .toList();
+    }
+
+    // --- PR 현황 ---
+
+    private static final java.util.regex.Pattern ISSUE_KEY_IN_TEXT =
+            java.util.regex.Pattern.compile("[A-Z][A-Z0-9]*-\\d+");
+
+    // STUDY: repo 수만큼 GitHub 왕복이라 5분 Caffeine 캐시(@Cacheable) — 새로고침 연타에도 rate limit 안전.
+    //        권한 부족(4xx) repo 는 GitHubAccessException 으로 구분 수집해 UI 가 안내를 띄울 수 있게 한다.
+    @Override
+    @org.springframework.cache.annotation.Cacheable(com.jirabot.slack.config.CacheConfig.OPEN_PRS_CACHE)
+    public com.jirabot.slack.dto.dashboard.DashboardDtos.PrBoard prs() {
+        if (!gitHubProps.enabled()) {
+            return new com.jirabot.slack.dto.dashboard.DashboardDtos.PrBoard(false, List.of(), List.of());
+        }
+        List<com.jirabot.slack.dto.dashboard.DashboardDtos.PullRequestRow> rows = new ArrayList<>();
+        List<String> inaccessible = new ArrayList<>();
+        for (String repo : gitHubProps.branchRepos()) {
+            try {
+                for (var pr : gitHubApiClient.listOpenPullRequests(repo)) {
+                    rows.add(toPrRow(repo, pr));
+                }
+            } catch (com.jirabot.slack.client.GitHubAccessException e) {
+                inaccessible.add(repo);
+            }
+        }
+        rows.sort(Comparator.comparing(
+                com.jirabot.slack.dto.dashboard.DashboardDtos.PullRequestRow::updatedAt,
+                Comparator.nullsLast(Comparator.reverseOrder())));
+        return new com.jirabot.slack.dto.dashboard.DashboardDtos.PrBoard(true, rows, inaccessible);
+    }
+
+    private com.jirabot.slack.dto.dashboard.DashboardDtos.PullRequestRow toPrRow(
+            String repo, com.jirabot.slack.client.dto.PullRequestInfo pr) {
+        // 이슈 키: 브랜치명(봇 규칙 feature/ES2-123-slug) 우선, 없으면 PR 제목에서.
+        String issueKey = extractIssueKey(pr.headRef());
+        if (issueKey == null) {
+            issueKey = extractIssueKey(pr.title());
+        }
+        String summary = null;
+        String status = null;
+        String assignee = null;
+        String issueUrl = null;
+        if (issueKey != null) {
+            Optional<IssueEntity> issue = issueRepository.findByIssueKey(issueKey);
+            if (issue.isPresent()) {
+                summary = issue.get().getSummary();
+                status = issue.get().getStatusCategory();
+                assignee = issue.get().getAssignee();
+            }
+            issueUrl = jiraBaseUrl.isEmpty() ? null : jiraBaseUrl + "/browse/" + issueKey;
+        }
+        return new com.jirabot.slack.dto.dashboard.DashboardDtos.PullRequestRow(
+                repo, pr.number(), pr.title(), pr.htmlUrl(), pr.authorLogin(), pr.draft(),
+                pr.headRef(), pr.createdAt(), pr.updatedAt(),
+                issueKey, summary, status, assignee, issueUrl);
+    }
+
+    String extractIssueKey(String text) {
+        if (text == null) return null;
+        if (projectKeyPattern != null) {
+            var pm = projectKeyPattern.matcher(text);
+            if (pm.find()) return pm.group().toUpperCase();
+        }
+        var m = ISSUE_KEY_IN_TEXT.matcher(text);   // 대문자 일반 패턴 (다른 프로젝트 키 등)
+        return m.find() ? m.group() : null;
     }
 
     // --- helpers ---

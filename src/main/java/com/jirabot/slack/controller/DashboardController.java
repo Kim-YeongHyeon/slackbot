@@ -70,6 +70,11 @@ public class DashboardController {
         return dashboardService.issues(status, assignee, type, q);
     }
 
+    @GetMapping("/prs")
+    public com.jirabot.slack.dto.dashboard.DashboardDtos.PrBoard prs() {
+        return dashboardService.prs();
+    }
+
     @GetMapping("/intent-failures")
     public List<IntentFailureRow> intentFailures(
             @RequestParam(name = "limit", defaultValue = "50") int limit) {

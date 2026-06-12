@@ -78,6 +78,17 @@ class DashboardControllerTest {
     }
 
     @Test
+    void prs_returnsBoardJson() throws Exception {
+        when(dashboardService.prs()).thenReturn(
+                new com.jirabot.slack.dto.dashboard.DashboardDtos.PrBoard(true, List.of(), List.of("locked")));
+
+        mockMvc.perform(get("/api/dashboard/prs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(true))
+                .andExpect(jsonPath("$.inaccessibleRepos[0]").value("locked"));
+    }
+
+    @Test
     void unknownSubPath_is404() throws Exception {
         mockMvc.perform(get("/api/dashboard/nope")).andExpect(status().isNotFound());
     }

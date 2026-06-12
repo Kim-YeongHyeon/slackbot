@@ -81,6 +81,50 @@ public class GitHubApiClientImpl implements GitHubApiClient {
         }
     }
 
+    @Override
+    public java.util.List<com.jirabot.slack.client.dto.PullRequestInfo> listOpenPullRequests(String repo) {
+        String org = props.org();
+        try {
+            String json = githubWebClient.get()
+                    .uri("/repos/{org}/{repo}/pulls?state=open&per_page=50", org, repo)
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode arr = objectMapper.readTree(json);
+            java.util.List<com.jirabot.slack.client.dto.PullRequestInfo> result = new java.util.ArrayList<>();
+            for (JsonNode pr : arr) {
+                result.add(new com.jirabot.slack.client.dto.PullRequestInfo(
+                        pr.path("number").asInt(),
+                        pr.path("title").asText(""),
+                        pr.path("html_url").asText(""),
+                        pr.path("user").path("login").asText(""),
+                        pr.path("draft").asBoolean(false),
+                        pr.path("head").path("ref").asText(""),
+                        parseInstant(pr.path("created_at").asText(null)),
+                        parseInstant(pr.path("updated_at").asText(null))));
+            }
+            return result;
+        } catch (WebClientResponseException e) {
+            if (e.getStatusCode().is4xxClientError()) {
+                // STUDY: fine-grained 토큰은 권한 부족 시 403 대신 404 — "권한 또는 repo 접근 불가" 로 묶어 전달.
+                throw new GitHubAccessException(repo + " → HTTP " + e.getStatusCode().value()
+                        + " (토큰에 Pull requests: Read 권한이 있는지 확인)");
+            }
+            log.warn("GitHub listOpenPullRequests {}/{} failed: {}", org, repo, e.getStatusCode());
+            return java.util.List.of();
+        } catch (Exception e) {
+            log.warn("GitHub listOpenPullRequests {}/{} error: {}", org, repo, e.toString());
+            return java.util.List.of();
+        }
+    }
+
+    private java.time.Instant parseInstant(String iso) {
+        if (iso == null || iso.isBlank()) return null;
+        try {
+            return java.time.Instant.parse(iso);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private static String truncate(String s) {
         if (s == null) return "";
         return s.length() > 300 ? s.substring(0, 300) : s;

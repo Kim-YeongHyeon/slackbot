@@ -27,4 +27,7 @@ public interface DashboardService {
     List<IssueRow> issues(String statusCategory, String assignee, String issueType, String keyword);
 
     List<IntentFailureRow> intentFailures(int limit);
+
+    /** 열린 PR 현황 + 연결 Jira 이슈 (5분 캐시 — CacheConfig.OPEN_PRS_CACHE). */
+    com.jirabot.slack.dto.dashboard.DashboardDtos.PrBoard prs();
 }

@@ -25,7 +25,17 @@ class DashboardServiceImplTest {
     private UserMappingRepository userMappingRepository;
     private IntentFailureRepository intentFailureRepository;
     private JiraSyncService jiraSyncService;
+    private com.jirabot.slack.client.GitHubApiClient gitHubApiClient;
     private DashboardServiceImpl service;
+
+    private DashboardServiceImpl build(com.jirabot.slack.config.GitHubProperties gitHubProps) {
+        ReminderProperties reminderProps = new ReminderProperties(
+                true, "0 0 9 * * MON-FRI", "Asia/Seoul", "0 30 9 * * MON", "2026-06-22", 7);
+        JiraProperties jiraProps = new JiraProperties("https://j.example.com", "u@x", "t", "ES2",
+                null, new JiraProperties.IssueTypes("버그", "작업", "하위 작업"));
+        return new DashboardServiceImpl(issueRepository, userMappingRepository,
+                intentFailureRepository, jiraSyncService, reminderProps, gitHubApiClient, gitHubProps, jiraProps);
+    }
 
     @BeforeEach
     void setUp() {
@@ -33,13 +43,10 @@ class DashboardServiceImplTest {
         userMappingRepository = mock(UserMappingRepository.class);
         intentFailureRepository = mock(IntentFailureRepository.class);
         jiraSyncService = mock(JiraSyncService.class);
+        gitHubApiClient = mock(com.jirabot.slack.client.GitHubApiClient.class);
         when(jiraSyncService.lastSyncAt()).thenReturn(Optional.empty());
-        ReminderProperties reminderProps = new ReminderProperties(
-                true, "0 0 9 * * MON-FRI", "Asia/Seoul", "0 30 9 * * MON", "2026-06-22", 7);
-        JiraProperties jiraProps = new JiraProperties("https://j.example.com", "u@x", "t", "ES2",
-                null, new JiraProperties.IssueTypes("버그", "작업", "하위 작업"));
-        service = new DashboardServiceImpl(issueRepository, userMappingRepository,
-                intentFailureRepository, jiraSyncService, reminderProps, jiraProps);
+        service = build(new com.jirabot.slack.config.GitHubProperties(
+                "tok", "CryptoLabInc", List.of("evi"), "https://api.github.com"));
     }
 
     private IssueEntity issue(String key, String type, String statusCategory, String assignee,
@@ -198,6 +205,84 @@ class DashboardServiceImplTest {
         var rowsOne = service.intentFailures(1);
         assertThat(rowsOne).hasSize(1);
         assertThat(rowsOne.get(0).rawInput()).isEqualTo("새 입력");
+    }
+
+    // --- PR 현황 ---
+
+    private com.jirabot.slack.client.dto.PullRequestInfo pr(int number, String title, String branch) {
+        return new com.jirabot.slack.client.dto.PullRequestInfo(number, title,
+                "https://github.com/x/evi/pull/" + number, "yhkim", false, branch,
+                Instant.now().minus(1, ChronoUnit.DAYS), Instant.now());
+    }
+
+    @Test
+    void prs_joinsJiraIssueByBranchKey_lowercaseToo() {
+        Instant now = Instant.now();
+        IssueEntity linked = issue("ES2-123", "버그", "진행 중", "Alice", 2.0, now, null);
+        when(issueRepository.findByIssueKey("ES2-123")).thenReturn(Optional.of(linked));
+        when(gitHubApiClient.listOpenPullRequests("evi"))
+                .thenReturn(List.of(pr(1, "로그인 수정", "bugfix/es2-123-fix-login")));
+
+        var board = service.prs();
+
+        assertThat(board.enabled()).isTrue();
+        assertThat(board.prs()).hasSize(1);
+        var row = board.prs().get(0);
+        assertThat(row.issueKey()).isEqualTo("ES2-123");      // 소문자 브랜치도 매칭
+        assertThat(row.issueStatus()).isEqualTo("진행 중");
+        assertThat(row.issueAssignee()).isEqualTo("Alice");
+        assertThat(row.issueUrl()).isEqualTo("https://j.example.com/browse/ES2-123");
+    }
+
+    @Test
+    void prs_noIssueKey_leavesIssueFieldsNull() {
+        when(gitHubApiClient.listOpenPullRequests("evi"))
+                .thenReturn(List.of(pr(2, "chore: bump deps", "chore/bump-deps")));
+
+        var row = service.prs().prs().get(0);
+
+        assertThat(row.issueKey()).isNull();
+        assertThat(row.issueSummary()).isNull();
+        assertThat(row.issueUrl()).isNull();
+    }
+
+    @Test
+    void prs_titleFallback_whenBranchHasNoKey() {
+        when(issueRepository.findByIssueKey("ES2-7")).thenReturn(Optional.empty());
+        when(gitHubApiClient.listOpenPullRequests("evi"))
+                .thenReturn(List.of(pr(3, "[ES2-7] 검색 개선", "improve-search")));
+
+        var row = service.prs().prs().get(0);
+
+        assertThat(row.issueKey()).isEqualTo("ES2-7");
+        assertThat(row.issueSummary()).isNull();   // 로컬 DB 미보유 → 키/링크만
+        assertThat(row.issueUrl()).contains("/browse/ES2-7");
+    }
+
+    @Test
+    void prs_collectsInaccessibleRepos() {
+        service = build(new com.jirabot.slack.config.GitHubProperties(
+                "tok", "CryptoLabInc", List.of("evi", "locked"), "https://api.github.com"));
+        when(gitHubApiClient.listOpenPullRequests("evi")).thenReturn(List.of(pr(1, "t", "b")));
+        when(gitHubApiClient.listOpenPullRequests("locked"))
+                .thenThrow(new com.jirabot.slack.client.GitHubAccessException("locked → HTTP 404"));
+
+        var board = service.prs();
+
+        assertThat(board.prs()).hasSize(1);
+        assertThat(board.inaccessibleRepos()).containsExactly("locked");
+    }
+
+    @Test
+    void prs_tokenDisabled_returnsDisabledBoard() {
+        service = build(new com.jirabot.slack.config.GitHubProperties(
+                "", "CryptoLabInc", List.of("evi"), "https://api.github.com"));
+
+        var board = service.prs();
+
+        assertThat(board.enabled()).isFalse();
+        assertThat(board.prs()).isEmpty();
+        org.mockito.Mockito.verifyNoInteractions(gitHubApiClient);
     }
 
     private void setFailedAt(IntentFailureEntity e, Instant at) {

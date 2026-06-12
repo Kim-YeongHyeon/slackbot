@@ -17,16 +17,18 @@ import org.springframework.context.annotation.Configuration;
 public class CacheConfig {
 
     public static final String ACTIVE_SPRINT_CACHE = "activeSprint";
+    // 대시보드 PR 현황 — repo 수만큼 GitHub 왕복이라 캐시 필수 (rate limit + 응답속도).
+    public static final String OPEN_PRS_CACHE = "openPrs";
 
-    // STUDY: TTL 5분 — 스프린트 시작/종료가 캐시에 반영되기까지의 최대 지연.
-    //        버튼 전환(moveToActiveSprint)·리마인더가 참조하는 수준에서 충분히 신선하다.
-    private static final Duration ACTIVE_SPRINT_TTL = Duration.ofMinutes(5);
+    // STUDY: TTL 5분 — 스프린트 시작/종료, PR 생성/머지가 캐시에 반영되기까지의 최대 지연.
+    //        두 캐시 모두 "자주 읽고 천천히 변하는" 외부 API 응답이라 동일 정책을 공유한다.
+    private static final Duration CACHE_TTL = Duration.ofMinutes(5);
 
     @Bean
     public CacheManager cacheManager() {
-        CaffeineCacheManager manager = new CaffeineCacheManager(ACTIVE_SPRINT_CACHE);
+        CaffeineCacheManager manager = new CaffeineCacheManager(ACTIVE_SPRINT_CACHE, OPEN_PRS_CACHE);
         manager.setCaffeine(Caffeine.newBuilder()
-                .expireAfterWrite(ACTIVE_SPRINT_TTL)
+                .expireAfterWrite(CACHE_TTL)
                 .maximumSize(10));
         return manager;
     }
