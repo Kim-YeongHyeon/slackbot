@@ -121,6 +121,8 @@ async function loadBugs() {
     || '<tr><td colspan="4" class="muted">미해결 버그 없음 🎉</td></tr>');
 }
 
+let prData = [];   // 마지막 fetch 결과 — 필터/정렬 변경 시 refetch 없이 재렌더
+
 async function loadPrs() {
   const d = await get('/prs');
   const msg = document.getElementById('pr-msg');
@@ -137,11 +139,38 @@ async function loadPrs() {
   } else {
     msg.className = 'msg'; msg.textContent = '';
   }
-  const drafts = d.prs.filter(p => p.draft).length;
-  const linked = d.prs.filter(p => p.issueKey).length;
+  prData = d.prs;
+  fillSelect('pr-repo', [...new Set(prData.map(p => p.repo))].sort());
+  fillSelect('pr-author', [...new Set(prData.map(p => p.author))].sort());
+  renderPrs();
+}
+
+// 데이터로 옵션을 다시 채우되, 기존 선택값은 가능하면 유지한다.
+function fillSelect(id, values) {
+  const sel = document.getElementById(id);
+  const prev = sel.value;
+  while (sel.options.length > 1) sel.remove(1);   // 첫 옵션("전체")만 남김
+  values.forEach(v => sel.add(new Option(v, v)));
+  if (values.includes(prev)) sel.value = prev;
+}
+
+function renderPrs() {
+  const repo = document.getElementById('pr-repo').value;
+  const author = document.getElementById('pr-author').value;
+  const [field, dir] = document.getElementById('pr-sort').value.split('-');
+  const key = field === 'created' ? 'createdAt' : 'updatedAt';
+
+  const list = prData
+    .filter(p => !repo || p.repo === repo)
+    .filter(p => !author || p.author === author)
+    .sort((a, b) => (new Date(a[key]) - new Date(b[key])) * (dir === 'asc' ? 1 : -1));
+
+  const drafts = list.filter(p => p.draft).length;
+  const linked = list.filter(p => p.issueKey).length;
   document.getElementById('pr-cards').innerHTML =
-    card('열린 PR', d.prs.length) + card('Draft', drafts) + card('Jira 연결됨', linked);
-  rows('table-prs', d.prs.map(p =>
+    card('열린 PR', list.length === prData.length ? list.length : `${list.length} <span class="muted">/ ${prData.length}</span>`) +
+    card('Draft', drafts) + card('Jira 연결됨', linked);
+  rows('table-prs', list.map(p =>
     `<tr><td class="muted">${esc(p.repo)}</td>` +
     `<td><a href="${p.url}" target="_blank">#${p.number}</a> ${p.draft ? '<span class="badge todo">draft</span> ' : ''}${esc(p.title)}</td>` +
     `<td>${esc(p.author)}</td><td class="muted">${esc(p.branch)}</td>` +
@@ -149,8 +178,9 @@ async function loadPrs() {
         ? `<a href="${p.issueUrl}" target="_blank">${p.issueKey}</a> ${p.issueStatus ? badge(p.issueStatus) : ''} ${p.issueSummary ? '<span class="muted">' + esc(p.issueSummary) + '</span>' : ''}`
         : '<span class="muted">-</span>'}</td>` +
     `<td>${esc(p.issueAssignee ?? '-')}</td>` +
+    `<td class="muted">${fmtDate(p.createdAt)}</td>` +
     `<td class="muted">${fmtDate(p.updatedAt)}</td></tr>`).join('')
-    || '<tr><td colspan="7" class="muted">열린 PR 없음 🎉</td></tr>');
+    || '<tr><td colspan="8" class="muted">조건에 맞는 PR 없음</td></tr>');
 }
 
 function badge(cat) {
@@ -261,6 +291,8 @@ function showTab(name) {
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
 document.getElementById('trend-weeks').onchange = loadTrends;
+['pr-repo', 'pr-author', 'pr-sort'].forEach(id =>
+  document.getElementById(id).onchange = renderPrs);
 document.getElementById('btn-filter').onclick = loadIssues;
 document.getElementById('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadIssues(); });
 

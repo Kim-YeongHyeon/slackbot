@@ -80,8 +80,18 @@
   <section id="panel-prs" class="panel">
     <h2>열린 PR 현황 <span class="muted">(최대 5분 지연 캐시)</span></h2>
     <div id="pr-msg" class="msg"></div>
+    <div class="filters">
+      <select id="pr-repo"><option value="">레포 전체</option></select>
+      <select id="pr-author"><option value="">작성자 전체</option></select>
+      <select id="pr-sort">
+        <option value="updated-desc">갱신 ↓ (최신순)</option>
+        <option value="updated-asc">갱신 ↑</option>
+        <option value="created-desc">생성 ↓ (최신순)</option>
+        <option value="created-asc">생성 ↑</option>
+      </select>
+    </div>
     <div class="cards" id="pr-cards"></div>
-    <table id="table-prs"><thead><tr><th>Repo</th><th>PR</th><th>작성자</th><th>브랜치</th><th>연결 Jira</th><th>이슈 담당자</th><th>갱신</th></tr></thead><tbody></tbody></table>
+    <table id="table-prs"><thead><tr><th>Repo</th><th>PR</th><th>작성자</th><th>브랜치</th><th>연결 Jira</th><th>이슈 담당자</th><th>생성</th><th>갱신</th></tr></thead><tbody></tbody></table>
   </section>
 
   <!-- 이슈 목록 -->

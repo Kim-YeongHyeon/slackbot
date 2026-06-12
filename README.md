@@ -48,7 +48,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 버그 | 버그 비율 · 주간 발생 vs 해결 · 미해결 버그 목록 |
 | 이슈 목록 | 상태/담당자/유형 필터 + 키워드 검색 (최근 갱신순 200건) |
 | 사용자 관리 | Slack↔Jira 매핑 등록(accountId·Slack 실명 자동 해석)/삭제, 리마인더·할당알림 토글 |
-| PR 현황 | 설정된 repo 전체의 열린 PR + 작성자 + **연결 Jira 이슈**(브랜치명/제목의 이슈 키로 자동 조인 — 상태·담당자·링크). 5분 캐시. **토큰에 Pull requests: Read-only 권한 필요** (없으면 탭에 안내 표시) |
+| PR 현황 | 설정된 repo 전체의 열린 PR + 작성자 + **연결 Jira 이슈**(브랜치명/제목의 이슈 키로 자동 조인 — 상태·담당자·링크). **레포/작성자 필터 + 생성·갱신일 정렬(↑↓)** (v0.0.31, 클라이언트 필터라 refetch 없음), 생성일 컬럼 표시. 5분 캐시. **토큰에 Pull requests: Read-only 권한 필요** (없으면 탭에 안내 표시) |
 | 봇 상태 | 서버 health · 최근 의도분류 실패 로그 |
 
 API: `/api/dashboard/*` (summary·sprint·trends·workload·bugs·issues·intent-failures·actions/sync),
