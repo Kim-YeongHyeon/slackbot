@@ -51,6 +51,7 @@ services:
       SPRING_EVENT_URL: http://server:8080/api/slack/event
       SPRING_INTERACTION_URL: http://server:8080/api/slack/interaction
       SPRING_JIRA_WEBHOOK_URL: http://server:8080/api/jira/webhook
+      SPRING_BASE_URL: http://server:8080   # 대시보드 프록시용 (DASHBOARD_USER/PASSWORD 는 .env)
     ports:
       - "3000:3000"
     depends_on:

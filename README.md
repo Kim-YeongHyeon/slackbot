@@ -31,9 +31,13 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 - **인덱스**: `issues(status_category)`, `issues(sprint_id)`, `issues(completed_at)`.
 - **운영 설정**: `show-sql` off, 로깅 INFO(트러블슈팅 시 `LOG_LEVEL_APP=DEBUG`), HikariCP `maximum-pool-size: 15`.
 
-### 웹 대시보드 (v0.0.26)
+### 웹 대시보드 (v0.0.26, 외부 접근 v0.0.30)
 
-`http://<호스트IP>:8080/dashboard/` — **사내망 전용** (ngrok 터널은 봇(:3000)만 노출하므로 외부 인터넷 접근 불가).
+- 사내망/SSH 포워딩: `http://<호스트IP>:8080/dashboard/` (인증 없음)
+- **외부(인터넷)**: `https://<ngrok-domain>/dashboard/` — Go봇이 :8080 으로 리버스 프록시하며
+  **Basic Auth**(`DASHBOARD_USER`/`DASHBOARD_PASSWORD`, 둘 다 설정 시에만 활성)로 보호.
+  화이트리스트 경로만 노출: `/dashboard/`, `/api/dashboard/`, `/api/user-mappings`, `/actuator/health`
+  — 그 외 Spring API 는 터널에서 계속 404.
 
 | 탭 | 내용 |
 |---|---|
@@ -74,6 +78,12 @@ ngrok 이 Go 봇만 노출하므로 프록시가 필수다. 등록은 Jira **사
 **2026-06-12 등록 완료** (`webhooks/1.0/webhook/1`, 관리자 `JIRA_ADMIN_EMAIL` 계정) — 할당 DM·스레드
 상태변경 알림·버그 완료 Notion 자동 동기화 라이브 활성. **ngrok 도메인이 바뀌면 웹훅 URL 재등록 필요.**
 수신/할당 DM 판정(발송·생략 사유)은 INFO 로그로 남는다 (`Jira webhook received`, `Assign DM sent/skipped`).
+
+### 터널 경유 대시보드 접근 (v0.0.30)
+
+OCI 서버라 SSH 포워딩 없이는 대시보드를 못 보던 문제 해결 — 기존 ngrok 도메인을 재사용해
+Go봇이 대시보드 경로만 Basic Auth 를 걸어 :8080 으로 프록시한다 (위 "웹 대시보드" 섹션 참고).
+Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/token 검증).
 
 ### 응답 시간 계측 (v0.0.29)
 
@@ -151,6 +161,10 @@ POSTGRES_PASSWORD=<임의 비밀번호>
 GITHUB_BRANCH_TOKEN=<fine-grained PAT, 대상 repo Contents: Read & Write>
 GITHUB_ORG=<조직 (기본 CryptoLabInc)>
 GITHUB_BRANCH_REPOS=<버튼에 띄울 repo, 콤마 구분 (기본 envector-msa,evi)>
+
+# 터널 경유 대시보드 접근 (선택, v0.0.30) — 둘 다 설정해야 Go봇 프록시가 켜짐
+DASHBOARD_USER=<대시보드 Basic Auth 아이디>
+DASHBOARD_PASSWORD=<대시보드 Basic Auth 비밀번호 (강한 랜덤값)>
 ```
 
 > **GitHub 토큰 발급**: GitHub → Settings → Developer settings → Fine-grained tokens → Resource owner=조직, 대상 repo 선택, Repository permissions의 **Contents: Read and write**. 발급한 토큰을 `GITHUB_BRANCH_TOKEN`에 넣으면 "진행 중" 전환 시 repo 선택 버튼이 활성화됩니다.

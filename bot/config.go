@@ -13,6 +13,11 @@ type Config struct {
 	SpringInteractionURL string
 	// ngrok 터널이 :3000(이 봇)만 노출하므로 Jira webhook 도 이 봇을 경유해 Spring 으로 프록시한다.
 	SpringJiraWebhookURL string
+	// 대시보드 프록시용 Spring 루트 (경로 없는 베이스 URL).
+	SpringBaseURL string
+	// 둘 다 설정되면 터널 경유 대시보드 접근(/dashboard 등)이 Basic Auth 로 열린다.
+	DashboardUser     string
+	DashboardPassword string
 	SigningSecret      string
 	BotToken           string
 	ForwardTimeout     time.Duration
@@ -24,6 +29,9 @@ func LoadConfig() (Config, error) {
 		SpringURL:          envOr("SPRING_EVENT_URL", "http://localhost:8080/api/slack/event"),
 		SpringInteractionURL: envOr("SPRING_INTERACTION_URL", "http://localhost:8080/api/slack/interaction"),
 		SpringJiraWebhookURL: envOr("SPRING_JIRA_WEBHOOK_URL", "http://localhost:8080/api/jira/webhook"),
+		SpringBaseURL:      envOr("SPRING_BASE_URL", "http://localhost:8080"),
+		DashboardUser:      os.Getenv("DASHBOARD_USER"),
+		DashboardPassword:  os.Getenv("DASHBOARD_PASSWORD"),
 		SigningSecret:      os.Getenv("SLACK_SIGNING_SECRET"),
 		BotToken:           os.Getenv("SLACK_BOT_TOKEN"),
 		ForwardTimeout:     5 * time.Second,

@@ -44,6 +44,25 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	// 대시보드를 터널로 노출 (DASHBOARD_USER/PASSWORD 둘 다 있을 때만, Basic Auth).
+	// 화이트리스트 경로만 등록한다 — 그 외 Spring API 는 터널에서 계속 404.
+	if cfg.DashboardUser != "" && cfg.DashboardPassword != "" {
+		dash, err := NewDashboardProxy(cfg.SpringBaseURL, cfg.DashboardUser, cfg.DashboardPassword, logger)
+		if err != nil {
+			logger.Error("invalid SPRING_BASE_URL", "err", err)
+			os.Exit(1)
+		}
+		for _, p := range []string{
+			"/dashboard", "/dashboard/", // 정적 페이지
+			"/api/dashboard/",                          // 통계/응답시간/동기화 API
+			"/api/user-mappings", "/api/user-mappings/", // 사용자 관리 탭
+			"/actuator/health", // 봇 상태 탭의 서버 health 카드
+		} {
+			mux.Handle(p, dash)
+		}
+		logger.Info("dashboard proxy enabled", "user", cfg.DashboardUser)
+	}
+
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
 		Handler:           mux,
