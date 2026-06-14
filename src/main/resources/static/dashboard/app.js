@@ -404,6 +404,21 @@ document.getElementById('btn-resolved-toggle').onclick = () => {
 };
 document.getElementById('btn-resolved-search').onclick = loadResolvedBugs;
 document.getElementById('resolved-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadResolvedBugs(); });
+document.getElementById('btn-backfill').onclick = async () => {
+  const btn = document.getElementById('btn-backfill');
+  const msg = document.getElementById('trend-msg');
+  btn.disabled = true; btn.textContent = '백필 중… (Jira 전체 조회)';
+  try {
+    const res = await fetch(API + '/actions/backfill-history', { method: 'POST' });
+    const d = await res.json();
+    msg.className = 'msg ok'; msg.textContent = d.result;
+    loadTrends();
+  } catch (e) {
+    msg.className = 'msg err'; msg.textContent = '백필 실패: ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = '히스토리 백필';
+  }
+};
 
 document.getElementById('btn-sync').onclick = async () => {
   const btn = document.getElementById('btn-sync');

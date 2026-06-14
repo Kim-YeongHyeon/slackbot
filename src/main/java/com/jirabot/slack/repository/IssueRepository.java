@@ -129,8 +129,10 @@ public interface IssueRepository extends JpaRepository<IssueEntity, Long> {
     //        이번 sync 에 포함되지 않은 키를 일괄 삭제한다. @Modifying 은 SELECT 가 아닌 쿼리에 필수.
     //        봇이 직접 생성한 이슈 (slack_channel IS NOT NULL) 는 아직 board backlog API 가 인덱싱하기
     //        전이라도 절대 지우지 않는다 — Slack 스레드 연결이 끊기는 사고 방지.
+    //        또한 완료된 이슈(completedAt IS NOT NULL)는 추이/통계 히스토리용으로 보존한다 — 백필로 적재한
+    //        과거 완료 이슈도 이 조건 덕에 다음 백로그 sync 에서 지워지지 않는다.
     @Modifying
     @Query("DELETE FROM IssueEntity i WHERE i.sprintId IS NULL AND i.slackChannel IS NULL " +
-           "AND i.issueKey NOT IN :keys")
+           "AND i.completedAt IS NULL AND i.issueKey NOT IN :keys")
     int deleteStaleBacklog(@Param("keys") Collection<String> keys);
 }

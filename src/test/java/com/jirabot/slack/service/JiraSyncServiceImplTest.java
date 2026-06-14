@@ -29,7 +29,9 @@ class JiraSyncServiceImplTest {
     void setUp() {
         jira = mock(JiraApiClient.class);
         issueRepository = mock(IssueRepository.class);
-        service = new JiraSyncServiceImpl(jira, issueRepository);
+        service = new JiraSyncServiceImpl(jira, issueRepository,
+                new com.jirabot.slack.config.JiraProperties("https://j.example.com", "u@x", "t", "ES2",
+                        null, null));
     }
 
     private SprintIssue sprintIssue(String key) {
@@ -127,5 +129,57 @@ class JiraSyncServiceImplTest {
         // 이후 TTL 내 syncIfStale 은 통째로 생략된다.
         verify(jira, org.mockito.Mockito.times(1)).getActiveSprint();
         verify(jira, org.mockito.Mockito.times(1)).getBacklogIssues();
+    }
+
+    @Test
+    void parseInstant_handlesJiraOffsetWithoutColon() {
+        // Jira Cloud 의 +0900(콜론 없음) — 과거엔 Instant.parse 가 실패해 null 로 저장되던 형식.
+        Instant got = JiraSyncServiceImpl.parseInstant("2026-06-09T16:07:15.273+0900");
+        assertThat(got).isEqualTo(Instant.parse("2026-06-09T07:07:15.273Z"));
+        // 콜론 있는 오프셋과 Z 형식도 모두 파싱.
+        assertThat(JiraSyncServiceImpl.parseInstant("2026-06-09T16:07:15.273+09:00"))
+                .isEqualTo(Instant.parse("2026-06-09T07:07:15.273Z"));
+        assertThat(JiraSyncServiceImpl.parseInstant("2026-06-09T07:07:15Z"))
+                .isEqualTo(Instant.parse("2026-06-09T07:07:15Z"));
+        assertThat(JiraSyncServiceImpl.parseInstant(null)).isNull();
+        assertThat(JiraSyncServiceImpl.parseInstant("garbage")).isNull();
+    }
+
+    @Test
+    void backfillHistory_setsCreatedAndCompletedForDoneIssue() {
+        SprintIssue doneBug = new SprintIssue("ES2-100", "옛 버그", "완료", "완료", "Alice", "Bob", "버그",
+                false, 2.0, null, "2026-01-02T10:00:00.000+0900", "2026-01-05T10:00:00.000+0900",
+                "2026-01-05T18:30:00.000+0900");
+        when(jira.searchByJql(org.mockito.ArgumentMatchers.anyString())).thenReturn(List.of(doneBug));
+        when(issueRepository.findByIssueKey("ES2-100")).thenReturn(Optional.empty());
+
+        String result = service.backfillHistory();
+
+        assertThat(result).contains("전체 1건");
+        ArgumentCaptor<IssueEntity> cap = ArgumentCaptor.forClass(IssueEntity.class);
+        verify(issueRepository).save(cap.capture());
+        IssueEntity saved = cap.getValue();
+        assertThat(saved.getJiraCreated()).isEqualTo(Instant.parse("2026-01-02T01:00:00Z"));
+        // 완료일은 resolutionDate(=resolutiondate||statuscategorychangedate) 사용
+        assertThat(saved.getCompletedAt()).isEqualTo(Instant.parse("2026-01-05T09:30:00Z"));
+    }
+
+    @Test
+    void backfillHistory_existingIssue_fillsCreatedAndCompleted_withoutTouchingSprint() {
+        IssueEntity existing = open("ES2-101");
+        existing.setSprint(933, "S3");
+        existing.setJiraCreated(null);
+        SprintIssue doneBug = new SprintIssue("ES2-101", "버그", "완료", "완료", "Alice", null, "버그",
+                false, 1.0, null, "2026-02-01T10:00:00.000+0900", "2026-02-03T10:00:00.000+0900",
+                "2026-02-03T10:00:00.000+0900");
+        when(jira.searchByJql(org.mockito.ArgumentMatchers.anyString())).thenReturn(List.of(doneBug));
+        when(issueRepository.findByIssueKey("ES2-101")).thenReturn(Optional.of(existing));
+
+        service.backfillHistory();
+
+        assertThat(existing.getJiraCreated()).isEqualTo(Instant.parse("2026-02-01T01:00:00Z"));
+        assertThat(existing.getCompletedAt()).isEqualTo(Instant.parse("2026-02-03T01:00:00Z"));
+        // 스프린트 정보는 보존(활성 뷰 깨지지 않게)
+        assertThat(existing.getSprintId()).isEqualTo(933);
     }
 }

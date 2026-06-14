@@ -102,4 +102,11 @@ public class DashboardController {
         log.info("Dashboard manual sync requested");
         return Map.of("result", jiraSyncService.fullSync());
     }
+
+    // STUDY: 히스토리 백필 — Jira 전체 이슈를 1회 적재(추이/통계 과거 기록용). 느린 단발 호출이라 동기 실행.
+    @PostMapping("/actions/backfill-history")
+    public Map<String, String> backfillHistory() {
+        log.info("Dashboard history backfill requested");
+        return Map.of("result", jiraSyncService.backfillHistory());
+    }
 }

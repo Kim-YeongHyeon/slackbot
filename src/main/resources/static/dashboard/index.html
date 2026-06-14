@@ -48,7 +48,9 @@
 
   <!-- 추이 -->
   <section id="panel-trends" class="panel">
-    <h2>추이 <select id="trend-weeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="12">12주</option><option value="26">26주</option></select></h2>
+    <h2>추이 <select id="trend-weeks"><option value="4">4주</option><option value="8" selected>8주</option><option value="12">12주</option><option value="26">26주</option></select>
+      <button id="btn-backfill" class="btn">히스토리 백필</button></h2>
+    <div id="trend-msg" class="msg muted">과거 기록이 비어 있으면 [히스토리 백필]로 Jira 전체 이슈를 1회 적재하세요 (이후 자동 누적).</div>
     <div class="grid-2">
       <div class="chart-box"><h3>주간 생성 vs 해결</h3><canvas id="chart-created-resolved"></canvas></div>
       <div class="chart-box"><h3>평균 해결 소요시간 (시간)</h3><canvas id="chart-resolution"></canvas></div>

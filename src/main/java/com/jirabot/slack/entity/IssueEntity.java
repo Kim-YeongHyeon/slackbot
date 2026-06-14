@@ -186,6 +186,8 @@ public class IssueEntity {
     }
     public Instant getCompletedAt() { return completedAt; }
     public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
+    // STUDY: 히스토리 백필용 — 기존 row 의 누락된(또는 잘못 파싱돼 null 이던) 생성일을 Jira 값으로 채운다.
+    public void setJiraCreated(Instant jiraCreated) { this.jiraCreated = jiraCreated; }
     public Instant getInProgressSince() { return inProgressSince; }
     public Integer getSprintId() { return sprintId; }
     public String getSprintName() { return sprintName; }
