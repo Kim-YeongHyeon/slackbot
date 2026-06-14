@@ -29,6 +29,7 @@ class DashboardServiceImplTest {
     private ResponseMetricRepository responseMetricRepository;
     private JiraSyncService jiraSyncService;
     private com.jirabot.slack.client.GitHubApiClient gitHubApiClient;
+    private com.jirabot.slack.client.JiraApiClient jiraApiClient;
     private DashboardServiceImpl service;
 
     private DashboardServiceImpl build(com.jirabot.slack.config.GitHubProperties gitHubProps) {
@@ -38,7 +39,7 @@ class DashboardServiceImplTest {
                 null, new JiraProperties.IssueTypes("버그", "작업", "하위 작업"));
         return new DashboardServiceImpl(issueRepository, userMappingRepository,
                 intentFailureRepository, responseMetricRepository, jiraSyncService, reminderProps,
-                gitHubApiClient, gitHubProps, jiraProps);
+                gitHubApiClient, gitHubProps, jiraApiClient, jiraProps);
     }
 
     @BeforeEach
@@ -49,6 +50,7 @@ class DashboardServiceImplTest {
         responseMetricRepository = mock(ResponseMetricRepository.class);
         jiraSyncService = mock(JiraSyncService.class);
         gitHubApiClient = mock(com.jirabot.slack.client.GitHubApiClient.class);
+        jiraApiClient = mock(com.jirabot.slack.client.JiraApiClient.class);
         when(jiraSyncService.lastSyncAt()).thenReturn(Optional.empty());
         service = build(new com.jirabot.slack.config.GitHubProperties(
                 "tok", "CryptoLabInc", List.of("evi"), "https://api.github.com"));
@@ -145,13 +147,33 @@ class DashboardServiceImplTest {
         IssueEntity none = issue("ES2-3", "작업", "해야 할 일", null, 1.0, now, null);
         when(issueRepository.findByStatusCategoryNot("완료")).thenReturn(List.of(a1, a2, none));
 
-        var loads = service.workload();
+        var loads = service.workload("all");
 
         assertThat(loads).hasSize(2);
         assertThat(loads.get(0).assignee()).isEqualTo("Alice");
         assertThat(loads.get(0).openCount()).isEqualTo(2);
         assertThat(loads.get(0).openSp()).isEqualTo(5.0);
         assertThat(loads).extracting("assignee").contains("미배정");
+    }
+
+    @Test
+    void workload_sprintScope_usesLatestSprintOpenIssuesOnly() {
+        Instant now = Instant.now();
+        IssueEntity inSprintOpen = issue("ES2-1", "작업", "진행 중", "Alice", 3.0, now, null);
+        IssueEntity inSprintDone = issue("ES2-2", "작업", "완료", "Alice", 2.0, now, now);
+        when(issueRepository.findLatestSprintInfo(any()))
+                .thenReturn(java.util.Collections.singletonList(new Object[]{933}));
+        when(issueRepository.findBySprintId(933)).thenReturn(List.of(inSprintOpen, inSprintDone));
+
+        var loads = service.workload("sprint");
+
+        // 완료 이슈는 제외, 미해결만 집계 → Alice 1건
+        assertThat(loads).hasSize(1);
+        assertThat(loads.get(0).assignee()).isEqualTo("Alice");
+        assertThat(loads.get(0).openCount()).isEqualTo(1);
+        // 전체 스코프 쿼리는 호출되지 않아야 한다
+        org.mockito.Mockito.verify(issueRepository, org.mockito.Mockito.never())
+                .findByStatusCategoryNot(org.mockito.ArgumentMatchers.anyString());
     }
 
     // --- bugs ---
@@ -164,13 +186,50 @@ class DashboardServiceImplTest {
         IssueEntity task = issue("ES2-3", "작업", "완료", "A", 3.0, now, now);
         when(issueRepository.findAll()).thenReturn(List.of(bug1, bug2, task));
 
-        var b = service.bugs(8);
+        var b = service.bugs(8, "all");
 
         assertThat(b.bugCount()).isEqualTo(2);
         assertThat(b.totalCount()).isEqualTo(3);
         assertThat(b.openBugCount()).isEqualTo(1);
         assertThat(b.openBugs()).extracting("key").containsExactly("ES2-1");
         assertThat(b.weekly()).hasSize(8);
+    }
+
+    @Test
+    void resolvedBugs_queriesJiraDoneFiltersBugsAndMapsResolutionDate() {
+        com.jirabot.slack.client.dto.SprintIssue bugDone = new com.jirabot.slack.client.dto.SprintIssue(
+                "ES2-9", "완료 버그", "완료", "완료", "Alice", null, "버그", false, 1.0, null,
+                "2026-05-01T00:00:00.000+0900", "2026-05-05T00:00:00.000+0900",
+                "2026-05-05T00:00:00.000+0900");
+        com.jirabot.slack.client.dto.SprintIssue taskDone = new com.jirabot.slack.client.dto.SprintIssue(
+                "ES2-8", "완료 작업", "완료", "완료", "Bob", null, "작업", false, 2.0, null,
+                "2026-05-01T00:00:00.000+0900", "2026-05-04T00:00:00.000+0900",
+                "2026-05-04T00:00:00.000+0900");
+        when(jiraApiClient.searchByJql(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(List.of(bugDone, taskDone));
+
+        var resolved = service.resolvedBugs(null);
+
+        // 작업은 제외, 버그만
+        assertThat(resolved).hasSize(1);
+        assertThat(resolved.get(0).key()).isEqualTo("ES2-9");
+        assertThat(resolved.get(0).resolutionDate()).isEqualTo("2026-05-05T00:00:00.000+0900");
+        assertThat(resolved.get(0).url()).isEqualTo("https://j.example.com/browse/ES2-9");
+    }
+
+    @Test
+    void resolvedBugs_withQuery_buildsSafeTextJql() {
+        when(jiraApiClient.searchByJql(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(List.of());
+        org.mockito.ArgumentCaptor<String> jql = org.mockito.ArgumentCaptor.forClass(String.class);
+
+        service.resolvedBugs("로그인\" OR x");
+
+        org.mockito.Mockito.verify(jiraApiClient).searchByJql(jql.capture());
+        // 따옴표가 제거되어 JQL 구문이 깨지지 않아야 한다
+        assertThat(jql.getValue()).contains("statusCategory = Done");
+        assertThat(jql.getValue()).contains("ORDER BY statusCategoryChangedDate DESC");
+        assertThat(jql.getValue()).doesNotContain("\" OR x\"");
     }
 
     // --- issues filter ---

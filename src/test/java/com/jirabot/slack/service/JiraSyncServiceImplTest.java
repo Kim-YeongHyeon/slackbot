@@ -34,7 +34,7 @@ class JiraSyncServiceImplTest {
 
     private SprintIssue sprintIssue(String key) {
         return new SprintIssue(key, key, "진행 중", "진행 중", "Alice", null, "작업",
-                false, 2.0, null, null, null);
+                false, 2.0, null, null, null, null);
     }
 
     private IssueEntity open(String key) {

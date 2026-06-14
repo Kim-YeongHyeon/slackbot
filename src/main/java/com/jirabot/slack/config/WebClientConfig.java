@@ -40,6 +40,9 @@ public class WebClientConfig {
                 .defaultHeader(HttpHeaders.AUTHORIZATION, "Basic " + basic)
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .defaultHeader(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                // STUDY: JQL 검색이 큰 결과(다수 이슈)를 한 페이지로 받으면 기본 256KB 버퍼를 넘겨
+                //        DataBufferLimitException 으로 조용히 실패한다 → 8MB 로 상향.
+                .codecs(c -> c.defaultCodecs().maxInMemorySize(8 * 1024 * 1024))
                 .clientConnector(new ReactorClientHttpConnector(httpClient(30)))
                 .build();
     }

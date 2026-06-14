@@ -87,7 +87,8 @@ async function loadTrends() {
 }
 
 async function loadWorkload() {
-  const d = await get('/workload');
+  const scope = document.getElementById('wl-scope').value;
+  const d = await get('/workload?scope=' + scope);
   makeChart('chart-workload', {
     type: 'bar',
     data: { labels: d.map(x => x.assignee),
@@ -102,10 +103,12 @@ async function loadWorkload() {
 }
 
 async function loadBugs() {
-  const d = await get('/bugs?weeks=8');
+  const scope = document.getElementById('bug-scope').value;
+  const d = await get('/bugs?weeks=8&scope=' + scope);
   const ratio = d.totalCount > 0 ? Math.round(d.bugCount * 100 / d.totalCount) : 0;
+  const bugLabel = scope === 'sprint' ? '스프린트 버그' : '버그 (로컬 동기화분)';
   document.getElementById('bug-cards').innerHTML =
-    card('전체 버그', d.bugCount) + card('미해결 버그', d.openBugCount, d.openBugCount > 0 ? 'red' : 'green')
+    card(bugLabel, d.bugCount) + card('미해결 버그', d.openBugCount, d.openBugCount > 0 ? 'red' : 'green')
     + card('버그 비율', ratio + '%');
   makeChart('chart-bugs-weekly', {
     type: 'line',
@@ -119,6 +122,24 @@ async function loadBugs() {
     `<tr><td><a href="${i.url}" target="_blank">${i.key}</a></td><td>${esc(i.summary)}</td>` +
     `<td>${esc(i.status)}</td><td>${esc(i.assignee ?? '미배정')}</td></tr>`).join('')
     || '<tr><td colspan="4" class="muted">미해결 버그 없음 🎉</td></tr>');
+}
+
+// 해결된 버그 — Jira 라이브 조회라 펼칠 때 1회 lazy 로드, 검색은 재조회.
+let resolvedLoaded = false;
+async function loadResolvedBugs() {
+  const q = document.getElementById('resolved-q').value.trim();
+  const msg = document.getElementById('resolved-msg');
+  msg.className = 'msg'; msg.textContent = '불러오는 중… (Jira 조회, 잠시만요)';
+  try {
+    const d = await get('/bugs/resolved' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    rows('table-resolved-bugs', d.map(b =>
+      `<tr><td><a href="${b.url}" target="_blank">${b.key}</a></td><td>${esc(b.summary)}</td>` +
+      `<td>${esc(b.assignee ?? '미배정')}</td><td class="muted">${fmtDate(b.resolutionDate)}</td></tr>`).join('')
+      || `<tr><td colspan="4" class="muted">${q ? '검색 결과 없음' : '해결된 버그 없음'}</td></tr>`);
+    msg.className = 'msg'; msg.textContent = `${d.length}건${q ? ` (검색: ${esc(q)})` : ''}`;
+  } catch (e) {
+    msg.className = 'msg err'; msg.textContent = '조회 실패: ' + e.message;
+  }
 }
 
 let prData = [];   // 마지막 fetch 결과 — 필터/정렬 변경 시 refetch 없이 재렌더
@@ -211,7 +232,27 @@ async function loadIssues() {
       types.map(t => `<option>${esc(t)}</option>`).join('');
   }
 
-  rows('table-issues', d.map(i =>
+  issueData = d;
+  renderIssues();
+}
+
+let issueData = [];
+let issueKeyDir = null;   // null=서버순(최근 갱신), 'asc'|'desc'=키 정렬
+
+// 키의 끝 숫자로 정렬(ES2-9 < ES2-10). 키가 같은 프로젝트라는 전제.
+function issueKeyNum(k) {
+  const m = /(\d+)\s*$/.exec(k || '');
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function renderIssues() {
+  let list = issueData.slice();
+  if (issueKeyDir) {
+    list.sort((a, b) => (issueKeyNum(a.key) - issueKeyNum(b.key)) * (issueKeyDir === 'asc' ? 1 : -1));
+  }
+  document.getElementById('issues-sort-key').textContent =
+    '키 ' + (issueKeyDir === 'asc' ? '▲' : issueKeyDir === 'desc' ? '▼' : '⇅');
+  rows('table-issues', list.map(i =>
     `<tr><td><a href="${i.url}" target="_blank">${i.key}</a></td><td>${esc(i.summary)}</td>` +
     `<td>${esc(i.issueType ?? '-')}</td><td>${badge(i.statusCategory)}</td>` +
     `<td>${esc(i.assignee ?? '미배정')}</td><td>${i.storyPoint ?? '-'}</td>` +
@@ -348,6 +389,21 @@ document.getElementById('trend-weeks').onchange = loadTrends;
 document.getElementById('btn-fr-add').onclick = addFeature;
 document.getElementById('btn-filter').onclick = loadIssues;
 document.getElementById('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadIssues(); });
+document.getElementById('wl-scope').onchange = loadWorkload;
+document.getElementById('bug-scope').onchange = loadBugs;
+document.getElementById('issues-sort-key').onclick = () => {
+  issueKeyDir = issueKeyDir === 'asc' ? 'desc' : 'asc';
+  renderIssues();
+};
+document.getElementById('btn-resolved-toggle').onclick = () => {
+  const wrap = document.getElementById('resolved-wrap');
+  const opening = wrap.style.display === 'none';
+  wrap.style.display = opening ? '' : 'none';
+  document.getElementById('btn-resolved-toggle').textContent = opening ? '접기 ▲' : '펼치기 ▼';
+  if (opening && !resolvedLoaded) { resolvedLoaded = true; loadResolvedBugs(); }
+};
+document.getElementById('btn-resolved-search').onclick = loadResolvedBugs;
+document.getElementById('resolved-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadResolvedBugs(); });
 
 document.getElementById('btn-sync').onclick = async () => {
   const btn = document.getElementById('btn-sync');

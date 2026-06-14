@@ -53,13 +53,22 @@ public class DashboardController {
     }
 
     @GetMapping("/workload")
-    public List<AssigneeLoad> workload() {
-        return dashboardService.workload();
+    public List<AssigneeLoad> workload(
+            @RequestParam(name = "scope", defaultValue = "all") String scope) {
+        return dashboardService.workload(scope);
     }
 
     @GetMapping("/bugs")
-    public BugStats bugs(@RequestParam(name = "weeks", defaultValue = "8") int weeks) {
-        return dashboardService.bugs(weeks);
+    public BugStats bugs(@RequestParam(name = "weeks", defaultValue = "8") int weeks,
+                         @RequestParam(name = "scope", defaultValue = "all") String scope) {
+        return dashboardService.bugs(weeks, scope);
+    }
+
+    // 해결된 버그 — Jira 라이브 조회(느림)라 대시보드에서 펼칠 때만 호출. q 는 완료 버그 내 검색어.
+    @GetMapping("/bugs/resolved")
+    public List<com.jirabot.slack.dto.dashboard.DashboardDtos.ResolvedBugRow> resolvedBugs(
+            @RequestParam(name = "q", required = false) String q) {
+        return dashboardService.resolvedBugs(q);
     }
 
     @GetMapping("/issues")

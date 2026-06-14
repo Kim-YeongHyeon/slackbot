@@ -58,6 +58,9 @@
   <!-- 담당자 부하 -->
   <section id="panel-workload" class="panel">
     <h2>담당자별 미해결 부하</h2>
+    <div class="filters">
+      <select id="wl-scope"><option value="all">전체</option><option value="sprint">현재 스프린트</option></select>
+    </div>
     <div class="grid-2">
       <div class="chart-box"><canvas id="chart-workload"></canvas></div>
       <table id="table-workload"><thead><tr><th>담당자</th><th>미해결</th><th>SP</th><th>정체</th></tr></thead><tbody></tbody></table>
@@ -67,6 +70,9 @@
   <!-- 버그 -->
   <section id="panel-bugs" class="panel">
     <h2>버그 통계</h2>
+    <div class="filters">
+      <select id="bug-scope"><option value="all">전체</option><option value="sprint">현재 스프린트</option></select>
+    </div>
     <div class="cards" id="bug-cards"></div>
     <div class="grid-2">
       <div class="chart-box"><h3>주간 버그 발생 vs 해결</h3><canvas id="chart-bugs-weekly"></canvas></div>
@@ -74,6 +80,16 @@
         <h3>미해결 버그</h3>
         <table id="table-open-bugs"><thead><tr><th>키</th><th>요약</th><th>상태</th><th>담당자</th></tr></thead><tbody></tbody></table>
       </div>
+    </div>
+    <h3>해결된 버그 <button id="btn-resolved-toggle" class="btn">펼치기 ▼</button></h3>
+    <div id="resolved-wrap" style="display:none">
+      <div class="filters">
+        <input id="resolved-q" type="text" placeholder="완료 버그 검색 (요약/키)">
+        <button id="btn-resolved-search" class="btn">검색</button>
+        <span class="muted">Jira 라이브 조회 — 완료일 최신순, 조금 느릴 수 있어요</span>
+      </div>
+      <div id="resolved-msg" class="msg"></div>
+      <table id="table-resolved-bugs"><thead><tr><th>키</th><th>요약</th><th>담당자</th><th>완료일</th></tr></thead><tbody></tbody></table>
     </div>
   </section>
 
@@ -105,7 +121,7 @@
       <input id="f-q" type="text" placeholder="키워드/이슈키 검색">
       <button id="btn-filter" class="btn">검색</button>
     </div>
-    <table id="table-issues"><thead><tr><th>키</th><th>요약</th><th>유형</th><th>상태</th><th>담당자</th><th>SP</th><th>스프린트</th></tr></thead><tbody></tbody></table>
+    <table id="table-issues"><thead><tr><th id="issues-sort-key" style="cursor:pointer" title="클릭하면 키 정렬 전환">키 ⇅</th><th>요약</th><th>유형</th><th>상태</th><th>담당자</th><th>SP</th><th>스프린트</th></tr></thead><tbody></tbody></table>
   </section>
 
   <!-- 사용자 관리 -->

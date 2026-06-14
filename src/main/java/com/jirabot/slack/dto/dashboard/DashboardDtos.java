@@ -49,9 +49,13 @@ public final class DashboardDtos {
     /** 추이 통계 — GET /api/dashboard/trends */
     public record TrendStats(List<WeekBucket> weekly, List<WeekResolution> resolution) {}
 
-    /** 버그 통계 — GET /api/dashboard/bugs */
+    /** 버그 통계 — GET /api/dashboard/bugs?scope=all|sprint (미해결 버그 + 주간 추이) */
     public record BugStats(long bugCount, long totalCount, long openBugCount,
                            List<WeekBucket> weekly, List<IssueRow> openBugs) {}
+
+    /** 해결된 버그 한 줄 — GET /api/dashboard/bugs/resolved (Jira 라이브 조회, 완료일 desc) */
+    public record ResolvedBugRow(String key, String summary, String assignee,
+                                 String resolutionDate, String url) {}
 
     /** 봇 운영 — 의도분류 실패 한 줄 */
     public record IntentFailureRow(Instant failedAt, String errorType, String rawInput,

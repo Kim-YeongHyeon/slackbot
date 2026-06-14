@@ -53,8 +53,10 @@ public class DashboardServiceImpl implements DashboardService {
     private final ReminderProperties reminderProps;
     private final com.jirabot.slack.client.GitHubApiClient gitHubApiClient;
     private final com.jirabot.slack.config.GitHubProperties gitHubProps;
+    private final com.jirabot.slack.client.JiraApiClient jiraApiClient;
     private final String jiraBaseUrl;
     private final String bugTypeName;
+    private final String projectKey;
 
     public DashboardServiceImpl(IssueRepository issueRepository,
                                 UserMappingRepository userMappingRepository,
@@ -64,6 +66,7 @@ public class DashboardServiceImpl implements DashboardService {
                                 ReminderProperties reminderProps,
                                 com.jirabot.slack.client.GitHubApiClient gitHubApiClient,
                                 com.jirabot.slack.config.GitHubProperties gitHubProps,
+                                com.jirabot.slack.client.JiraApiClient jiraApiClient,
                                 JiraProperties jiraProps) {
         this.issueRepository = issueRepository;
         this.userMappingRepository = userMappingRepository;
@@ -73,6 +76,7 @@ public class DashboardServiceImpl implements DashboardService {
         this.reminderProps = reminderProps;
         this.gitHubApiClient = gitHubApiClient;
         this.gitHubProps = gitHubProps;
+        this.jiraApiClient = jiraApiClient;
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl().replaceAll("/+$", "");
         this.jiraBaseUrl = base;
         this.bugTypeName = jiraProps.issueTypes() != null && jiraProps.issueTypes().bug() != null
@@ -80,6 +84,7 @@ public class DashboardServiceImpl implements DashboardService {
         // PR 브랜치명에서 이슈 키 추출용 — 프로젝트 키 기반(es2-123 같은 소문자 허용) 우선,
         // 그 외 대문자 일반 패턴 폴백 (소문자 일반 단어 test-123 의 오탐 방지).
         String key = jiraProps.projectKey() == null ? "" : jiraProps.projectKey();
+        this.projectKey = key;
         this.projectKeyPattern = key.isBlank() ? null
                 : java.util.regex.Pattern.compile("(?i)" + java.util.regex.Pattern.quote(key) + "-\\d+");
     }
@@ -200,8 +205,17 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    public List<AssigneeLoad> workload() {
-        List<IssueEntity> open = issueRepository.findByStatusCategoryNot(StatusCategory.DONE);
+    public List<AssigneeLoad> workload(String scope) {
+        List<IssueEntity> open;
+        if (isSprintScope(scope)) {
+            Optional<int[]> sprint = latestSprintId();
+            open = sprint.isEmpty() ? List.of()
+                    : issueRepository.findBySprintId(sprint.get()[0]).stream()
+                            .filter(i -> !StatusCategory.DONE.equals(i.getStatusCategory()))
+                            .toList();
+        } else {
+            open = issueRepository.findByStatusCategoryNot(StatusCategory.DONE);
+        }
         Map<String, double[]> byAssignee = new LinkedHashMap<>();
         for (IssueEntity i : open) {
             double[] load = byAssignee.computeIfAbsent(assigneeLabel(i), k -> new double[3]);
@@ -217,10 +231,16 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     @Override
-    public BugStats bugs(int weeks) {
+    public BugStats bugs(int weeks, String scope) {
         int w = clampWeeks(weeks);
         LocalDate firstWeekStart = currentWeekStart().minusWeeks(w - 1L);
-        List<IssueEntity> all = issueRepository.findAll();
+        List<IssueEntity> all;
+        if (isSprintScope(scope)) {
+            Optional<int[]> sprint = latestSprintId();
+            all = sprint.isEmpty() ? List.of() : issueRepository.findBySprintId(sprint.get()[0]);
+        } else {
+            all = issueRepository.findAll();
+        }
 
         long bugCount = 0;
         long openBugCount = 0;
@@ -247,6 +267,40 @@ public class DashboardServiceImpl implements DashboardService {
         openBugs.sort(Comparator.comparing(IssueRow::jiraUpdated,
                 Comparator.nullsLast(Comparator.reverseOrder())));
         return new BugStats(bugCount, all.size(), openBugCount, weekly, openBugs);
+    }
+
+    private static final int RESOLVED_BUGS_CAP = 200;
+
+    // STUDY: 해결된 버그는 로컬 DB 에서 prune 되므로(완료 이슈는 백로그 sync 시 정리) Jira 라이브로 조회한다.
+    //        느린 호출이라 대시보드에서 lazy(펼칠 때만) 로 부른다. issuetype 은 JQL 에서 표시명으로 못 거르니
+    //        (L7) project+statusCategory=Done 으로 받아 응답 name 으로 isBugType 필터. 완료일(resolutiondate) desc.
+    @Override
+    public List<com.jirabot.slack.dto.dashboard.DashboardDtos.ResolvedBugRow> resolvedBugs(String q) {
+        if (projectKey == null || projectKey.isBlank()) {
+            return List.of();
+        }
+        // STUDY: L7 — JQL 의 issuetype 은 영문 정식명("Bug")/id 로만 매칭(표시명 "버그"는 0건).
+        //        이 사이트는 "Bug" 가 매칭되며, 결과를 버그로 좁혀 응답 크기/지연을 줄인다.
+        //        완료 시각은 resolutiondate 가 비는 경우가 많아 statusCategoryChangedDate 로 정렬.
+        StringBuilder jql = new StringBuilder("project = ").append(projectKey)
+                .append(" AND issuetype = Bug AND statusCategory = Done");
+        String term = blankToNull(q);
+        if (term != null) {
+            // JQL 문자열 인젝션/구문오류 방지 — 따옴표·백슬래시 제거 후 text 매칭.
+            String safe = term.replace("\\", "").replace("\"", "").trim();
+            if (!safe.isEmpty()) {
+                jql.append(" AND text ~ \"").append(safe).append("\"");
+            }
+        }
+        jql.append(" ORDER BY statusCategoryChangedDate DESC");
+
+        return jiraApiClient.searchByJql(jql.toString()).stream()
+                .filter(b -> isBugType(b.issueType()))
+                .limit(RESOLVED_BUGS_CAP)
+                .map(b -> new com.jirabot.slack.dto.dashboard.DashboardDtos.ResolvedBugRow(
+                        b.key(), b.summary(), b.assignee(), b.resolutionDate(),
+                        jiraBaseUrl.isEmpty() ? null : jiraBaseUrl + "/browse/" + b.key()))
+                .toList();
     }
 
     @Override
@@ -396,10 +450,19 @@ public class DashboardServiceImpl implements DashboardService {
     }
 
     private boolean isBug(IssueEntity i) {
-        String type = i.getIssueType();
-        if (type == null) return false;
-        String lower = type.toLowerCase();
-        return lower.contains("버그") || lower.contains("bug") || type.equalsIgnoreCase(bugTypeName);
+        return isBugType(i.getIssueType());
+    }
+
+    // STUDY: L7 — JQL 의 issuetype 은 표시명("버그")으로 못 거르므로, Jira 응답의 issuetype.name 으로
+    //        클라이언트 필터한다(응답 name 은 표시명이라 이 검사와 일치). 영문/표시명/설정값 모두 커버.
+    private boolean isBugType(String issueType) {
+        if (issueType == null) return false;
+        String lower = issueType.toLowerCase();
+        return lower.contains("버그") || lower.contains("bug") || issueType.equalsIgnoreCase(bugTypeName);
+    }
+
+    private boolean isSprintScope(String scope) {
+        return "sprint".equalsIgnoreCase(scope);
     }
 
     private Optional<int[]> latestSprintId() {

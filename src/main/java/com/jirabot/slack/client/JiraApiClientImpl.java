@@ -38,7 +38,7 @@ public class JiraApiClientImpl implements JiraApiClient {
         this.jiraWebClient = jiraWebClient;
         this.props = props;
         this.objectMapper = objectMapper;
-        this.sprintFields = "summary,status,assignee,reporter,issuetype,parent," + props.storyPointField() + ",created,updated";
+        this.sprintFields = "summary,status,assignee,reporter,issuetype,parent," + props.storyPointField() + ",created,updated,resolutiondate,statuscategorychangedate";
     }
 
     @Override
@@ -276,7 +276,20 @@ public class JiraApiClientImpl implements JiraApiClient {
                 f.path(props.storyPointField()).asDouble(0),
                 parentKey,
                 f.path("created").asText(""),
-                f.path("updated").asText(""));
+                f.path("updated").asText(""),
+                // STUDY: 이 사이트는 done 이슈에 resolutiondate 를 안 채우는 경우가 많아,
+                //        "완료 시각" 으로 statuscategorychangedate(Done 카테고리 진입 시각)를 폴백으로 쓴다.
+                firstNonBlankDate(f.path("resolutiondate"), f.path("statuscategorychangedate")));
+    }
+
+    private static String firstNonBlankDate(JsonNode... nodes) {
+        for (JsonNode n : nodes) {
+            if (n != null && !n.isMissingNode() && !n.isNull()) {
+                String v = n.asText(null);
+                if (v != null && !v.isBlank()) return v;
+            }
+        }
+        return null;
     }
 
     @Override
