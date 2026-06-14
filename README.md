@@ -80,6 +80,22 @@ ngrok 이 Go 봇만 노출하므로 프록시가 필수다. 등록은 Jira **사
 상태변경 알림·버그 완료 Notion 자동 동기화 라이브 활성. **ngrok 도메인이 바뀌면 웹훅 URL 재등록 필요.**
 수신/할당 DM 판정(발송·생략 사유)은 INFO 로그로 남는다 (`Jira webhook received`, `Assign DM sent/skipped`).
 
+### 분류 프롬프트 개선 (v0.0.33)
+
+`claude -p`(headless) 분류 호출의 시스템 프롬프트(`prompts/*.md`)를 개선했다. 검증된 사실 기준:
+
+- `--system-prompt-file` 은 시스템 프롬프트를 **대체**(append 아님)하므로 각 파일은 자기완결적이어야 한다.
+- `--bare`(CLAUDE.md/skill/hook 스킵)는 이 호스트의 **구독 인증을 깨므로 사용 불가**(라이브 확인: "Not logged in").
+  따라서 분류 호출마다 프로젝트 컨텍스트가 로드되지만, 시스템 롤은 prompt 파일이 덮어쓴다.
+- `--json-schema` 는 구조화 출력을 **툴 호출**로 처리해 `--max-turns` 를 1 더 소비 → 현재 `max-turns 1/2` 와
+  충돌(`error_max_turns`)하므로 채택하지 않음. 출력 견고성은 파서의 fence-strip 으로 보장.
+- 개선 핵심: 흩어진 disambiguation 을 **우선순위 결정 절차(first-match-wins)**로 재구성, `skip`(봇과의 사회적/내용없는
+  상호작용) vs `unknown`(Jira 무관 잡담·잡지식)의 경계를 명확화, 통계(숫자/집계) vs 스크럼(서술형 진행)의 경계 추가.
+- **회귀 가드**: `IntentClassifierEvalTest`(90케이스, 실제 CLI 호출)로 전후 정확도를 측정.
+  실행: `./gradlew test -Dintent.eval=true --tests "*IntentClassifierEvalTest"`.
+- Story Point 기준을 [docs/story-point-guide.md](docs/story-point-guide.md) 와 정합(1·2·3·5·8, **8이 상한**, 13 출력 금지).
+  `prompts/sonnet-classifier.md` 와 인라인 폴백 `ClaudeApiClientImpl.SYSTEM_PROMPT` 양쪽 정리.
+
 ### 터널 경유 대시보드 접근 (v0.0.30)
 
 OCI 서버라 SSH 포워딩 없이는 대시보드를 못 보던 문제 해결 — 기존 ngrok 도메인을 재사용해

@@ -191,3 +191,31 @@ columnDefinition DEFAULT 가 있는지 먼저 확인. 없으면 이 함정. 그�
 
 **How to apply**: 새 엔티티+리포지토리 작업의 체크리스트 = ①Flyway V<N> ②엔티티 ③리포지토리
 ④주입처 ⑤**SecurityConfigIntegrationTest @MockitoBean** ⑥테스트. ⑤를 빼먹으면 전체 테스트에서 5건이 무더기로 깨진다.
+
+---
+
+## L12 — 분류 프롬프트는 IntentClassifierEvalTest 로 전후를 측정하고, `--bare` 는 이 호스트에서 인증을 깬다
+
+**Context**: v0.0.33. `claude -p` 분류용 `prompts/*.md` 개선 요청. (1) 외부 문서/서브에이전트는 "`--bare` 가
+구독 인증을 깨지 않는다"고 했으나 실측은 정반대였고, (2) 프롬프트를 감으로 고치면 회귀를 못 본다.
+
+**Mistake 회피**: 라이브로 `echo ... | claude -p --bare --system-prompt-file ...` 를 돌려보니
+`{"is_error":true,"result":"Not logged in · Please run /login"}` (22ms 즉시 실패). `--bare` 는
+keychain 읽기까지 스킵해서 구독(OAuth) 인증 토큰을 못 읽는다. 코드 주석(IntentClassifierImpl)이 맞았다.
+
+**Rule**:
+- `claude -p` 호출 플래그/동작은 **이 호스트에서 직접 실측**으로 확정한다 (L5/L6 연장). 특히 `--bare`(인증 깨짐),
+  `--json-schema`(구조화 출력을 **툴 호출**로 처리 → `--max-turns` 1 더 소비, `max-turns 1/2` 와 충돌해 `error_max_turns`).
+  파서가 이미 fence/잡텍스트를 strip 하므로 출력 견고성은 프롬프트가 아니라 코드가 보장.
+- 분류 프롬프트(`prompts/haiku-classifier.md` 등)를 고치면 **반드시 전후로**
+  `./gradlew test -Dintent.eval=true --tests "*IntentClassifierEvalTest"` 를 돌려 정확도 diff 를 확인한다
+  (90케이스, 실제 CLI 호출, ~12분, 리포트 `build/reports/intent-eval/report.txt`). 임계 0.95.
+- 흩어진 disambiguation 은 **우선순위 결정 절차(first-match-wins)**로 재구성하면 작은 모델(Haiku)에서 잘 듣는다.
+  단, 절차 순서가 곧 동작이라 **순서 재배치가 회귀를 만들 수 있다**(예: "뭐 해야 해?" 단축 규칙이 "이번 스프린트에"
+  문맥을 눌러 my_tasks 오분류). 우선순위가 높은 컨텍스트(스프린트/팀 키워드)를 단축 규칙보다 위에 둔다.
+- `prompts/*.md` 는 런타임에 디스크에서 읽히므로(작업 디렉터리=repo 루트) **재배포 없이 즉시 반영**된다.
+  단 인라인 폴백 상수(`ClaudeApiClientImpl.SYSTEM_PROMPT`)와 SP 기준은 함께 정합시키고(13 금지, 8 상한),
+  jar 도 버전 맞춰 재배포해 드리프트를 막는다.
+
+**How to apply**: 프롬프트 수정 PR = ①베이스라인 eval ②수정 ③단위테스트 ④eval 재측정(개선/무회귀 확인)
+⑤커밋. 실패 케이스의 confusion matrix 를 보고 경계 규칙/예시를 보강한다.
