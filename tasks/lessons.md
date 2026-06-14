@@ -219,3 +219,27 @@ keychain 읽기까지 스킵해서 구독(OAuth) 인증 토큰을 못 읽는다.
 
 **How to apply**: 프롬프트 수정 PR = ①베이스라인 eval ②수정 ③단위테스트 ④eval 재측정(개선/무회귀 확인)
 ⑤커밋. 실패 케이스의 confusion matrix 를 보고 경계 규칙/예시를 보강한다.
+
+---
+
+## L13 — Jira Cloud 날짜는 `+0900`(콜론 없는 오프셋) → `Instant.parse` 가 조용히 실패한다
+
+**Context**: v0.0.35. 대시보드 추이가 과거를 못 보여줌. 원인 추적 중 로컬 DB 의 `jira_created` 가 102개 중 97개 null,
+`completed_at` 은 전부 null 임을 발견. 동기화는 매번 도는데 왜?
+
+**Mistake (잠재)**: `JiraSyncServiceImpl.parseInstant` 가 `Instant.parse(s)` 만 썼다. `Instant.parse` 는
+**`Z`(UTC) 형식만** 받는다. Jira Cloud REST 는 `2026-06-09T16:07:15.273+0900`(콜론 없는 오프셋)을 주므로
+`DateTimeParseException` → catch 에서 **null 반환**. 즉 동기화로 들어온 모든 이슈의 생성일/완료일이 null 로
+저장돼 추이·해결추이·평균해결시간이 전부 빈 채로 "정상 동작"하는 것처럼 보였다. (Slack 봇 생성 이슈만
+`Instant.now()` 라 5건은 살아 있었음 — 그래서 더 안 보였다.)
+
+**Rule**:
+- 외부 시스템의 ISO 날짜를 파싱할 때 `Instant.parse` 단독 사용 금지. **`OffsetDateTime.parse`(콜론 오프셋/Z)
+  + 콜론 없는 오프셋용 포맷터(`yyyy-MM-dd'T'HH:mm:ss.SSSZ`)** 를 순차 시도하고 마지막에 `Instant.parse` 폴백.
+- 파싱 실패를 null 로 삼키는 코드는 **데이터 손실을 무음화**한다. null 이 다량이면 파서를 1순위로 의심.
+- 날짜 의존 통계(추이/리드타임)를 만들면 **DB 에 실제로 날짜가 채워지는지** `count(col)` 로 한 번 실측한다.
+- 완료 시각은 이 사이트에서 `resolutiondate` 가 비는 경우가 많다 → `statusCategoryChangedDate`(Done 진입 시각)
+  폴백을 쓴다. (해결 버그/백필 공통)
+
+**How to apply**: Jira(또는 임의 SaaS) 날짜를 Instant 로 바꾸는 지점을 보면 오프셋 형식(`+0900` vs `+09:00` vs `Z`)을
+실측하고 견고 파서를 쓴다. 동기화가 채우는 컬럼은 배포 후 `SELECT count(col)` 로 null 비율을 확인.
