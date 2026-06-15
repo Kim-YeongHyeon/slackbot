@@ -421,7 +421,7 @@ document.getElementById('btn-import-pr').onclick = async () => {
       msg.className = 'msg err'; msg.textContent = '실패: ' + (d.message || res.status);
     } else {
       msg.className = 'msg ok';
-      msg.innerHTML = `✅ <a href="${d.issueUrl}" target="_blank">${esc(d.issueKey)}</a> 등록 — 영업일 ${d.businessDays.toFixed(1)}일 → SP ${d.storyPoint}, 상태 <b>${esc(d.finalStatus)}</b> (현재 스프린트)`;
+      msg.innerHTML = `✅ <a href="${d.issueUrl}" target="_blank">${esc(d.issueKey)}</a> 등록 — 영업일 ${d.businessDays.toFixed(1)}일 → SP ${d.storyPoint}, 상태 <b>${esc(d.finalStatus)}</b>, 보고자/담당자 <b>${esc(d.assignee || '미지정')}</b> (현재 스프린트)`;
       document.getElementById('import-pr-url').value = '';
       loadPrs();
     }

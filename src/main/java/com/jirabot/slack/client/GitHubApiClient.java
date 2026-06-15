@@ -28,4 +28,10 @@ public interface GitHubApiClient {
      * 토큰 미설정/404/권한오류/네트워크 오류 시 empty.
      */
     Optional<PullRequestDetail> getPullRequest(String owner, String repo, int number);
+
+    /**
+     * GitHub 사용자(login)의 프로필 표시 이름(name)을 조회한다. name 이 없으면 login 자체를 반환.
+     * PR 작성자 → Jira 사용자 매핑(Jira user search)용. 토큰 미설정/404/오류 시 empty.
+     */
+    Optional<String> getUserDisplayName(String login);
 }

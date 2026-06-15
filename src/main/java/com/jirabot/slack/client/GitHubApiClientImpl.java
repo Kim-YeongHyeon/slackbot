@@ -146,6 +146,25 @@ public class GitHubApiClientImpl implements GitHubApiClient {
         }
     }
 
+    @Override
+    public java.util.Optional<String> getUserDisplayName(String login) {
+        if (!props.enabled() || login == null || login.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            String json = githubWebClient.get()
+                    .uri("/users/{login}", login)
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode u = objectMapper.readTree(json);
+            String name = u.path("name").isNull() ? null : u.path("name").asText(null);
+            // 프로필 이름이 없으면 empty — login 으로 Jira 검색하면 오매칭 위험이 커 시도하지 않는다.
+            return (name == null || name.isBlank()) ? java.util.Optional.empty() : java.util.Optional.of(name);
+        } catch (Exception e) {
+            log.warn("GitHub getUserDisplayName {} error: {}", login, e.toString());
+            return java.util.Optional.empty();
+        }
+    }
+
     private java.time.Instant parseInstant(String iso) {
         if (iso == null || iso.isBlank()) return null;
         try {

@@ -943,8 +943,9 @@ public class SlackEventController {
                     return;
                 }
                 replyThread(event, String.format(
-                        ":white_check_mark: <%s|%s> 등록 완료 — 영업일 %.1f일 → SP %d, 상태 *%s* (현재 스프린트)",
-                        r.issueUrl(), r.issueKey(), r.businessDays(), r.storyPoint(), r.finalStatus()));
+                        ":white_check_mark: <%s|%s> 등록 완료 — 영업일 %.1f일 → SP %d, 상태 *%s*, 보고자/담당자 *%s* (현재 스프린트)",
+                        r.issueUrl(), r.issueKey(), r.businessDays(), r.storyPoint(), r.finalStatus(),
+                        r.assignee() == null ? "미지정" : r.assignee()));
             } catch (Exception e) {
                 log.error("PR import failed for {}: {}", prUrl, e.toString(), e);
                 replyThread(event, ":x: PR 등록 중 오류가 발생했어요.");

@@ -115,7 +115,9 @@ merge된 PR URL 하나로 Jira 티켓을 만들고 현재 스프린트에 완료
 - **흐름**: PR 조회(GitHub) → 내용 분석(Claude: BUG/FEATURE/OTHER + 제목/요약) → **PR 생성~merge 영업일**(주말 제외)로
   Story Point 산정(≤0.5→1, ≤1→2, ≤2→3, ≤3→5, >3→8) → 티켓 생성 → 현재 스프린트로 이동 →
   해야 할 일→진행 중→검토 중→완료까지 한번에 전환. 로컬 DB 에 완료일=merge 시각으로 적재(추이 반영).
-- **슬랙**: `@지라 pr <PR URL>` (실행자가 보고자, 매핑 없으면 토큰 소유자).
+- **보고자/담당자 = PR 작성자** (v0.0.38): PR 작성자의 GitHub 프로필 이름(없으면 login)으로 Jira user search →
+  accountId 해결 → reporter+assignee 로 지정. 못 찾으면 실행자(슬랙)→토큰 소유자 순으로 폴백.
+- **슬랙**: `@지라 pr <PR URL>`.
 - **대시보드**: PR 현황 탭 상단 입력칸 + [PR → 티켓 등록]. `POST /api/dashboard/actions/import-pr {url}`.
 - merge 안 된 PR/잘못된 URL/조회 실패는 사유와 함께 거부. PR 출처는 티켓 댓글로 기록.
 

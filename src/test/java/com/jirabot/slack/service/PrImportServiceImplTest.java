@@ -91,6 +91,9 @@ class PrImportServiceImplTest {
     @Test
     void importMergedPr_happyPath_createsTransitionsAndPersists() {
         when(gitHub.getPullRequest("CryptoLabInc", "evi", 7)).thenReturn(Optional.of(mergedPr()));
+        // PR 작성자(alice) → GitHub name → Jira accountId 해결.
+        when(gitHub.getUserDisplayName("alice")).thenReturn(Optional.of("Suyeong Park"));
+        when(jira.findAccountId("Suyeong Park")).thenReturn("acc-suyeong");
         when(claude.classify(anyString())).thenReturn(new IssueClassification(
                 IssueClassification.IssueType.BUG, 99, "decryptor 토큰 누락", "세션 만료 미처리"));
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("100", "ES2-300", "self"));
@@ -103,10 +106,11 @@ class PrImportServiceImplTest {
         assertThat(r.issueUrl()).isEqualTo("https://j.example.com/browse/ES2-300");
         assertThat(r.storyPoint()).isEqualTo(2);    // 1 영업일 → SP 2 (PR 텍스트의 99 는 무시)
         assertThat(r.finalStatus()).isEqualTo("완료");
+        assertThat(r.assignee()).isEqualTo("Suyeong Park");
 
-        // SP 는 기간값으로 덮어써져 createIssue 에 전달된다.
+        // reporter/assignee = PR 작성자 accountId 로 createIssue 호출.
         ArgumentCaptor<IssueClassification> cc = ArgumentCaptor.forClass(IssueClassification.class);
-        verify(jira).createIssue(cc.capture(), any(), any());
+        verify(jira).createIssue(cc.capture(), eq("Suyeong Park"), eq("acc-suyeong"));
         assertThat(cc.getValue().storyPoint()).isEqualTo(2);
 
         // 전체 워크플로 전환 + 스프린트 이동.
@@ -121,6 +125,25 @@ class PrImportServiceImplTest {
         verify(issueRepository).save(ec.capture());
         assertThat(ec.getValue().getCompletedAt()).isEqualTo(Instant.parse("2026-06-15T08:00:00Z"));
         assertThat(ec.getValue().getJiraCreated()).isEqualTo(Instant.parse("2026-06-12T08:00:00Z"));
+    }
+
+    @Test
+    void importMergedPr_authorUnresolved_fallsBackToInvoker() {
+        when(gitHub.getPullRequest(anyString(), anyString(), eq(7))).thenReturn(Optional.of(mergedPr()));
+        when(gitHub.getUserDisplayName("alice")).thenReturn(Optional.of("alice")); // name 없음 → login
+        when(jira.findAccountId(anyString())).thenReturn(null);                    // Jira 매칭 실패
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(Optional.of(
+                new com.jirabot.slack.entity.UserMappingEntity("U1", "Kim", "김영현", "acc-kim")));
+        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+                IssueClassification.IssueType.OTHER, 1, "t", "s"));
+        when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-301", "self"));
+        when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
+
+        var r = service.importMergedPr("https://github.com/CryptoLabInc/evi/pull/7", "U1");
+
+        assertThat(r.success()).isTrue();
+        verify(jira).createIssue(any(), eq("김영현"), eq("acc-kim"));
+        assertThat(r.assignee()).isEqualTo("김영현");
     }
 
     @Test

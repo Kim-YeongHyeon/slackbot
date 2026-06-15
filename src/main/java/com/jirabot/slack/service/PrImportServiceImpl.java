@@ -84,10 +84,20 @@ public class PrImportServiceImpl implements PrImportService {
         IssueClassification classification = new IssueClassification(
                 analyzed.type(), storyPoint, analyzed.title(), analyzed.summary());
 
-        // 보고자 — 실행한 Slack 사용자가 매핑돼 있으면 그 사람으로, 아니면 토큰 소유자.
+        // 보고자/담당자 = PR 작성자. GitHub 프로필 name(없으면 login)으로 Jira user search 해서 accountId 해결.
+        // createIssue 는 accountId 가 있으면 reporter+assignee 를 모두 그 계정으로 지정한다.
+        // 작성자를 못 찾으면 실행한 Slack 사용자 → 토큰 소유자 순으로 폴백.
         String reporterName = null;
         String reporterAccountId = null;
-        if (slackUserId != null) {
+        // GitHub 프로필 이름으로만 Jira 검색(login fuzzy 검색은 오매칭 위험이라 제외).
+        String ghName = gitHub.getUserDisplayName(pr.authorLogin()).orElse(null);
+        String authorAccountId = (ghName == null || ghName.isBlank()) ? null : jira.findAccountId(ghName);
+        if (authorAccountId != null) {
+            reporterName = ghName;
+            reporterAccountId = authorAccountId;
+        } else if (slackUserId != null) {
+            log.info("PR import: PR 작성자 '{}'(name={}) Jira 매칭 실패 → 실행자로 폴백",
+                    pr.authorLogin(), ghName);
             Optional<UserMappingEntity> mapping = userMappingRepository.findBySlackUserId(slackUserId);
             if (mapping.isPresent()) {
                 reporterName = mapping.get().getJiraDisplayName();
@@ -124,9 +134,9 @@ public class PrImportServiceImpl implements PrImportService {
             log.warn("PR import: 로컬 DB 적재 실패 {} (비치명적): {}", key, e.toString());
         }
 
-        log.info("PR import done {} -> {} sp={} status={} (PR {}/{}#{})",
-                prUrl, key, storyPoint, finalStatus, owner, repo, number);
-        return new Result(true, key, issueUrl, storyPoint, businessDays, finalStatus, null);
+        log.info("PR import done {} -> {} sp={} status={} reporter={} (PR {}/{}#{})",
+                prUrl, key, storyPoint, finalStatus, reporterName, owner, repo, number);
+        return new Result(true, key, issueUrl, storyPoint, businessDays, finalStatus, reporterName, null);
     }
 
     private IssueClassification classifyContent(PullRequestDetail pr) {

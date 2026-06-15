@@ -2,11 +2,11 @@ package com.jirabot.slack.service;
 
 public interface PrImportService {
 
-    /** PR import 결과. success=false 면 message 에 사유. */
+    /** PR import 결과. success=false 면 message 에 사유. assignee=보고자/담당자로 지정된 이름. */
     record Result(boolean success, String issueKey, String issueUrl, int storyPoint,
-                  double businessDays, String finalStatus, String message) {
+                  double businessDays, String finalStatus, String assignee, String message) {
         static Result fail(String message) {
-            return new Result(false, null, null, 0, 0, null, message);
+            return new Result(false, null, null, 0, 0, null, null, message);
         }
     }
 
