@@ -287,22 +287,14 @@ public class JiraWebhookServiceImpl implements JiraWebhookService {
         String reporterMention = resolveMention(null, reporterDisplay);
         sb.append("reporter: ").append(reporterMention).append("\n");
 
-        // STUDY: actor 멘션. webhook payload 최상위 user 노드.
-        JsonNode userNode = root.path("user");
-        String actorAccountId = userNode.path("accountId").isMissingNode() ? null : userNode.path("accountId").asText(null);
-        String actorDisplay = userNode.path("displayName").isMissingNode() ? null : userNode.path("displayName").asText(null);
-        if (userNode.isMissingNode() || userNode.isNull() || (actorAccountId == null && actorDisplay == null)) {
-            sb.append("변경자: 자동화/시스템\n");
-        } else {
-            sb.append("변경자: ").append(resolveMention(actorAccountId, actorDisplay)).append("\n");
-        }
+        // STUDY: "변경자" 라인은 제거함. 봇이 일으킨 전환(슬랙 버튼/명령)은 단일 API 토큰으로 호출돼
+        //        webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) 오해를 부른다.
+        //        버튼 클릭 시 원본 메시지는 buildTransitionedBlocks 가 실제 클릭자로 이미 갱신한다.
 
-        // STUDY: 신규 담당자 라인. 단, actor 또는 reporter 와 같으면 중복 생략.
+        // STUDY: 신규 담당자 라인. reporter 와 같으면 중복 생략.
         if (assigneeItem != null && assigneeItem.toValue() != null && !assigneeItem.toValue().isBlank()) {
             String newAssignee = assigneeItem.toValue();
-            boolean sameAsActor = newAssignee.equals(actorDisplay);
-            boolean sameAsReporter = newAssignee.equals(reporterDisplay);
-            if (!sameAsActor && !sameAsReporter) {
+            if (!newAssignee.equals(reporterDisplay)) {
                 sb.append("신규 담당자: ").append(resolveMention(null, newAssignee)).append("\n");
             }
         }

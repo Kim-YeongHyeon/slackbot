@@ -154,7 +154,7 @@ class JiraWebhookServiceImplTest {
 
         verify(slackNotifier).postThreadReply(eq("C1"), eq("1700000000.000100"),
                 argThat(text -> text.contains("상태: 해야 할 일 → 진행 중")
-                        && text.contains("변경자: Bob")
+                        && !text.contains("변경자")   // 봇 전환은 actor 가 토큰 소유자라 오해 → 라인 제거
                         && text.contains("ES2-100")));
     }
 
@@ -202,28 +202,30 @@ class JiraWebhookServiceImplTest {
 
     @Test
     void mentionMode_PLAIN_outputsPlainDisplayName() {
+        // 변경자 라인 제거 후, PLAIN 모드는 reporter 멘션에 적용된다(평문 displayName).
         rebuild(NotifyTrigger.STATUS_AND_ASSIGNEE, MentionMode.PLAIN);
-        when(issueRepository.findByIssueKey("ES2-100")).thenReturn(Optional.of(botIssue()));
-        when(userMappingRepository.findByJiraAccountId("acc-actor"))
-                .thenReturn(Optional.of(new UserMappingEntity("U-actor", "", "Bob", "acc-actor")));
+        when(issueRepository.findByIssueKey("ES2-100")).thenReturn(Optional.of(botIssue())); // reporter=Alice
+        when(userMappingRepository.findByJiraDisplayName("Alice"))
+                .thenReturn(Optional.of(new UserMappingEntity("U-alice", "", "Alice", "acc-alice")));
 
         service.process(payload("clog-15", "ES2-100", "요약", "해야 할 일", "진행 중", null, null, "Bob"));
 
         verify(slackNotifier).postThreadReply(any(), any(),
-                argThat(text -> !text.contains("<@U-actor>") && text.contains("변경자: Bob")));
+                argThat(text -> !text.contains("<@U-alice>") && text.contains("reporter: Alice")
+                        && !text.contains("변경자")));
     }
 
     @Test
-    void accountIdMapping_takesPrecedence_overDisplayName() {
+    void reporterRendersAsMention_whenDisplayNameMapped() {
         rebuild(NotifyTrigger.STATUS_AND_ASSIGNEE, MentionMode.MENTION);
-        when(issueRepository.findByIssueKey("ES2-100")).thenReturn(Optional.of(botIssue()));
-        when(userMappingRepository.findByJiraAccountId("acc-actor"))
-                .thenReturn(Optional.of(new UserMappingEntity("U-by-acc", "", "Bob", "acc-actor")));
+        when(issueRepository.findByIssueKey("ES2-100")).thenReturn(Optional.of(botIssue())); // reporter=Alice
+        when(userMappingRepository.findByJiraDisplayName("Alice"))
+                .thenReturn(Optional.of(new UserMappingEntity("U-alice", "", "Alice", "acc-alice")));
 
         service.process(payload("clog-16", "ES2-100", "요약", "해야 할 일", "진행 중", null, null, "Bob"));
 
         verify(slackNotifier).postThreadReply(any(), any(),
-                argThat(text -> text.contains("변경자: <@U-by-acc>")));
+                argThat(text -> text.contains("reporter: <@U-alice>") && !text.contains("변경자")));
     }
 
     @Test
