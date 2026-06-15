@@ -1,4 +1,29 @@
 /* 지라봇 대시보드 — fetch + Chart.js 렌더링. 빌드체인 없는 바닐라 JS. */
+
+// STUDY: 대시보드는 100% JS 렌더라, 어디서든 throw 하면 화면이 통째로 빈다(특히 Safari).
+//        전역 에러/거부를 빨간 배너로 노출해 "빈 화면 + 원인 불명"을 없앤다. 진단에도 필수.
+function showFatal(msg) {
+  try {
+    let bar = document.getElementById('fatal-bar');
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'fatal-bar';
+      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#f85149;'
+        + 'color:#fff;padding:10px 16px;font:13px/1.5 sans-serif;white-space:pre-wrap';
+      (document.body || document.documentElement).appendChild(bar);
+    }
+    bar.textContent = '대시보드 오류: ' + msg + '\n(강력 새로고침 ⌘+Shift+R 후에도 계속되면 이 메시지를 공유해주세요)';
+  } catch (_) { /* 배너조차 못 그리면 콘솔만 */ }
+}
+function reportErr(e) {
+  console.error(e);
+  showFatal(e && e.message ? e.message : String(e));
+}
+window.addEventListener('error', (e) =>
+  showFatal((e.message || 'script error') + (e.filename ? '  @' + e.filename + ':' + e.lineno : '')));
+window.addEventListener('unhandledrejection', (e) =>
+  showFatal('promise: ' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
+
 const API = '/api/dashboard';
 const charts = {};   // canvasId → Chart 인스턴스 (탭 재방문 시 destroy 후 재생성)
 const loaded = {};   // 탭별 1회 로드 플래그 (새로고침 버튼/탭 재클릭 시 갱신)
@@ -391,7 +416,7 @@ const LOADERS = { overview: loadOverview, sprint: loadSprint, trends: loadTrends
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
-  LOADERS[name]().catch(err => console.error(err));
+  LOADERS[name]().catch(reportErr);
 }
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
@@ -495,4 +520,4 @@ document.getElementById('btn-user-add').onclick = async () => {
 };
 
 /* 초기 로드 */
-loadOverview().catch(err => console.error(err));
+loadOverview().catch(reportErr);
