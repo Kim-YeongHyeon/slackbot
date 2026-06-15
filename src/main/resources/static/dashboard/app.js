@@ -2,27 +2,37 @@
 
 // STUDY: 대시보드는 100% JS 렌더라, 어디서든 throw 하면 화면이 통째로 빈다(특히 Safari).
 //        전역 에러/거부를 빨간 배너로 노출해 "빈 화면 + 원인 불명"을 없앤다. 진단에도 필수.
-function showFatal(msg) {
+function showFatal(msg, detail) {
   try {
     let bar = document.getElementById('fatal-bar');
     if (!bar) {
       bar = document.createElement('div');
       bar.id = 'fatal-bar';
       bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#f85149;'
-        + 'color:#fff;padding:10px 16px;font:13px/1.5 sans-serif;white-space:pre-wrap';
+        + 'color:#fff;padding:10px 16px;font:12px/1.5 monospace;white-space:pre-wrap;max-height:50vh;overflow:auto';
       (document.body || document.documentElement).appendChild(bar);
     }
-    bar.textContent = '대시보드 오류: ' + msg + '\n(강력 새로고침 ⌘+Shift+R 후에도 계속되면 이 메시지를 공유해주세요)';
+    bar.textContent = '대시보드 오류: ' + msg
+      + (detail ? '\n위치: ' + detail : '')
+      + '\n(이 메시지를 그대로 공유해주세요)';
   } catch (_) { /* 배너조차 못 그리면 콘솔만 */ }
+}
+// 스택의 첫 의미있는 프레임(app.js:line:col)을 뽑아 위치를 노출한다.
+function firstFrame(err) {
+  const st = err && err.stack ? String(err.stack) : '';
+  const line = st.split('\n').map(s => s.trim()).filter(s => s.includes('app.js'))[0];
+  return line || (st.split('\n')[1] || '').trim();
 }
 function reportErr(e) {
   console.error(e);
-  showFatal(e && e.message ? e.message : String(e));
+  showFatal(e && e.message ? e.message : String(e), firstFrame(e));
 }
 window.addEventListener('error', (e) =>
-  showFatal((e.message || 'script error') + (e.filename ? '  @' + e.filename + ':' + e.lineno : '')));
+  showFatal(e.message || 'script error',
+    (e.filename ? e.filename.replace(/.*\//, '') + ':' + e.lineno + ':' + e.colno : '') || firstFrame(e.error)));
 window.addEventListener('unhandledrejection', (e) =>
-  showFatal('promise: ' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
+  showFatal('promise: ' + (e.reason && e.reason.message ? e.reason.message : e.reason),
+    firstFrame(e.reason)));
 
 const API = '/api/dashboard';
 const charts = {};   // canvasId → Chart 인스턴스 (탭 재방문 시 destroy 후 재생성)
@@ -32,7 +42,12 @@ const loaded = {};   // 탭별 1회 로드 플래그 (새로고침 버튼/탭 �
 //        → 밀리초(3자리)로 잘라낸다. (2) toLocaleString 의 dateStyle/timeStyle 은 Safari 14.1 미만에서
 //        RangeError 를 던진다 → 직접 포맷한다. 대시보드가 100% JS 렌더라 여기서 throw 하면 화면이 통째로 빈다.
 function toDate(iso) {
-  return new Date(String(iso == null ? '' : iso).replace(/(\.\d{3})\d+/, '$1'));
+  // STUDY: 일부 WebKit 은 비정상 문자열에 new Date 가 throw 한다(표준은 Invalid Date 반환). 절대 throw 안 되게 감싼다.
+  try {
+    return new Date(String(iso == null ? '' : iso).replace(/(\.\d{3})\d+/, '$1'));
+  } catch (_) {
+    return new Date(NaN);
+  }
 }
 function fmtDate(iso) {
   if (!iso) return '-';
@@ -56,7 +71,8 @@ function makeChart(id, config) {
 }
 
 function rows(tableId, html) {
-  document.querySelector(`#${tableId} tbody`).innerHTML = html;
+  const tbody = document.getElementById(tableId) && document.getElementById(tableId).querySelector('tbody');
+  if (tbody) tbody.innerHTML = html;
 }
 
 function card(label, value, cls = '') {
