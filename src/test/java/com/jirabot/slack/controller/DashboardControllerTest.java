@@ -24,13 +24,16 @@ class DashboardControllerTest {
 
     private DashboardService dashboardService;
     private JiraSyncService jiraSyncService;
+    private com.jirabot.slack.service.PrImportService prImportService;
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         dashboardService = mock(DashboardService.class);
         jiraSyncService = mock(JiraSyncService.class);
-        mockMvc = standaloneSetup(new DashboardController(dashboardService, jiraSyncService)).build();
+        prImportService = mock(com.jirabot.slack.service.PrImportService.class);
+        mockMvc = standaloneSetup(
+                new DashboardController(dashboardService, jiraSyncService, prImportService)).build();
     }
 
     @Test

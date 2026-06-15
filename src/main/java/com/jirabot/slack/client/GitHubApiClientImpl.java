@@ -116,6 +116,36 @@ public class GitHubApiClientImpl implements GitHubApiClient {
         }
     }
 
+    @Override
+    public java.util.Optional<com.jirabot.slack.client.dto.PullRequestDetail> getPullRequest(
+            String owner, String repo, int number) {
+        if (!props.enabled()) {
+            return java.util.Optional.empty();
+        }
+        String o = (owner == null || owner.isBlank()) ? props.org() : owner;
+        try {
+            String json = githubWebClient.get()
+                    .uri("/repos/{owner}/{repo}/pulls/{number}", o, repo, number)
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode pr = objectMapper.readTree(json);
+            return java.util.Optional.of(new com.jirabot.slack.client.dto.PullRequestDetail(
+                    pr.path("number").asInt(number),
+                    pr.path("title").asText(""),
+                    pr.path("body").isNull() ? "" : pr.path("body").asText(""),
+                    pr.path("html_url").asText(""),
+                    pr.path("user").path("login").asText(""),
+                    pr.path("merged").asBoolean(false),
+                    parseInstant(pr.path("created_at").asText(null)),
+                    parseInstant(pr.path("merged_at").asText(null))));
+        } catch (WebClientResponseException e) {
+            log.warn("GitHub getPullRequest {}/{}#{} failed: {}", o, repo, number, e.getStatusCode());
+            return java.util.Optional.empty();
+        } catch (Exception e) {
+            log.warn("GitHub getPullRequest {}/{}#{} error: {}", o, repo, number, e.toString());
+            return java.util.Optional.empty();
+        }
+    }
+
     private java.time.Instant parseInstant(String iso) {
         if (iso == null || iso.isBlank()) return null;
         try {

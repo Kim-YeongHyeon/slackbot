@@ -1,8 +1,10 @@
 package com.jirabot.slack.client;
 
 import com.jirabot.slack.client.dto.BranchResult;
+import com.jirabot.slack.client.dto.PullRequestDetail;
 import com.jirabot.slack.client.dto.PullRequestInfo;
 import java.util.List;
+import java.util.Optional;
 
 // STUDY: GitHub 브랜치 생성을 얇은 interface 뒤에 둔다(lessons L3) — 외부 HTTP 의존을 테스트에서 목으로 대체.
 public interface GitHubApiClient {
@@ -20,4 +22,10 @@ public interface GitHubApiClient {
      *         (5xx/네트워크 오류는 빈 목록 반환 — 부분 데이터라도 표시)
      */
     List<PullRequestInfo> listOpenPullRequests(String repo);
+
+    /**
+     * {owner}/{repo} 의 단건 PR 상세를 조회한다 (merge 완료 PR → Jira 티켓 import 용).
+     * 토큰 미설정/404/권한오류/네트워크 오류 시 empty.
+     */
+    Optional<PullRequestDetail> getPullRequest(String owner, String repo, int number);
 }

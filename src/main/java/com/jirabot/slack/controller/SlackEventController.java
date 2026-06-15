@@ -20,6 +20,7 @@ import com.jirabot.slack.repository.UserMappingRepository;
 import com.jirabot.slack.service.BugNotionService;
 import com.jirabot.slack.service.BugQueryService;
 import com.jirabot.slack.service.IssueCreateService;
+import com.jirabot.slack.service.PrImportService;
 import com.jirabot.slack.service.IssueSearchService;
 import com.jirabot.slack.service.JiraSyncService;
 import com.jirabot.slack.service.ReminderSubscriptionService;
@@ -74,6 +75,7 @@ public class SlackEventController {
               `@지라 할당알림 on` / `off` / `상태` — 이슈가 나에게 할당되면 DM 알림 (기본 ON)
               `@지라 리마인더 on` / `off` / `상태` — 평일 09:00 미해결 이슈 DM 알림 토글
               `@지라 notion백필` — Jira 전체 버그를 Notion '버그 현황' DB로 동기화
+              `@지라 pr <PR URL>` — 완료(merge)된 PR을 분석해 티켓 생성·기간 기반 SP·현재 스프린트로 완료 처리
               `@지라 버그` — 최근 7일간 해결된 버그 조회
               `@지라 버그 2026.03.11` — 특정 날짜 이후 해결된 버그 조회
               `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
@@ -129,6 +131,7 @@ public class SlackEventController {
     private final SlackEventDeduplicator deduplicator;
     private final ReminderSubscriptionService reminderSubscriptionService;
     private final BugNotionService bugNotionService;
+    private final PrImportService prImportService;
     private final Set<String> allowedChannels;
 
     public SlackEventController(IssueCreateService issueCreateService,
@@ -148,6 +151,7 @@ public class SlackEventController {
                                 SlackEventDeduplicator deduplicator,
                                 ReminderSubscriptionService reminderSubscriptionService,
                                 BugNotionService bugNotionService,
+                                PrImportService prImportService,
                                 @Value("${slack.allowed-channels:}") String allowedChannelsConfig) {
         this.issueCreateService = issueCreateService;
         this.issueSearchService = issueSearchService;
@@ -166,6 +170,7 @@ public class SlackEventController {
         this.deduplicator = deduplicator;
         this.reminderSubscriptionService = reminderSubscriptionService;
         this.bugNotionService = bugNotionService;
+        this.prImportService = prImportService;
         // STUDY: 허용 채널이 비어있으면 모든 채널 허용. 쉼표 구분으로 파싱.
         if (allowedChannelsConfig == null || allowedChannelsConfig.isBlank()) {
             this.allowedChannels = Set.of();
@@ -271,6 +276,11 @@ public class SlackEventController {
         }
         if (lower.equals("notion백필") || lower.equals("notion sync") || lower.equals("노션백필")) {
             handleNotionBackfill(event);
+            return;
+        }
+        // STUDY: 완료된 PR 등록 — `@지라 pr <url>`. GitHub 링크 unfurl 로 <url|text> 형태가 올 수 있어 정제.
+        if (lower.startsWith("pr ") && cleaned.length() > 3) {
+            handlePrImport(event, cleaned.substring(3).strip());
             return;
         }
         // STUDY: 담당자 지정 — 명시적 `할당 <KEY> <이름|@멘션>` 은 스레드 안에서도 키워드 1차에서 잡혀
@@ -907,6 +917,37 @@ public class SlackEventController {
             } catch (Exception e) {
                 log.error("Notion backfill failed: {}", e.toString());
                 replyThread(event, ":x: 백필 중 오류가 발생했어요.");
+            }
+        });
+    }
+
+    // STUDY: 완료된 PR → Jira 티켓. GitHub/Claude/Jira 다단계라 느려서 async. Slack unfurl 로 들어오는
+    //        `<https://...|text>` 형태에서 URL 만 추출한다.
+    private void handlePrImport(SlackEventInner event, String arg) {
+        String url = arg;
+        int lt = url.indexOf('<');
+        if (lt >= 0) {
+            int gt = url.indexOf('>', lt);
+            String inside = gt > lt ? url.substring(lt + 1, gt) : url.substring(lt + 1);
+            int bar = inside.indexOf('|');
+            url = (bar >= 0 ? inside.substring(0, bar) : inside).strip();
+        }
+        final String prUrl = url;
+        replyThread(event, ":hourglass_flowing_sand: PR 분석 중입니다… (생성~merge 기간으로 SP 산정)");
+        final String slackUserId = event.user();
+        slackExecutor.execute(() -> {
+            try {
+                PrImportService.Result r = prImportService.importMergedPr(prUrl, slackUserId);
+                if (!r.success()) {
+                    replyThread(event, ":x: " + r.message());
+                    return;
+                }
+                replyThread(event, String.format(
+                        ":white_check_mark: <%s|%s> 등록 완료 — 영업일 %.1f일 → SP %d, 상태 *%s* (현재 스프린트)",
+                        r.issueUrl(), r.issueKey(), r.businessDays(), r.storyPoint(), r.finalStatus()));
+            } catch (Exception e) {
+                log.error("PR import failed for {}: {}", prUrl, e.toString(), e);
+                replyThread(event, ":x: PR 등록 중 오류가 발생했어요.");
             }
         });
     }

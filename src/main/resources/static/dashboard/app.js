@@ -404,6 +404,33 @@ document.getElementById('btn-resolved-toggle').onclick = () => {
 };
 document.getElementById('btn-resolved-search').onclick = loadResolvedBugs;
 document.getElementById('resolved-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadResolvedBugs(); });
+document.getElementById('btn-import-pr').onclick = async () => {
+  const url = document.getElementById('import-pr-url').value.trim();
+  const msg = document.getElementById('import-pr-msg');
+  if (!url) { msg.className = 'msg warn'; msg.textContent = 'PR URL을 입력해주세요.'; return; }
+  const btn = document.getElementById('btn-import-pr');
+  btn.disabled = true; btn.textContent = '분석 중…';
+  msg.className = 'msg'; msg.textContent = 'PR 분석 중… (GitHub 조회 + 내용 분석 + Jira 전환, 잠시만요)';
+  try {
+    const res = await fetch(API + '/actions/import-pr', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
+    });
+    const d = await res.json();
+    if (!d.success) {
+      msg.className = 'msg err'; msg.textContent = '실패: ' + (d.message || res.status);
+    } else {
+      msg.className = 'msg ok';
+      msg.innerHTML = `✅ <a href="${d.issueUrl}" target="_blank">${esc(d.issueKey)}</a> 등록 — 영업일 ${d.businessDays.toFixed(1)}일 → SP ${d.storyPoint}, 상태 <b>${esc(d.finalStatus)}</b> (현재 스프린트)`;
+      document.getElementById('import-pr-url').value = '';
+      loadPrs();
+    }
+  } catch (e) {
+    msg.className = 'msg err'; msg.textContent = '오류: ' + e.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'PR → 티켓 등록';
+  }
+};
 document.getElementById('btn-backfill').onclick = async () => {
   const btn = document.getElementById('btn-backfill');
   const msg = document.getElementById('trend-msg');

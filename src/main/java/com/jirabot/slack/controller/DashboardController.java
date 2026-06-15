@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,10 +32,13 @@ public class DashboardController {
 
     private final DashboardService dashboardService;
     private final JiraSyncService jiraSyncService;
+    private final com.jirabot.slack.service.PrImportService prImportService;
 
-    public DashboardController(DashboardService dashboardService, JiraSyncService jiraSyncService) {
+    public DashboardController(DashboardService dashboardService, JiraSyncService jiraSyncService,
+                               com.jirabot.slack.service.PrImportService prImportService) {
         this.dashboardService = dashboardService;
         this.jiraSyncService = jiraSyncService;
+        this.prImportService = prImportService;
     }
 
     @GetMapping("/summary")
@@ -108,5 +112,13 @@ public class DashboardController {
     public Map<String, String> backfillHistory() {
         log.info("Dashboard history backfill requested");
         return Map.of("result", jiraSyncService.backfillHistory());
+    }
+
+    // 완료된 PR URL → Jira 티켓 생성 + SP 산정 + 현재 스프린트로 전체 워크플로 전환.
+    @PostMapping("/actions/import-pr")
+    public com.jirabot.slack.service.PrImportService.Result importPr(@RequestBody Map<String, String> body) {
+        String url = body == null ? null : body.get("url");
+        log.info("Dashboard PR import requested: {}", url);
+        return prImportService.importMergedPr(url, null);
     }
 }
