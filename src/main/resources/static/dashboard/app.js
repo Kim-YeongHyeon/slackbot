@@ -3,7 +3,19 @@ const API = '/api/dashboard';
 const charts = {};   // canvasId → Chart 인스턴스 (탭 재방문 시 destroy 후 재생성)
 const loaded = {};   // 탭별 1회 로드 플래그 (새로고침 버튼/탭 재클릭 시 갱신)
 
-const fmtDate = (iso) => iso ? new Date(iso).toLocaleString('ko-KR', { dateStyle: 'short', timeStyle: 'short' }) : '-';
+// STUDY: Safari 호환. (1) Safari 의 Date 파서는 ISO 소수점 4자리+(마이크로/나노초)를 Invalid Date 로 본다
+//        → 밀리초(3자리)로 잘라낸다. (2) toLocaleString 의 dateStyle/timeStyle 은 Safari 14.1 미만에서
+//        RangeError 를 던진다 → 직접 포맷한다. 대시보드가 100% JS 렌더라 여기서 throw 하면 화면이 통째로 빈다.
+function toDate(iso) {
+  return new Date(String(iso == null ? '' : iso).replace(/(\.\d{3})\d+/, '$1'));
+}
+function fmtDate(iso) {
+  if (!iso) return '-';
+  const d = toDate(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${String(d.getFullYear()).slice(2)}.${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 const fmtDay = (d) => d ? d.slice(5).replace('-', '/') : '';
 const esc = (s) => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -184,7 +196,7 @@ function renderPrs() {
   const list = prData
     .filter(p => !repo || p.repo === repo)
     .filter(p => !author || p.author === author)
-    .sort((a, b) => (new Date(a[key]) - new Date(b[key])) * (dir === 'asc' ? 1 : -1));
+    .sort((a, b) => (toDate(a[key]) - toDate(b[key])) * (dir === 'asc' ? 1 : -1));
 
   const drafts = list.filter(p => p.draft).length;
   const linked = list.filter(p => p.issueKey).length;

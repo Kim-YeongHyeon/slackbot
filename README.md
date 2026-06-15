@@ -108,6 +108,13 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### Safari 대시보드 빈 화면 수정 (v0.0.40)
+
+Safari 에서 대시보드가 통째로 안 보이던 문제 — 대시보드는 100% JS 렌더라 `fmtDate` 가 throw 하면 모든 패널이
+빈다. 두 Safari 특이사항을 회피: (1) `Instant` 가 ISO 소수점 **나노초(9자리)** 로 직렬화돼(`...18.672182191Z`)
+Safari `new Date` 가 Invalid Date 처리 → 밀리초 3자리로 잘라낸 뒤 파싱. (2) `toLocaleString({dateStyle,timeStyle})`
+은 Safari 14.1 미만에서 RangeError → 직접 포맷으로 대체. 날짜 정렬도 동일 정규화(`toDate`) 적용.
+
 ### 완료 PR → 티켓 회고 등록 (v0.0.36)
 
 merge된 PR URL 하나로 Jira 티켓을 만들고 현재 스프린트에 완료 상태로 올린다.
