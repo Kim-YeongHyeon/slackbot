@@ -46,6 +46,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/user-mappings/**").permitAll()
                         // 기능요청 게시판 — 대시보드와 동일 신뢰 경계 (사내망 or Go봇 Basic Auth 터널).
                         .requestMatchers("/api/feature-requests/**").permitAll()
+                        // GitHub↔Jira 매핑 관리 (PR import 보고자/담당자 해결). 대시보드와 동일 신뢰 경계.
+                        .requestMatchers("/api/github-mappings/**").permitAll()
                         // STUDY: 웹 대시보드(정적 UI + 통계 API) — 사내망 전용 가정으로 permitAll.
                         // ngrok 터널은 Go봇(:3000)만 노출하므로 외부 인터넷에서는 이 경로에 도달 불가.
                         // 판매/외부 노출 시 이 지점에 인증(예: 토큰 필터)을 추가할 것.

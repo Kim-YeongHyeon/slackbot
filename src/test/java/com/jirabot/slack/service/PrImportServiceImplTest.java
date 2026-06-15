@@ -33,6 +33,7 @@ class PrImportServiceImplTest {
     private JiraApiClient jira;
     private IssueRepository issueRepository;
     private UserMappingRepository userMappingRepository;
+    private com.jirabot.slack.repository.GitHubUserMappingRepository gitHubUserMappingRepository;
     private PrImportServiceImpl service;
 
     @BeforeEach
@@ -42,7 +43,11 @@ class PrImportServiceImplTest {
         jira = mock(JiraApiClient.class);
         issueRepository = mock(IssueRepository.class);
         userMappingRepository = mock(UserMappingRepository.class);
+        gitHubUserMappingRepository = mock(com.jirabot.slack.repository.GitHubUserMappingRepository.class);
+        when(gitHubUserMappingRepository.findByGithubLoginIgnoreCase(anyString()))
+                .thenReturn(Optional.empty());   // 기본: 명시 매핑 없음(이름검색 경로로 진행)
         service = new PrImportServiceImpl(gitHub, claude, jira, issueRepository, userMappingRepository,
+                gitHubUserMappingRepository,
                 new JiraProperties("https://j.example.com", "u@x", "t", "ES2", null, null));
     }
 
@@ -125,6 +130,26 @@ class PrImportServiceImplTest {
         verify(issueRepository).save(ec.capture());
         assertThat(ec.getValue().getCompletedAt()).isEqualTo(Instant.parse("2026-06-15T08:00:00Z"));
         assertThat(ec.getValue().getJiraCreated()).isEqualTo(Instant.parse("2026-06-12T08:00:00Z"));
+    }
+
+    @Test
+    void importMergedPr_explicitGithubMapping_takesPrecedenceOverNameSearch() {
+        when(gitHub.getPullRequest("CryptoLabInc", "evi", 7)).thenReturn(Optional.of(mergedPr()));
+        // 명시 매핑 존재(alice) → GitHub 이름검색/findAccountId 는 건너뛴다.
+        when(gitHubUserMappingRepository.findByGithubLoginIgnoreCase("alice")).thenReturn(Optional.of(
+                new com.jirabot.slack.entity.GitHubUserMappingEntity("alice", "acc-mapped", "최아록")));
+        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+                IssueClassification.IssueType.OTHER, 1, "t", "s"));
+        when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-302", "self"));
+        when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
+
+        var r = service.importMergedPr("https://github.com/CryptoLabInc/evi/pull/7", "U1");
+
+        assertThat(r.success()).isTrue();
+        assertThat(r.assignee()).isEqualTo("최아록");
+        verify(jira).createIssue(any(), eq("최아록"), eq("acc-mapped"));
+        verify(gitHub, never()).getUserDisplayName(anyString());   // 이름검색 안 함
+        verify(jira, never()).findAccountId(anyString());
     }
 
     @Test

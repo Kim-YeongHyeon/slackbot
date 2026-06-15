@@ -39,17 +39,20 @@ public class PrImportServiceImpl implements PrImportService {
     private final JiraApiClient jira;
     private final IssueRepository issueRepository;
     private final UserMappingRepository userMappingRepository;
+    private final com.jirabot.slack.repository.GitHubUserMappingRepository gitHubUserMappingRepository;
     private final String jiraBaseUrl;
 
     public PrImportServiceImpl(GitHubApiClient gitHub, ClaudeApiClient claude, JiraApiClient jira,
                                IssueRepository issueRepository,
                                UserMappingRepository userMappingRepository,
+                               com.jirabot.slack.repository.GitHubUserMappingRepository gitHubUserMappingRepository,
                                JiraProperties jiraProps) {
         this.gitHub = gitHub;
         this.claude = claude;
         this.jira = jira;
         this.issueRepository = issueRepository;
         this.userMappingRepository = userMappingRepository;
+        this.gitHubUserMappingRepository = gitHubUserMappingRepository;
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl().replaceAll("/+$", "");
         this.jiraBaseUrl = base;
     }
@@ -89,19 +92,27 @@ public class PrImportServiceImpl implements PrImportService {
         // 작성자를 못 찾으면 실행한 Slack 사용자 → 토큰 소유자 순으로 폴백.
         String reporterName = null;
         String reporterAccountId = null;
-        // GitHub 프로필 이름으로만 Jira 검색(login fuzzy 검색은 오매칭 위험이라 제외).
-        String ghName = gitHub.getUserDisplayName(pr.authorLogin()).orElse(null);
-        String authorAccountId = (ghName == null || ghName.isBlank()) ? null : jira.findAccountId(ghName);
-        if (authorAccountId != null) {
-            reporterName = ghName;
-            reporterAccountId = authorAccountId;
-        } else if (slackUserId != null) {
-            log.info("PR import: PR 작성자 '{}'(name={}) Jira 매칭 실패 → 실행자로 폴백",
-                    pr.authorLogin(), ghName);
-            Optional<UserMappingEntity> mapping = userMappingRepository.findBySlackUserId(slackUserId);
-            if (mapping.isPresent()) {
-                reporterName = mapping.get().getJiraDisplayName();
-                reporterAccountId = mapping.get().getJiraAccountId();
+        // 1순위: 명시적 GitHub→Jira 매핑(github_user_mappings). 가장 정확.
+        var ghMapping = gitHubUserMappingRepository.findByGithubLoginIgnoreCase(pr.authorLogin());
+        if (ghMapping.isPresent()) {
+            reporterName = ghMapping.get().getJiraDisplayName();
+            reporterAccountId = ghMapping.get().getJiraAccountId();
+        } else {
+            // 2순위: GitHub 프로필 이름으로 Jira 검색(login fuzzy 검색은 오매칭 위험이라 제외).
+            String ghName = gitHub.getUserDisplayName(pr.authorLogin()).orElse(null);
+            String authorAccountId = (ghName == null || ghName.isBlank()) ? null : jira.findAccountId(ghName);
+            if (authorAccountId != null) {
+                reporterName = ghName;
+                reporterAccountId = authorAccountId;
+            } else if (slackUserId != null) {
+                // 3순위: 실행한 Slack 사용자.
+                log.info("PR import: PR 작성자 '{}'(name={}) Jira 매칭 실패 → 실행자로 폴백",
+                        pr.authorLogin(), ghName);
+                Optional<UserMappingEntity> mapping = userMappingRepository.findBySlackUserId(slackUserId);
+                if (mapping.isPresent()) {
+                    reporterName = mapping.get().getJiraDisplayName();
+                    reporterAccountId = mapping.get().getJiraAccountId();
+                }
             }
         }
 

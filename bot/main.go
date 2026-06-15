@@ -57,6 +57,8 @@ func main() {
 			"/api/dashboard/",                          // 통계/응답시간/동기화 API
 			"/api/user-mappings", "/api/user-mappings/", // 사용자 관리 탭
 			"/api/feature-requests", "/api/feature-requests/", // 기능요청 게시판
+			"/api/github-mappings", "/api/github-mappings/", // GitHub↔Jira 매핑
+
 			"/actuator/health", // 봇 상태 탭의 서버 health 카드
 		} {
 			mux.Handle(p, dash)
