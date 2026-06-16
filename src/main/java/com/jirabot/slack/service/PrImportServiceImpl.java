@@ -58,7 +58,7 @@ public class PrImportServiceImpl implements PrImportService {
     }
 
     @Override
-    public Result importMergedPr(String prUrl, String slackUserId) {
+    public Result importPr(String prUrl, String slackUserId) {
         Matcher m = prUrl == null ? null : PR_URL.matcher(prUrl.trim());
         if (m == null || !m.find()) {
             return Result.fail("PR URL 형식이 올바르지 않습니다. 예: https://github.com/조직/repo/pull/123");
@@ -72,14 +72,25 @@ public class PrImportServiceImpl implements PrImportService {
             return Result.fail("PR 을 가져오지 못했습니다 (토큰 권한/URL 확인): " + owner + "/" + repo + "#" + number);
         }
         PullRequestDetail pr = prOpt.get();
-        if (!pr.merged() || pr.mergedAt() == null) {
-            return Result.fail("아직 merge 되지 않은 PR 입니다. 완료(merge)된 PR 만 등록할 수 있어요.");
-        }
         if (pr.createdAt() == null) {
             return Result.fail("PR 생성일을 확인할 수 없습니다.");
         }
 
-        double businessDays = businessDaysBetween(pr.createdAt(), pr.mergedAt());
+        // PR 상태 → 전환 목표 상태. SP 산정 종료시점도 함께 결정(merged=merge시각, open=현재).
+        String targetStatus;
+        Instant spEnd;
+        if (pr.merged()) {
+            targetStatus = "완료";
+            spEnd = pr.mergedAt() != null ? pr.mergedAt() : Instant.now();
+        } else if (pr.draft()) {
+            targetStatus = "진행 중";
+            spEnd = Instant.now();
+        } else {
+            targetStatus = "검토 중";
+            spEnd = Instant.now();
+        }
+
+        double businessDays = businessDaysBetween(pr.createdAt(), spEnd);
         int storyPoint = storyPointForBusinessDays(businessDays);
 
         // 내용 분석 — 제목/본문으로 BUG/FEATURE/OTHER + 제목/요약 생성. SP 는 PR 기간 값으로 덮어쓴다.
@@ -127,26 +138,28 @@ public class PrImportServiceImpl implements PrImportService {
         String issueUrl = jiraBaseUrl.isEmpty() ? key : jiraBaseUrl + "/browse/" + key;
 
         // PR 출처를 댓글로 남겨 추적성 확보 (실패해도 비치명적).
+        String prState = pr.merged() ? "merged" : (pr.draft() ? "open(draft)" : "open(ready)");
+        String endLabel = pr.merged() && pr.mergedAt() != null ? "merge " + pr.mergedAt() : "현재(미완료)";
         try {
             jira.addComment(key, String.format(
-                    "PR import: %s\n생성 %s → merge %s (영업일 %.1f일 → SP %d)",
-                    pr.htmlUrl(), pr.createdAt(), pr.mergedAt(), businessDays, storyPoint));
+                    "PR import: %s [%s]\n생성 %s → %s (영업일 %.1f일 → SP %d)",
+                    pr.htmlUrl(), prState, pr.createdAt(), endLabel, businessDays, storyPoint));
         } catch (Exception e) {
             log.debug("PR import comment skipped {}: {}", key, e.toString());
         }
 
-        // 전체 워크플로 한번에: 해야 할 일 → 진행 중 → (스프린트 이동) → 검토 중 → 완료.
-        String finalStatus = runFullWorkflow(key);
+        // 워크플로 전환: 해야 할 일 → 진행 중 → (스프린트 이동) → [검토 중] → [완료]. 목표 상태에서 멈춘다.
+        String finalStatus = runWorkflow(key, targetStatus);
 
-        // 로컬 DB 적재 — 추이/통계에 바로 반영. 작업 기간(PR 생성~merge)을 그대로 저장.
+        // 로컬 DB 적재 — 추이/통계에 바로 반영. 완료면 completedAt=merge 시각.
         try {
             persist(pr, key, classification, finalStatus);
         } catch (Exception e) {
             log.warn("PR import: 로컬 DB 적재 실패 {} (비치명적): {}", key, e.toString());
         }
 
-        log.info("PR import done {} -> {} sp={} status={} reporter={} (PR {}/{}#{})",
-                prUrl, key, storyPoint, finalStatus, reporterName, owner, repo, number);
+        log.info("PR import done {} -> {} state={} sp={} status={} reporter={} (PR {}/{}#{})",
+                prUrl, key, prState, storyPoint, finalStatus, reporterName, owner, repo, number);
         return new Result(true, key, issueUrl, storyPoint, businessDays, finalStatus, reporterName, null);
     }
 
@@ -166,14 +179,28 @@ public class PrImportServiceImpl implements PrImportService {
                 pr.body() == null ? "" : pr.body());
     }
 
-    // 전환은 각 단계 best-effort. 마지막으로 성공한 상태를 반환.
-    private String runFullWorkflow(String key) {
+    // STUDY: 워크플로 순서 — 해야 할 일(1) → 진행 중(2) → 검토 중(3) → 완료(4). target 까지만 전환하고 멈춘다.
+    //        각 전환은 best-effort. 스프린트 이동은 "진행 중" 단계에서 수행(어떤 target 이든 스프린트엔 들어간다).
+    private static int rank(String status) {
+        return switch (status) {
+            case "해야 할 일" -> 1;
+            case "진행 중" -> 2;
+            case "검토 중" -> 3;
+            case "완료" -> 4;
+            default -> 0;
+        };
+    }
+
+    private String runWorkflow(String key, String targetStatus) {
+        int target = rank(targetStatus);
         String status = "Backlog";
         if (jira.transitionIssue(key, "해야 할 일")) status = "해야 할 일";
-        if (jira.transitionIssue(key, "진행 중")) status = "진행 중";
-        jira.moveToActiveSprint(key);
-        if (jira.transitionIssue(key, "검토 중")) status = "검토 중";
-        if (jira.transitionIssue(key, "완료")) status = "완료";
+        if (target >= rank("진행 중")) {
+            if (jira.transitionIssue(key, "진행 중")) status = "진행 중";
+            jira.moveToActiveSprint(key);
+        }
+        if (target >= rank("검토 중") && jira.transitionIssue(key, "검토 중")) status = "검토 중";
+        if (target >= rank("완료") && jira.transitionIssue(key, "완료")) status = "완료";
         return status;
     }
 

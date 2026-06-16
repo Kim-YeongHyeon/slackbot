@@ -89,12 +89,12 @@ class PrImportServiceImplTest {
 
     private PullRequestDetail mergedPr() {
         return new PullRequestDetail(7, "decryptor token 누락 수정", "원인: 세션 만료. 핸들러 추가.",
-                "https://github.com/CryptoLabInc/evi/pull/7", "alice", true,
-                Instant.parse("2026-06-12T08:00:00Z"), Instant.parse("2026-06-15T08:00:00Z")); // 1 영업일
+                "https://github.com/CryptoLabInc/evi/pull/7", "alice", true, false,
+                Instant.parse("2026-06-12T08:00:00Z"), Instant.parse("2026-06-15T08:00:00Z")); // merged, 1 영업일
     }
 
     @Test
-    void importMergedPr_happyPath_createsTransitionsAndPersists() {
+    void importPr_happyPath_createsTransitionsAndPersists() {
         when(gitHub.getPullRequest("CryptoLabInc", "evi", 7)).thenReturn(Optional.of(mergedPr()));
         // PR 작성자(alice) → GitHub name → Jira accountId 해결.
         when(gitHub.getUserDisplayName("alice")).thenReturn(Optional.of("Suyeong Park"));
@@ -104,7 +104,7 @@ class PrImportServiceImplTest {
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("100", "ES2-300", "self"));
         when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
 
-        var r = service.importMergedPr("https://github.com/CryptoLabInc/evi/pull/7", "U1");
+        var r = service.importPr("https://github.com/CryptoLabInc/evi/pull/7", "U1");
 
         assertThat(r.success()).isTrue();
         assertThat(r.issueKey()).isEqualTo("ES2-300");
@@ -133,7 +133,7 @@ class PrImportServiceImplTest {
     }
 
     @Test
-    void importMergedPr_explicitGithubMapping_takesPrecedenceOverNameSearch() {
+    void importPr_explicitGithubMapping_takesPrecedenceOverNameSearch() {
         when(gitHub.getPullRequest("CryptoLabInc", "evi", 7)).thenReturn(Optional.of(mergedPr()));
         // 명시 매핑 존재(alice) → GitHub 이름검색/findAccountId 는 건너뛴다.
         when(gitHubUserMappingRepository.findByGithubLoginIgnoreCase("alice")).thenReturn(Optional.of(
@@ -143,7 +143,7 @@ class PrImportServiceImplTest {
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-302", "self"));
         when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
 
-        var r = service.importMergedPr("https://github.com/CryptoLabInc/evi/pull/7", "U1");
+        var r = service.importPr("https://github.com/CryptoLabInc/evi/pull/7", "U1");
 
         assertThat(r.success()).isTrue();
         assertThat(r.assignee()).isEqualTo("최아록");
@@ -153,7 +153,7 @@ class PrImportServiceImplTest {
     }
 
     @Test
-    void importMergedPr_authorUnresolved_fallsBackToInvoker() {
+    void importPr_authorUnresolved_fallsBackToInvoker() {
         when(gitHub.getPullRequest(anyString(), anyString(), eq(7))).thenReturn(Optional.of(mergedPr()));
         when(gitHub.getUserDisplayName("alice")).thenReturn(Optional.of("alice")); // name 없음 → login
         when(jira.findAccountId(anyString())).thenReturn(null);                    // Jira 매칭 실패
@@ -164,7 +164,7 @@ class PrImportServiceImplTest {
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-301", "self"));
         when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
 
-        var r = service.importMergedPr("https://github.com/CryptoLabInc/evi/pull/7", "U1");
+        var r = service.importPr("https://github.com/CryptoLabInc/evi/pull/7", "U1");
 
         assertThat(r.success()).isTrue();
         verify(jira).createIssue(any(), eq("김영현"), eq("acc-kim"));
@@ -172,30 +172,62 @@ class PrImportServiceImplTest {
     }
 
     @Test
-    void importMergedPr_notMerged_rejected() {
-        PullRequestDetail open = new PullRequestDetail(7, "t", "b", "url", "alice", false,
-                Instant.parse("2026-06-12T08:00:00Z"), null);
+    void importPr_openReadyPr_stopsAtInReview() {
+        PullRequestDetail open = new PullRequestDetail(7, "기능 추가", "본문",
+                "https://github.com/CryptoLabInc/evi/pull/7", "alice", false, false,
+                Instant.parse("2026-06-12T08:00:00Z"), null);   // open, not draft
         when(gitHub.getPullRequest(anyString(), anyString(), eq(7))).thenReturn(Optional.of(open));
+        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+                IssueClassification.IssueType.FEATURE, 1, "기능", "요약"));
+        when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-310", "self"));
+        when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
 
-        var r = service.importMergedPr("https://github.com/CryptoLabInc/evi/pull/7", null);
+        var r = service.importPr("https://github.com/CryptoLabInc/evi/pull/7", null);
 
-        assertThat(r.success()).isFalse();
-        assertThat(r.message()).contains("merge");
-        verify(jira, never()).createIssue(any(), any(), any());
+        assertThat(r.success()).isTrue();
+        assertThat(r.finalStatus()).isEqualTo("검토 중");
+        verify(jira).transitionIssue("ES2-310", "진행 중");
+        verify(jira).transitionIssue("ES2-310", "검토 중");
+        verify(jira).moveToActiveSprint("ES2-310");
+        verify(jira, never()).transitionIssue("ES2-310", "완료");   // 열린 PR → 완료까지 안 감
+        ArgumentCaptor<IssueEntity> ec = ArgumentCaptor.forClass(IssueEntity.class);
+        verify(issueRepository).save(ec.capture());
+        assertThat(ec.getValue().getCompletedAt()).isNull();       // 미완료 → completedAt 없음
     }
 
     @Test
-    void importMergedPr_badUrl_rejected() {
-        var r = service.importMergedPr("https://example.com/not-a-pr", null);
+    void importPr_draftPr_stopsAtInProgress() {
+        PullRequestDetail draft = new PullRequestDetail(7, "WIP", "본문",
+                "https://github.com/CryptoLabInc/evi/pull/7", "alice", false, true,
+                Instant.parse("2026-06-12T08:00:00Z"), null);   // open, draft
+        when(gitHub.getPullRequest(anyString(), anyString(), eq(7))).thenReturn(Optional.of(draft));
+        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+                IssueClassification.IssueType.FEATURE, 1, "WIP", "요약"));
+        when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-311", "self"));
+        when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
+
+        var r = service.importPr("https://github.com/CryptoLabInc/evi/pull/7", null);
+
+        assertThat(r.success()).isTrue();
+        assertThat(r.finalStatus()).isEqualTo("진행 중");
+        verify(jira).transitionIssue("ES2-311", "진행 중");
+        verify(jira).moveToActiveSprint("ES2-311");
+        verify(jira, never()).transitionIssue("ES2-311", "검토 중");   // draft → 진행 중에서 멈춤
+        verify(jira, never()).transitionIssue("ES2-311", "완료");
+    }
+
+    @Test
+    void importPr_badUrl_rejected() {
+        var r = service.importPr("https://example.com/not-a-pr", null);
         assertThat(r.success()).isFalse();
         verify(gitHub, never()).getPullRequest(anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
-    void importMergedPr_prNotFound_rejected() {
+    void importPr_prNotFound_rejected() {
         when(gitHub.getPullRequest(anyString(), anyString(), org.mockito.ArgumentMatchers.anyInt()))
                 .thenReturn(Optional.empty());
-        var r = service.importMergedPr("https://github.com/CryptoLabInc/evi/pull/7", null);
+        var r = service.importPr("https://github.com/CryptoLabInc/evi/pull/7", null);
         assertThat(r.success()).isFalse();
         verify(jira, never()).createIssue(any(), any(), any());
     }

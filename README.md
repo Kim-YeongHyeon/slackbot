@@ -108,6 +108,13 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### PR 상태별 워크플로 전환 (v0.0.45)
+
+PR-import 가 열린 PR 도 받는다. PR 상태에 따라 전환 목표를 달리한다: **merged → 완료**, **open(ready) → 검토 중**,
+**open(draft) → 진행 중**. 어떤 상태든 현재 스프린트로 이동하고, SP 는 생성→(merge 또는 현재) 영업일로 산정한다.
+완료가 아니면 `completedAt` 미설정(추이에서 미해결로 집계). (`importMergedPr` → `importPr` 로 이름 변경,
+`PullRequestDetail.draft` 추가.)
+
 ### 자연어 PR 요청 라우팅 (v0.0.44)
 
 `@지라 <PR URL> 관련 티켓 만들어줘` 처럼 PR URL 이 섞인 자연어가 일반 이슈 생성으로 빠져 문장 전체가 제목이

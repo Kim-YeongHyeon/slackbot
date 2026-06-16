@@ -11,12 +11,15 @@ public interface PrImportService {
     }
 
     /**
-     * 완료(merge)된 PR URL 을 받아 Jira 티켓을 만들고, 내용 분석으로 분류/제목/요약을 채운 뒤,
-     * PR 생성→merge 영업일로 Story Point 를 산정하고, 현재 스프린트로 옮겨
-     * 해야 할 일→진행 중→검토 중→완료까지 한번에 전환한다.
+     * PR URL 을 받아 Jira 티켓을 만들고, 내용 분석으로 분류/제목/요약을 채운 뒤 현재 스프린트로 옮긴다.
+     * PR 상태에 따라 전환 목표가 다르다:
+     *   - merged          → 해야 할 일→진행 중→검토 중→완료
+     *   - open & ready    → 해야 할 일→진행 중→검토 중
+     *   - open & draft    → 해야 할 일→진행 중
+     * Story Point 는 생성→(merge 또는 현재) 영업일로 산정한다.
      *
      * @param prUrl       https://github.com/{owner}/{repo}/pull/{number}
-     * @param slackUserId 명령 실행자 Slack ID (보고자 매핑용, 없으면 null → 토큰 소유자)
+     * @param slackUserId 명령 실행자 Slack ID (보고자 매핑 폴백용, 없으면 null → 토큰 소유자)
      */
-    Result importMergedPr(String prUrl, String slackUserId);
+    Result importPr(String prUrl, String slackUserId);
 }

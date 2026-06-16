@@ -135,6 +135,7 @@ public class GitHubApiClientImpl implements GitHubApiClient {
                     pr.path("html_url").asText(""),
                     pr.path("user").path("login").asText(""),
                     pr.path("merged").asBoolean(false),
+                    pr.path("draft").asBoolean(false),
                     parseInstant(pr.path("created_at").asText(null)),
                     parseInstant(pr.path("merged_at").asText(null))));
         } catch (WebClientResponseException e) {

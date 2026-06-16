@@ -75,7 +75,7 @@ public class SlackEventController {
               `@지라 할당알림 on` / `off` / `상태` — 이슈가 나에게 할당되면 DM 알림 (기본 ON)
               `@지라 리마인더 on` / `off` / `상태` — 평일 09:00 미해결 이슈 DM 알림 토글
               `@지라 notion백필` — Jira 전체 버그를 Notion '버그 현황' DB로 동기화
-              `@지라 pr <PR URL>` — 완료(merge)된 PR을 분석해 티켓 생성·기간 기반 SP·현재 스프린트로 완료 처리
+              `@지라 pr <PR URL>` (또는 PR 링크가 포함된 문장) — PR 내용을 분석해 티켓 생성·기간 기반 SP·현재 스프린트로 이동. 상태별: merged→완료, open→검토 중, draft→진행 중
               `@지라 버그` — 최근 7일간 해결된 버그 조회
               `@지라 버그 2026.03.11` — 특정 날짜 이후 해결된 버그 조회
               `@지라 sync` — Jira 이슈를 로컬 DB에 동기화
@@ -939,11 +939,11 @@ public class SlackEventController {
             return;
         }
         final String prUrl = m.group();
-        replyThread(event, ":hourglass_flowing_sand: PR 내용을 읽고 티켓을 만드는 중입니다… (생성~merge 기간으로 SP 산정)");
+        replyThread(event, ":hourglass_flowing_sand: PR 내용을 읽고 티켓을 만드는 중입니다… (PR 상태에 맞춰 진행 중/검토 중/완료까지 전환)");
         final String slackUserId = event.user();
         slackExecutor.execute(() -> {
             try {
-                PrImportService.Result r = prImportService.importMergedPr(prUrl, slackUserId);
+                PrImportService.Result r = prImportService.importPr(prUrl, slackUserId);
                 if (!r.success()) {
                     replyThread(event, ":x: " + r.message());
                     return;

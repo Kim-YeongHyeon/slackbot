@@ -119,6 +119,6 @@ public class DashboardController {
     public com.jirabot.slack.service.PrImportService.Result importPr(@RequestBody Map<String, String> body) {
         String url = body == null ? null : body.get("url");
         log.info("Dashboard PR import requested: {}", url);
-        return prImportService.importMergedPr(url, null);
+        return prImportService.importPr(url, null);
     }
 }
