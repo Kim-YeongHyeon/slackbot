@@ -107,6 +107,10 @@ public class SlackEventController {
     private static final java.util.regex.Pattern DATE_PATTERN =
             java.util.regex.Pattern.compile("(\\d{4})[.\\-/](\\d{1,2})[.\\-/](\\d{1,2})");
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    // STUDY: 메시지 어디에 있든(자연어/unfurl <url|label>) GitHub PR URL 을 잡는다. owner/repo 세그먼트는
+    //        '/', 공백, '|', '<', '>' 를 제외해 unfurl 마크업 안에서도 정확히 끊긴다.
+    private static final java.util.regex.Pattern GITHUB_PR_URL =
+            java.util.regex.Pattern.compile("https?://github\\.com/[^/\\s|<>]+/[^/\\s|<>]+/pull/\\d+");
 
     // STUDY: 순수 인사말만 매칭(인사 + 선택적 문장부호/ㅋㅋㅎㅎ). "안녕 못하는 버그" 처럼 뒤에 내용이 붙으면
     //        매칭되지 않아 이슈 생성 흐름으로 넘어간다. 인사면 가볍게 받아주고 사용법을 안내한다.
@@ -278,9 +282,12 @@ public class SlackEventController {
             handleNotionBackfill(event);
             return;
         }
-        // STUDY: 완료된 PR 등록 — `@지라 pr <url>`. GitHub 링크 unfurl 로 <url|text> 형태가 올 수 있어 정제.
-        if (lower.startsWith("pr ") && cleaned.length() > 3) {
-            handlePrImport(event, cleaned.substring(3).strip());
+        // STUDY: 완료된 PR 등록. `@지라 pr <url>` 뿐 아니라 "이 PR(<url>) 관련 티켓 만들어줘" 같은 자연어에
+        //        PR URL 이 섞여 와도 PR-import 로 보낸다(아니면 문장 전체가 이슈 제목이 되는 오작동). URL 추출은
+        //        handlePrImport 가 정규식으로 처리(unfurl <url|label> 포함).
+        if (GITHUB_PR_URL.matcher(cleaned).find()
+                || (lower.startsWith("pr ") && cleaned.length() > 3)) {
+            handlePrImport(event, cleaned);
             return;
         }
         // STUDY: 담당자 지정 — 명시적 `할당 <KEY> <이름|@멘션>` 은 스레드 안에서도 키워드 1차에서 잡혀
@@ -924,16 +931,15 @@ public class SlackEventController {
     // STUDY: 완료된 PR → Jira 티켓. GitHub/Claude/Jira 다단계라 느려서 async. Slack unfurl 로 들어오는
     //        `<https://...|text>` 형태에서 URL 만 추출한다.
     private void handlePrImport(SlackEventInner event, String arg) {
-        String url = arg;
-        int lt = url.indexOf('<');
-        if (lt >= 0) {
-            int gt = url.indexOf('>', lt);
-            String inside = gt > lt ? url.substring(lt + 1, gt) : url.substring(lt + 1);
-            int bar = inside.indexOf('|');
-            url = (bar >= 0 ? inside.substring(0, bar) : inside).strip();
+        // 자연어/unfurl(<url|label>) 어디에 있든 첫 GitHub PR URL 을 정규식으로 추출.
+        java.util.regex.Matcher m = arg == null ? null : GITHUB_PR_URL.matcher(arg);
+        if (m == null || !m.find()) {
+            replyThread(event, ":mag: GitHub PR URL 을 찾지 못했어요. 예: "
+                    + "`@지라 https://github.com/조직/repo/pull/123 관련 티켓 만들어줘`");
+            return;
         }
-        final String prUrl = url;
-        replyThread(event, ":hourglass_flowing_sand: PR 분석 중입니다… (생성~merge 기간으로 SP 산정)");
+        final String prUrl = m.group();
+        replyThread(event, ":hourglass_flowing_sand: PR 내용을 읽고 티켓을 만드는 중입니다… (생성~merge 기간으로 SP 산정)");
         final String slackUserId = event.user();
         slackExecutor.execute(() -> {
             try {

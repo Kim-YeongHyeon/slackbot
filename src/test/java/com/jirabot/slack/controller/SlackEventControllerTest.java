@@ -2,6 +2,8 @@ package com.jirabot.slack.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -114,6 +116,42 @@ class SlackEventControllerTest {
                 .andExpect(status().isOk());
 
         verify(reminderSubscriptionService).enable("U1");
+    }
+
+    @Test
+    void naturalLanguageWithPrUrl_routesToPrImport_notIssueCreation() throws Exception {
+        // "이 PR 관련 티켓 만들어줘" 같은 문장에 PR URL 이 섞여 와도 PR-import 로 가야 한다(문장이 제목 되면 안 됨).
+        when(prImportService.importMergedPr(anyString(), any())).thenReturn(
+                new com.jirabot.slack.service.PrImportService.Result(
+                        true, "ES2-1", "https://j/browse/ES2-1", 2, 1.0, "완료", "Suyeong", null));
+        String url = "https://github.com/CryptoLabInc/envector-msa/pull/2005";
+        String body = appMentionEvent("<@U0BOT> " + url + " 관련해서 티켓 하나 만들어줘", freshTs());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        verify(prImportService).importMergedPr(eq(url), eq("U1"));
+        verify(issueCreateService, never()).createFromSlackText(any(), any());
+        verify(issueCreateService, never()).createFromSlackText(any());
+    }
+
+    @Test
+    void prUrlInsideSlackUnfurl_isExtracted() throws Exception {
+        // Slack 이 URL 을 <url|label> 로 unfurl 해도 URL 만 추출해 import.
+        when(prImportService.importMergedPr(anyString(), any())).thenReturn(
+                new com.jirabot.slack.service.PrImportService.Result(
+                        true, "ES2-2", "u", 1, 0.5, "완료", "Kim", null));
+        String url = "https://github.com/CryptoLabInc/evi/pull/7";
+        String body = appMentionEvent("<@U0BOT> <" + url + "|evi#7> 티켓 만들어줘", freshTs());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk());
+
+        verify(prImportService).importMergedPr(eq(url), eq("U1"));
     }
 
     @Test

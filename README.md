@@ -108,6 +108,13 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 자연어 PR 요청 라우팅 (v0.0.44)
+
+`@지라 <PR URL> 관련 티켓 만들어줘` 처럼 PR URL 이 섞인 자연어가 일반 이슈 생성으로 빠져 문장 전체가 제목이
+되던 문제. 메시지에 GitHub PR URL 이 있으면(unfurl `<url|label>` 포함) `pr ` 명령이 아니어도 PR-import 로
+라우팅한다. URL 은 정규식으로 추출. (PR-import 는 PR 내용을 읽어 분류/제목/요약 생성 + 기간 기반 SP + 현재
+스프린트로 전환.)
+
 ### PR 현황 누락 수정 — githubWebClient 버퍼 (v0.0.43)
 
 PR 이 많은 repo(envector-msa, 열린 PR 20개 ≈ 470KB)가 PR 탭에서 통째로 빠지던 버그. githubWebClient 의
