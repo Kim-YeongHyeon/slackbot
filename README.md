@@ -108,6 +108,12 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### PR 현황 누락 수정 — githubWebClient 버퍼 (v0.0.43)
+
+PR 이 많은 repo(envector-msa, 열린 PR 20개 ≈ 470KB)가 PR 탭에서 통째로 빠지던 버그. githubWebClient 의
+기본 인메모리 버퍼(256KB)를 응답이 넘겨 `DataBufferLimitException` → `listOpenPullRequests` 가 빈 목록 반환
+(에러 아닌 200 OK 라 inaccessible 로도 안 잡힘). 버퍼 8MB 로 상향(jiraWebClient 와 동일, v0.0.34 와 같은 부류).
+
 ### Safari 빈 화면 — 캐시 무력화 + 전역 에러 노출 (v0.0.41)
 
 v0.0.40 후에도 Safari 빈 화면이 지속 보고됨. 두 가지 추가 조치: (1) 정적 자산에 버전 쿼리(`app.js?v=…`)로

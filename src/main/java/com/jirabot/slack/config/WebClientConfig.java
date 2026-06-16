@@ -55,6 +55,9 @@ public class WebClientConfig {
                 .baseUrl(props.apiBaseUrl())
                 .defaultHeader(HttpHeaders.ACCEPT, "application/vnd.github+json")
                 .defaultHeader("X-GitHub-Api-Version", "2022-11-28")
+                // STUDY: PR 이 많은 repo(예: envector-msa 20개 ≈ 470KB)의 PR 목록이 기본 256KB 버퍼를 넘겨
+                //        DataBufferLimitException 으로 조용히 빈 목록이 되던 버그 → 8MB 로 상향(jiraWebClient 와 동일).
+                .codecs(c -> c.defaultCodecs().maxInMemorySize(8 * 1024 * 1024))
                 .clientConnector(new ReactorClientHttpConnector(httpClient(15)));
         if (props.token() != null && !props.token().isBlank()) {
             builder.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + props.token());
