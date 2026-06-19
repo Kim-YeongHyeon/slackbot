@@ -110,20 +110,39 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         return classify(rawText, null);
     }
 
+    // 한 번의 시도 결과. RETRYABLE = 일시적 실패(재시도 가치 있음), TIMEOUT = 재시도 금지(지연 2배 방지).
+    private enum Outcome { OK, RETRYABLE, TIMEOUT }
+    private record Attempt(Outcome outcome, IssueClassification result) {}
+
     @Override
     public IssueClassification classify(String rawText, IntentResult intentHint) {
         if (rawText == null || rawText.isBlank()) {
             return IssueClassification.fallback(rawText);
         }
+        // STUDY: Sonnet CLI 가 간헐적으로 exit≠0/빈출력/파싱실패로 떨어진다(원문이 제목 되는 fallback 유발).
+        //        타임아웃이 아닌 일시적 실패는 1회 재시도. 타임아웃은 재시도하면 최악 지연이 2배라 즉시 fallback.
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            Attempt a = attemptClassify(rawText, intentHint);
+            if (a.outcome() == Outcome.OK) {
+                return a.result();
+            }
+            if (a.outcome() == Outcome.TIMEOUT) {
+                break;
+            }
+            if (attempt == 1) {
+                log.info("Claude classify 일시 실패 → 1회 재시도");
+            }
+        }
+        return fallbackForIntent(rawText, intentHint);
+    }
+
+    private Attempt attemptClassify(String rawText, IntentResult intentHint) {
         try {
             // STUDY: stdin 으로 프롬프트 전달 — argv 는 shell 이스케이프/플랫폼별 길이 제한 이슈 회피.
-            //        한국어/개행/따옴표가 섞여도 byte-safe.
             //        skill 파일이 있으면 시스템 프롬프트는 --system-prompt-file 로, stdin 은 사용자 입력만.
             boolean useFile = promptFileExists(CLASSIFIER_PROMPT_FILE);
             List<String> command = buildCommand(props.model(), useFile ? CLASSIFIER_PROMPT_FILE : null);
 
-            // STUDY: intentHint 가 있으면 INTENT HINT 블록을 삽입하여 Haiku 분류 결과를 Sonnet 에게 전달한다.
-            //        confidence 가 낮거나 hint 가 없으면 기존 포맷 유지.
             String hintBlock = (intentHint != null && intentHint.intent() != null && !intentHint.intent().isBlank())
                     ? "INTENT HINT: " + intentHint.intent() + " (confidence: " + intentHint.confidence() + ")\n---\n"
                     : "";
@@ -131,27 +150,40 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
                     ? hintBlock + "USER INPUT:\n" + rawText
                     : SYSTEM_PROMPT + "\n\n---\n" + hintBlock + "USER INPUT:\n" + rawText;
 
-            Duration timeout = Duration.ofSeconds(props.timeoutSeconds());
-
-            ProcessRunner.Result result = processRunner.run(command, stdin, timeout);
+            ProcessRunner.Result result =
+                    processRunner.run(command, stdin, Duration.ofSeconds(props.timeoutSeconds()));
 
             if (result.timedOut()) {
                 log.warn("Claude CLI timed out after {}s", props.timeoutSeconds());
-                return IssueClassification.fallback(rawText);
+                return new Attempt(Outcome.TIMEOUT, null);
             }
             if (result.exitCode() != 0) {
                 log.warn("Claude CLI exited with code={} stderr={}", result.exitCode(), truncate(result.stderr()));
-                return IssueClassification.fallback(rawText);
+                return new Attempt(Outcome.RETRYABLE, null);
             }
             if (result.stdout() == null || result.stdout().isBlank()) {
                 log.warn("Claude CLI returned empty stdout");
-                return IssueClassification.fallback(rawText);
+                return new Attempt(Outcome.RETRYABLE, null);
             }
-            return parseEnvelope(result.stdout(), rawText);
+            IssueClassification parsed = parseEnvelopeOrNull(result.stdout());
+            return parsed != null ? new Attempt(Outcome.OK, parsed) : new Attempt(Outcome.RETRYABLE, null);
         } catch (Exception e) {
-            log.warn("Claude classify failed, using fallback. err={}", e.toString());
-            return IssueClassification.fallback(rawText);
+            log.warn("Claude classify attempt failed: {}", e.toString());
+            return new Attempt(Outcome.RETRYABLE, null);
         }
+    }
+
+    // 분류 최종 실패 시 Haiku 의도로 type 을 추정해 fallback (register_bug→BUG, register_story→FEATURE, else OTHER).
+    private IssueClassification fallbackForIntent(String rawText, IntentResult intentHint) {
+        IssueClassification.IssueType type = IssueClassification.IssueType.OTHER;
+        if (intentHint != null && intentHint.intent() != null) {
+            type = switch (intentHint.intent()) {
+                case "register_bug" -> IssueClassification.IssueType.BUG;
+                case "register_story" -> IssueClassification.IssueType.FEATURE;
+                default -> IssueClassification.IssueType.OTHER;
+            };
+        }
+        return IssueClassification.fallback(rawText, type);
     }
 
     // STUDY: Sonnet 기반 의미 검색. 전체 이슈 목록을 Sonnet에게 전달하여 사용자 질문과 관련도 높은 이슈를 선별한다.
@@ -405,29 +437,30 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         return cmd;
     }
 
-    private IssueClassification parseEnvelope(String stdout, String rawText) {
+    // 파싱 실패/에러 응답이면 null 반환(호출부가 재시도 판단). 성공 시에만 분류 결과 반환.
+    private IssueClassification parseEnvelopeOrNull(String stdout) {
         JsonNode envelope;
         try {
             envelope = objectMapper.readTree(stdout);
         } catch (Exception e) {
             log.warn("Claude CLI envelope parse failed: {} head={}", e.toString(), truncate(stdout));
-            return IssueClassification.fallback(rawText);
+            return null;
         }
         if (envelope.path("is_error").asBoolean(false)) {
             log.warn("Claude CLI reported is_error=true, envelope head={}", truncate(stdout));
-            return IssueClassification.fallback(rawText);
+            return null;
         }
         String inner = envelope.path("result").asText("");
         if (inner == null || inner.isBlank()) {
             log.warn("Claude CLI envelope has blank result");
-            return IssueClassification.fallback(rawText);
+            return null;
         }
         String stripped = stripToJsonObject(inner);
         try {
             return objectMapper.readValue(stripped, IssueClassification.class);
         } catch (Exception e) {
             log.warn("Claude inner JSON parse failed: {} head={}", e.toString(), truncate(stripped));
-            return IssueClassification.fallback(rawText);
+            return null;
         }
     }
 

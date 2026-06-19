@@ -15,6 +15,11 @@ public record IssueClassification(
     }
 
     public static IssueClassification fallback(String rawText) {
+        return fallback(rawText, IssueType.OTHER);
+    }
+
+    // STUDY: 분류 실패 시 type 은 Haiku 의도(register_bug→BUG 등)로 추정해 넘긴다 — OTHER 로 뭉뚱그리는 것보다 정확.
+    public static IssueClassification fallback(String rawText, IssueType type) {
         String safe = rawText == null ? "" : rawText.strip();
         String title = cleanTitle(safe);
         if (title.length() > 80) {
@@ -23,7 +28,7 @@ public record IssueClassification(
         if (title.isBlank()) {
             title = "Untitled issue from Slack";
         }
-        return new IssueClassification(IssueType.OTHER, 3, title, safe);
+        return new IssueClassification(type == null ? IssueType.OTHER : type, 3, title, safe);
     }
 
     // STUDY: Claude 분류 실패(타임아웃/에러/파싱실패) 시 원문이 제목이 되는데, 사용자가 붙인 명령·요청 어구

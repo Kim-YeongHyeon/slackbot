@@ -67,6 +67,46 @@ class ClaudeApiClientImplTest {
     }
 
     @Test
+    void transientFailure_thenSuccess_retriesOnce() {
+        String inner = "{\"type\":\"BUG\",\"storyPoint\":2,\"title\":\"T\",\"summary\":\"S\"}";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(1, "", "", false))          // 1차: exit 1
+                .thenReturn(new ProcessRunner.Result(0, envelope(inner, false), "", false)); // 2차: 성공
+
+        IssueClassification result = client.classify("로그인 500 에러");
+
+        assertThat(result.type()).isEqualTo(IssueClassification.IssueType.BUG);   // 재시도로 정상 분류
+        verify(runner, org.mockito.Mockito.times(2))
+                .run(any(List.class), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void timeout_doesNotRetry() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(-1, "", "", true));   // 타임아웃
+
+        client.classify("오래 걸리는 입력");
+
+        // 타임아웃은 재시도 금지(지연 2배 방지) → run 1회만.
+        verify(runner, org.mockito.Mockito.times(1))
+                .run(any(List.class), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void allAttemptsFail_withRegisterBugHint_fallbackTypeIsBug() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(1, "", "", false));   // 매번 실패
+        var hint = new com.jirabot.slack.client.dto.IntentResult(
+                "register_bug", 0.9, java.util.Map.of(), "CPU 저조 티켓 만들어줘");
+
+        IssueClassification result = client.classify("CPU 저조 티켓 만들어줘", hint);
+
+        // 의도(register_bug) 기반으로 OTHER 대신 BUG, 제목엔 명령어구 없음.
+        assertThat(result.type()).isEqualTo(IssueClassification.IssueType.BUG);
+        assertThat(result.title()).doesNotContain("만들어줘");
+    }
+
+    @Test
     void nonZeroExitCode_returnsFallback() {
         when(runner.run(any(), anyString(), any(Duration.class)))
                 .thenReturn(new ProcessRunner.Result(1, "", "command not found", false));
