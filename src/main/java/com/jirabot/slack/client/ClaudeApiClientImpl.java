@@ -42,7 +42,9 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
               재현/원인 조사가 여러 단계로 불확실하면 한 단계 올린다.
             - 8 is the maximum. Never output 13 or higher. If the work clearly exceeds 8
               (에픽급, 분할 필요), still output 8 — it is the signal that the item should be split.
-            - title: <= 120 Korean/English characters, imperative mood.
+            - title: <= 120 Korean/English characters, imperative mood. Describe ONLY the problem/request.
+              Never include command/request phrasing ("티켓/이슈 만들어줘", "등록해줘", "~생겼는데") or any
+              issue key ("[ES2-123]") in the title — strip them.
             - summary: 1-2 concise paragraphs summarizing the problem/request.
             - An INTENT HINT may be provided above the user input.
               Use it as a strong signal but override if the text clearly contradicts it.

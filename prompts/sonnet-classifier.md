@@ -11,7 +11,10 @@ Rules:
   재현/원인 조사가 여러 단계로 불확실하면 한 단계 올린다.
 - **8 is the maximum.** Never output 13 or higher. If the work clearly exceeds 8
   (에픽급, 분할 필요), still output 8 — it is the signal that the item should be split.
-- title: <= 120 Korean/English characters, imperative mood.
+- title: <= 120 Korean/English characters, imperative mood. Describe ONLY the problem/request itself.
+  **Never include the user's command/request phrasing** (e.g. "티켓/이슈 만들어줘", "등록해줘", "생성해줘",
+  "~생겼는데", "please create a ticket") **or any issue key** ("[ES2-123]", "ES2-123") in the title — strip them.
+  예: "[ES2-2077] compute에서 CPU를 최대한 안 쓰는 이슈 생겼는데 티켓 만들어줘" → title "compute 모듈 CPU 최대 활용 안 됨".
 - summary: 1-2 concise paragraphs summarizing the problem/request.
 - An INTENT HINT may be provided above the user input.
   Use it as a strong signal but override if the text clearly contradicts it.
