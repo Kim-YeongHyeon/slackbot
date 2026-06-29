@@ -26,7 +26,7 @@ class IntentClassifierImplTest {
     void setUp() {
         runner = mock(ProcessRunner.class);
         classifier = new IntentClassifierImpl(
-                runner, new IntentProperties("claude-haiku-4-5", 25, "prompts/haiku-classifier.md"),
+                runner, new IntentProperties("claude-haiku-4-5", 40, "prompts/haiku-classifier.md"),
                 new ObjectMapper());
     }
 
@@ -63,14 +63,31 @@ class IntentClassifierImplTest {
     }
 
     @Test
-    void timeout_doesNotRetry() {
+    void timeout_thenSuccess_retriesWithShorterTimeout() {
+        String inner = "{\"intent\":\"my_tasks\",\"confidence\":0.95,\"extracted\":{},\"raw_input\":\"x\"}";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(-1, "", "", true))             // 1차 타임아웃
+                .thenReturn(new ProcessRunner.Result(0, envelope(inner, false), "", false)); // 2차 성공
+
+        IntentResult r = classifier.classify("보고자가 나인데 완료 안된 task?");
+
+        assertThat(r.intent()).isEqualTo("my_tasks");   // 타임아웃도 재시도로 복구
+        org.mockito.ArgumentCaptor<Duration> cap = org.mockito.ArgumentCaptor.forClass(Duration.class);
+        verify(runner, times(2)).run(any(List.class), anyString(), cap.capture());
+        // 1차=40s(기본), 2차=15s(짧은 재시도 타임아웃)
+        assertThat(cap.getAllValues().get(0)).isEqualTo(Duration.ofSeconds(40));
+        assertThat(cap.getAllValues().get(1)).isEqualTo(Duration.ofSeconds(15));
+    }
+
+    @Test
+    void timeout_bothAttempts_returnsUnknown() {
         when(runner.run(any(), anyString(), any(Duration.class)))
                 .thenReturn(new ProcessRunner.Result(-1, "", "", true));
 
         IntentResult r = classifier.classify("오래 걸리는 입력");
 
         assertThat(r.intent()).isEqualTo("unknown");
-        verify(runner, times(1)).run(any(List.class), anyString(), any(Duration.class));
+        verify(runner, times(2)).run(any(List.class), anyString(), any(Duration.class));
     }
 
     @Test

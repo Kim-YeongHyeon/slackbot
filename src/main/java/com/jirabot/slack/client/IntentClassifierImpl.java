@@ -30,36 +30,36 @@ public class IntentClassifierImpl implements IntentClassifier {
         this.objectMapper = objectMapper;
     }
 
-    // 한 번의 시도 결과. RETRYABLE = 일시적 실패(재시도 가치), TIMEOUT = 재시도 금지(지연 2배 방지).
+    // 한 번의 시도 결과.
     private enum Outcome { OK, RETRYABLE, TIMEOUT }
     private record Attempt(Outcome outcome, IntentResult result) {}
+
+    // STUDY: Haiku 응답 지연은 변동이 크다(6~24s 관측). 타임아웃 outlier 도 보통 일시적이라 재시도하면
+    //        다음 호출은 빠른 경우가 많다. 단 최악 지연 폭증을 막으려고 재시도는 짧은 타임아웃으로 건다.
+    private static final long RETRY_TIMEOUT_SECONDS = 15;
 
     @Override
     public IntentResult classify(String rawText) {
         if (rawText == null || rawText.isBlank()) {
             return IntentResult.unknown(rawText);
         }
-        // STUDY: Haiku CLI 도 간헐적으로 exit≠0/빈출력/파싱실패로 떨어진다(→ unknown = "명령 못 알아들음" 오응답).
-        //        ClaudeApiClientImpl 과 동일하게 비-타임아웃 실패는 1회 재시도. 타임아웃은 즉시 unknown.
-        for (int attempt = 1; attempt <= 2; attempt++) {
-            Attempt a = attemptClassify(rawText);
-            if (a.outcome() == Outcome.OK) {
-                return a.result();
-            }
-            if (a.outcome() == Outcome.TIMEOUT) {
-                break;
-            }
-            if (attempt == 1) {
-                log.info("Haiku intent classify 일시 실패 → 1회 재시도");
-            }
+        // STUDY: Haiku CLI 가 간헐적으로 exit≠0/빈출력/파싱실패/타임아웃으로 떨어진다(→ unknown = "명령 못 알아들음").
+        //        일시적 실패는 1회 재시도. 타임아웃도 재시도하되 둘째는 짧은 타임아웃으로 최악 지연을 제한.
+        Attempt first = attemptClassify(rawText, props.timeoutSeconds());
+        if (first.outcome() == Outcome.OK) {
+            return first.result();
         }
-        return IntentResult.unknown(rawText);
+        long retryTimeout = first.outcome() == Outcome.TIMEOUT
+                ? RETRY_TIMEOUT_SECONDS : props.timeoutSeconds();
+        log.info("Haiku intent classify 일시 실패({}) → 1회 재시도(timeout {}s)", first.outcome(), retryTimeout);
+        Attempt second = attemptClassify(rawText, retryTimeout);
+        return second.outcome() == Outcome.OK ? second.result() : IntentResult.unknown(rawText);
     }
 
-    private Attempt attemptClassify(String rawText) {
+    private Attempt attemptClassify(String rawText, long timeoutSeconds) {
         try {
             List<String> command = buildCommand();
-            Duration timeout = Duration.ofSeconds(props.timeoutSeconds());
+            Duration timeout = Duration.ofSeconds(timeoutSeconds);
             // STUDY: stdin에는 사용자 메시지만 전달. 시스템 프롬프트는 --system-prompt-file로 분리.
             //        매우 짧은 입력 ("안녕하세요", "ok") 을 모델이 시스템에 대한 직접 인사로 받아
             //        비-JSON 대화 응답을 내는 회귀가 있어, 분류 대상임을 명시적으로 프레이밍한다.
@@ -67,7 +67,7 @@ public class IntentClassifierImpl implements IntentClassifier {
             ProcessRunner.Result result = processRunner.run(command, framedInput, timeout);
 
             if (result.timedOut()) {
-                log.warn("Haiku intent classifier timed out after {}s", props.timeoutSeconds());
+                log.warn("Haiku intent classifier timed out after {}s", timeoutSeconds);
                 return new Attempt(Outcome.TIMEOUT, null);
             }
             if (result.exitCode() != 0) {

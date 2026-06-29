@@ -52,10 +52,11 @@ claude:
   timeout-seconds: 60
   permission-mode: plan
   max-turns: 1
-  # STUDY: Haiku 의도 분류기 설정. --bare로 불필요한 컨텍스트 스킵, --system-prompt-file로 skill 전달.
+  # STUDY: Haiku 의도 분류기 설정. --system-prompt-file로 skill 전달. (--bare는 구독 인증을 깨므로 미사용)
+  #        타임아웃 40s — 24s+ outlier 실측 대응. 타임아웃 시 짧은 타임아웃(15s)으로 1회 재시도(IntentClassifierImpl).
   intent:
     model: claude-haiku-4-5
-    timeout-seconds: 25
+    timeout-seconds: 40
     prompt-file: prompts/haiku-classifier.md
 
 # Jira 설정 — spring-service-engineer의 JiraApiClient
