@@ -13,7 +13,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 // STUDY: Haiku 전용 의도 분류기. Sonnet(ClaudeApiClient)과 분리하여 역할별 독립 관리.
-//        --bare로 CLAUDE.md/skill/hook 로드를 스킵하고 --system-prompt-file로 분류 프롬프트만 전달.
+//        --system-prompt-file로 분류 프롬프트를 전달. (--bare는 구독 인증을 깨므로 미사용 — lessons L12.)
+//        CLI 가 간헐적으로 실패하면 unknown 으로 떨어져 "명령 못 알아들음" 오응답이 되므로 1회 재시도한다.
 @Component
 public class IntentClassifierImpl implements IntentClassifier {
 
@@ -29,11 +30,33 @@ public class IntentClassifierImpl implements IntentClassifier {
         this.objectMapper = objectMapper;
     }
 
+    // 한 번의 시도 결과. RETRYABLE = 일시적 실패(재시도 가치), TIMEOUT = 재시도 금지(지연 2배 방지).
+    private enum Outcome { OK, RETRYABLE, TIMEOUT }
+    private record Attempt(Outcome outcome, IntentResult result) {}
+
     @Override
     public IntentResult classify(String rawText) {
         if (rawText == null || rawText.isBlank()) {
             return IntentResult.unknown(rawText);
         }
+        // STUDY: Haiku CLI 도 간헐적으로 exit≠0/빈출력/파싱실패로 떨어진다(→ unknown = "명령 못 알아들음" 오응답).
+        //        ClaudeApiClientImpl 과 동일하게 비-타임아웃 실패는 1회 재시도. 타임아웃은 즉시 unknown.
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            Attempt a = attemptClassify(rawText);
+            if (a.outcome() == Outcome.OK) {
+                return a.result();
+            }
+            if (a.outcome() == Outcome.TIMEOUT) {
+                break;
+            }
+            if (attempt == 1) {
+                log.info("Haiku intent classify 일시 실패 → 1회 재시도");
+            }
+        }
+        return IntentResult.unknown(rawText);
+    }
+
+    private Attempt attemptClassify(String rawText) {
         try {
             List<String> command = buildCommand();
             Duration timeout = Duration.ofSeconds(props.timeoutSeconds());
@@ -45,20 +68,21 @@ public class IntentClassifierImpl implements IntentClassifier {
 
             if (result.timedOut()) {
                 log.warn("Haiku intent classifier timed out after {}s", props.timeoutSeconds());
-                return IntentResult.unknown(rawText);
+                return new Attempt(Outcome.TIMEOUT, null);
             }
             if (result.exitCode() != 0) {
                 log.warn("Haiku intent classifier exited with code={}", result.exitCode());
-                return IntentResult.unknown(rawText);
+                return new Attempt(Outcome.RETRYABLE, null);
             }
             if (result.stdout() == null || result.stdout().isBlank()) {
                 log.warn("Haiku intent classifier returned empty stdout");
-                return IntentResult.unknown(rawText);
+                return new Attempt(Outcome.RETRYABLE, null);
             }
-            return parseEnvelope(result.stdout(), rawText);
+            IntentResult parsed = parseEnvelopeOrNull(result.stdout(), rawText);
+            return parsed != null ? new Attempt(Outcome.OK, parsed) : new Attempt(Outcome.RETRYABLE, null);
         } catch (Exception e) {
-            log.warn("Haiku intent classification failed: {}", e.toString());
-            return IntentResult.unknown(rawText);
+            log.warn("Haiku intent classification attempt failed: {}", e.toString());
+            return new Attempt(Outcome.RETRYABLE, null);
         }
     }
 
@@ -75,23 +99,24 @@ public class IntentClassifierImpl implements IntentClassifier {
         );
     }
 
-    private IntentResult parseEnvelope(String stdout, String rawText) {
+    // 파싱 실패/에러 응답이면 null 반환(호출부가 재시도 판단). 성공 시에만 결과 반환.
+    private IntentResult parseEnvelopeOrNull(String stdout, String rawText) {
         try {
             JsonNode envelope = objectMapper.readTree(stdout);
             if (envelope.path("is_error").asBoolean(false)) {
                 log.warn("Haiku reported is_error=true");
-                return IntentResult.unknown(rawText);
+                return null;
             }
             String inner = envelope.path("result").asText("");
             if (inner.isBlank()) {
                 log.warn("Haiku envelope has blank result");
-                return IntentResult.unknown(rawText);
+                return null;
             }
             String stripped = stripToJsonObject(inner);
             return objectMapper.readValue(stripped, IntentResult.class);
         } catch (Exception e) {
             log.warn("Haiku JSON parse failed: {}", e.toString());
-            return IntentResult.unknown(rawText);
+            return null;
         }
     }
 
