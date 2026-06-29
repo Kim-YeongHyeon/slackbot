@@ -1,16 +1,20 @@
 package com.jirabot.slack.service;
 
 import com.jirabot.slack.client.ClaudeApiClient;
+import com.jirabot.slack.client.GitHubApiClient;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.NotionApiClient;
 import com.jirabot.slack.client.SlackNotifier;
+import com.jirabot.slack.client.dto.BugCategoryResult;
 import com.jirabot.slack.client.dto.BugResolutionSummary;
 import com.jirabot.slack.client.dto.SprintIssue;
 import com.jirabot.slack.config.JiraProperties;
 import com.jirabot.slack.config.NotionProperties;
 import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.entity.StatusCategory;
+import com.jirabot.slack.util.BugCategory;
 import com.jirabot.slack.util.NotionProperty;
+import java.util.ArrayList;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -37,16 +41,18 @@ public class BugNotionServiceImpl implements BugNotionService {
     private final SlackNotifier slackNotifier;
     private final NotionProperties notionProps;
     private final JiraProperties jiraProps;
+    private final GitHubApiClient gitHub;
 
     public BugNotionServiceImpl(NotionApiClient notion, ClaudeApiClient claude, JiraApiClient jira,
                                 SlackNotifier slackNotifier, NotionProperties notionProps,
-                                JiraProperties jiraProps) {
+                                JiraProperties jiraProps, GitHubApiClient gitHub) {
         this.notion = notion;
         this.claude = claude;
         this.jira = jira;
         this.slackNotifier = slackNotifier;
         this.notionProps = notionProps;
         this.jiraProps = jiraProps;
+        this.gitHub = gitHub;
     }
 
     @Override
@@ -56,17 +62,57 @@ public class BugNotionServiceImpl implements BugNotionService {
 
     @Override
     public void syncOnStatusChange(IssueEntity issue, boolean toDone) {
-        if (!enabled()) {
+        if (!enabled() || isBlank(notionProps.statusDbId()) || isBlank(issue.getIssueKey())) {
             return;
         }
-        String resolvedDate = StatusCategory.DONE.equals(issue.getStatusCategory())
-                ? instantToDate(issue.getJiraUpdated()) : null;
-        upsertStatusRow(issue.getIssueKey(), issue.getSummary(), issue.getStatus(),
-                issue.getStatusCategory(), issue.getAssignee(),
+        boolean resolved = StatusCategory.DONE.equals(issue.getStatusCategory());
+        String resolvedDate = resolved ? instantToDate(issue.getJiraUpdated()) : null;
+        Map<String, Object> props = baseStatusProps(issue.getIssueKey(), issue.getSummary(),
+                issue.getStatus(), resolved, issue.getAssignee(),
                 instantToDate(issue.getJiraCreated()), resolvedDate);
-
+        // 완료로 전환되면 원인분류/근본원인/해결방법/PR을 같은 row 에 채운다(해결 기록 DB 대체).
         if (toDone) {
-            upsertResolutionRow(issue);
+            enrichResolution(issue, props);
+        }
+        upsert(notionProps.statusDbId(), issue.getIssueKey(), props);
+    }
+
+    // 버그 완료 시: 카테고리 자동분류 + 원인/해결방법 요약 + 해결 PR 링크를 props 에 추가.
+    // 모든 단계는 실패해도 비치명적(해당 속성만 비고 진행).
+    private void enrichResolution(IssueEntity issue, Map<String, Object> props) {
+        try {
+            List<String> comments = jira.getComments(issue.getIssueKey());
+            List<String> thread = (issue.getSlackChannel() != null && issue.getSlackThreadTs() != null)
+                    ? slackNotifier.getThreadMessages(issue.getSlackChannel(), issue.getSlackThreadTs())
+                    : List.of();
+            BugResolutionSummary s = claude.summarizeBugResolution(
+                    issue.getIssueKey(), issue.getDescription(), comments, thread);
+            props.put("근본원인", NotionProperty.richText(s.causeOrDefault()));
+            props.put("해결방법", NotionProperty.richText(s.fixOrDefault()));
+        } catch (Exception e) {
+            log.warn("Notion enrich: 해결요약 실패 {}: {}", issue.getIssueKey(), e.toString());
+        }
+        try {
+            BugCategoryResult cat = claude.classifyBugCategory(issue.getSummary(), issue.getDescription());
+            if (cat.isPresent()) {
+                String major = BugCategory.majorLabel(cat.primary());
+                if (major != null) props.put("원인분류", NotionProperty.select(major));
+                List<String> subs = new ArrayList<>();
+                subs.add(BugCategory.subLabel(cat.primary()));
+                for (String c : cat.secondariesOrEmpty()) {
+                    String lbl = BugCategory.subLabel(c);
+                    if (!subs.contains(lbl)) subs.add(lbl);
+                }
+                props.put("세부원인", NotionProperty.multiSelect(subs));
+            }
+        } catch (Exception e) {
+            log.warn("Notion enrich: 카테고리 분류 실패 {}: {}", issue.getIssueKey(), e.toString());
+        }
+        try {
+            List<String> prs = gitHub.searchPullRequestUrls(issue.getIssueKey());
+            if (!prs.isEmpty()) props.put("PR링크", NotionProperty.richTextLinks(prs));
+        } catch (Exception e) {
+            log.warn("Notion enrich: PR 조회 실패 {}: {}", issue.getIssueKey(), e.toString());
         }
     }
 
@@ -87,8 +133,10 @@ public class BugNotionServiceImpl implements BugNotionService {
         for (SprintIssue b : bugs) {
             String resolvedDate = StatusCategory.DONE.equals(b.statusCategory())
                     ? isoDateOnly(b.updated()) : null;
-            upsertStatusRow(b.key(), b.summary(), b.status(), b.statusCategory(),
-                    b.assignee(), isoDateOnly(b.created()), resolvedDate);
+            Map<String, Object> props = baseStatusProps(b.key(), b.summary(), b.status(),
+                    StatusCategory.DONE.equals(b.statusCategory()), b.assignee(),
+                    isoDateOnly(b.created()), resolvedDate);
+            upsert(notionProps.statusDbId(), b.key(), props);
         }
         log.info("Notion backfill done: {} bugs", bugs.size());
         return bugs.size();
@@ -96,13 +144,10 @@ public class BugNotionServiceImpl implements BugNotionService {
 
     // --- 현황 DB(status) ---
 
-    private void upsertStatusRow(String key, String summary, String jiraStatus, String statusCategory,
-                                 String assignee, String createdDate, String resolvedDate) {
-        String dbId = notionProps.statusDbId();
-        if (isBlank(dbId) || isBlank(key)) {
-            return;
-        }
-        boolean resolved = StatusCategory.DONE.equals(statusCategory);
+    // 기본 현황 속성 빌드(카테고리/해결 정보 제외). 완료 시 enrichResolution 이 추가 속성을 더한다.
+    private Map<String, Object> baseStatusProps(String key, String summary, String jiraStatus,
+                                                boolean resolved, String assignee,
+                                                String createdDate, String resolvedDate) {
         Map<String, Object> props = new LinkedHashMap<>();
         props.put("이슈", NotionProperty.title(key + " " + nz(summary)));
         props.put("상태", NotionProperty.select(resolved ? "해결" : "미해결"));
@@ -111,31 +156,7 @@ public class BugNotionServiceImpl implements BugNotionService {
         props.put("생성일", NotionProperty.date(createdDate));
         props.put("해결일", NotionProperty.date(resolvedDate));
         props.put("Jira링크", NotionProperty.url(issueLink(key)));
-        upsert(dbId, key, props);
-    }
-
-    // --- 해결 기록 DB(resolution) ---
-
-    private void upsertResolutionRow(IssueEntity issue) {
-        String dbId = notionProps.resolutionDbId();
-        if (isBlank(dbId)) {
-            return;
-        }
-        List<String> comments = jira.getComments(issue.getIssueKey());
-        List<String> thread = (issue.getSlackChannel() != null && issue.getSlackThreadTs() != null)
-                ? slackNotifier.getThreadMessages(issue.getSlackChannel(), issue.getSlackThreadTs())
-                : List.of();
-        BugResolutionSummary s = claude.summarizeBugResolution(
-                issue.getIssueKey(), issue.getDescription(), comments, thread);
-
-        Map<String, Object> props = new LinkedHashMap<>();
-        props.put("이슈", NotionProperty.title(issue.getIssueKey() + " " + nz(issue.getSummary())));
-        props.put("원인", NotionProperty.richText(s.causeOrDefault()));
-        props.put("해결방법", NotionProperty.richText(s.fixOrDefault()));
-        props.put("해결일", NotionProperty.date(instantToDate(issue.getJiraUpdated())));
-        props.put("담당자", NotionProperty.richText(issue.getAssignee() == null ? "미배정" : issue.getAssignee()));
-        props.put("Jira링크", NotionProperty.url(issueLink(issue.getIssueKey())));
-        upsert(dbId, issue.getIssueKey(), props);
+        return props;
     }
 
     // --- 공통 ---

@@ -11,9 +11,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.jirabot.slack.client.ClaudeApiClient;
+import com.jirabot.slack.client.GitHubApiClient;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.NotionApiClient;
 import com.jirabot.slack.client.SlackNotifier;
+import com.jirabot.slack.client.dto.BugCategoryResult;
 import com.jirabot.slack.client.dto.BugResolutionSummary;
 import com.jirabot.slack.client.dto.SprintIssue;
 import com.jirabot.slack.config.JiraProperties;
@@ -34,6 +36,7 @@ class BugNotionServiceImplTest {
     private ClaudeApiClient claude;
     private JiraApiClient jira;
     private SlackNotifier slackNotifier;
+    private GitHubApiClient gitHub;
     private BugNotionServiceImpl service;
 
     private static final String STATUS_DB = "status-db";
@@ -54,8 +57,12 @@ class BugNotionServiceImplTest {
         claude = mock(ClaudeApiClient.class);
         jira = mock(JiraApiClient.class);
         slackNotifier = mock(SlackNotifier.class);
+        gitHub = mock(GitHubApiClient.class);
         when(notion.findPageId(anyString(), anyString())).thenReturn(Optional.empty());
-        service = new BugNotionServiceImpl(notion, claude, jira, slackNotifier, enabledProps(), jiraProps());
+        // enrich 의 비-요약 단계 기본 stub (null 반환 방지).
+        when(claude.classifyBugCategory(any(), any())).thenReturn(BugCategoryResult.empty());
+        when(gitHub.searchPullRequestUrls(anyString())).thenReturn(List.of());
+        service = new BugNotionServiceImpl(notion, claude, jira, slackNotifier, enabledProps(), jiraProps(), gitHub);
     }
 
     private IssueEntity bug(String statusCategory) {
@@ -74,23 +81,32 @@ class BugNotionServiceImplTest {
     }
 
     @Test
-    void completion_writesBothStatusAndResolution() {
+    void completion_writesSingleStatusRow_withResolutionAndCategory() {
         when(claude.summarizeBugResolution(any(), any(), any(), any()))
                 .thenReturn(new BugResolutionSummary("토큰 만료", "갱신 로직 추가"));
+        when(claude.classifyBugCategory(any(), any()))
+                .thenReturn(new BugCategoryResult("C4", List.of("C1")));
         when(jira.getComments(anyString())).thenReturn(List.of("댓글1"));
+        when(gitHub.searchPullRequestUrls("ES2-7"))
+                .thenReturn(List.of("https://github.com/CryptoLabInc/evi/pull/7"));
 
         service.syncOnStatusChange(bug(StatusCategory.DONE), true);
 
-        ArgumentCaptor<String> dbCaptor = ArgumentCaptor.forClass(String.class);
-        verify(notion, times(2)).createRow(dbCaptor.capture(), any());
-        assertThat(dbCaptor.getAllValues()).containsExactlyInAnyOrder(STATUS_DB, RESOLUTION_DB);
+        // 이제 해결 기록은 별도 DB 가 아니라 현황 DB(STATUS_DB) 한 row 에 통합된다 → createRow 1회.
+        ArgumentCaptor<Map<String, Object>> props = ArgumentCaptor.forClass(Map.class);
+        verify(notion, times(1)).createRow(eq(STATUS_DB), props.capture());
         verify(claude).summarizeBugResolution(eq("ES2-7"), any(), any(), any());
+        Map<String, Object> p = props.getValue();
+        assertThat(p).containsKeys("근본원인", "해결방법", "원인분류", "세부원인", "PR링크");
+        // 원인분류 = 대분류 라벨, 세부원인 = primary+secondary 라벨
+        Map<String, Object> sel = (Map<String, Object>) p.get("원인분류");
+        assertThat(((Map<?, ?>) sel.get("select")).get("name")).isEqualTo("C 키·암호");
     }
 
     @Test
     void disabled_whenTokenBlank_noNotionCalls() {
         BugNotionServiceImpl disabled = new BugNotionServiceImpl(notion, claude, jira, slackNotifier,
-                new NotionProperties(true, "", null, "page", RESOLUTION_DB, STATUS_DB), jiraProps());
+                new NotionProperties(true, "", null, "page", RESOLUTION_DB, STATUS_DB), jiraProps(), gitHub);
 
         assertThat(disabled.enabled()).isFalse();
         disabled.syncOnStatusChange(bug(StatusCategory.DONE), true);

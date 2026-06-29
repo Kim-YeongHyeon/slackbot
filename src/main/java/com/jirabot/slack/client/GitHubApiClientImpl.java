@@ -166,6 +166,35 @@ public class GitHubApiClientImpl implements GitHubApiClient {
         }
     }
 
+    @Override
+    public java.util.List<String> searchPullRequestUrls(String issueKey) {
+        if (!props.enabled() || issueKey == null || issueKey.isBlank()) {
+            return java.util.List.of();
+        }
+        String org = props.org();
+        try {
+            // STUDY: GitHub search API — 이슈 키를 본문/제목/브랜치에서 참조하는 PR 검색. org 한정 + type:pr.
+            String json = githubWebClient.get()
+                    .uri(uri -> uri.path("/search/issues")
+                            .queryParam("q", issueKey + " org:" + org + " type:pr")
+                            .queryParam("per_page", 10).build())
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode items = objectMapper.readTree(json).path("items");
+            java.util.List<String> urls = new java.util.ArrayList<>();
+            for (JsonNode it : items) {
+                String u = it.path("html_url").asText("");
+                if (!u.isBlank()) urls.add(u);
+            }
+            return urls;
+        } catch (WebClientResponseException e) {
+            log.warn("GitHub searchPullRequestUrls {} failed: {}", issueKey, e.getStatusCode());
+            return java.util.List.of();
+        } catch (Exception e) {
+            log.warn("GitHub searchPullRequestUrls {} error: {}", issueKey, e.toString());
+            return java.util.List.of();
+        }
+    }
+
     private java.time.Instant parseInstant(String iso) {
         if (iso == null || iso.isBlank()) return null;
         try {

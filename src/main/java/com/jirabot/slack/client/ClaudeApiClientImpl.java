@@ -3,6 +3,7 @@ package com.jirabot.slack.client;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jirabot.slack.client.dto.BugCategoryResult;
 import com.jirabot.slack.client.dto.BugResolutionSummary;
 import com.jirabot.slack.client.dto.IntentResult;
 import com.jirabot.slack.client.dto.IssueClassification;
@@ -84,6 +85,7 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
     static final String RESOLUTION_PROMPT_FILE = "prompts/sonnet-resolution.md";
     static final String BRANCH_SLUG_PROMPT_FILE = "prompts/haiku-branch-slug.md";
     static final String SEARCH_PROMPT_FILE = "prompts/sonnet-issue-search.md";
+    static final String BUG_CATEGORY_PROMPT_FILE = "prompts/bug-category.md";
 
     private static boolean promptFileExists(String path) {
         try {
@@ -372,6 +374,37 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         } catch (Exception e) {
             log.warn("Claude resolution summary error for {}: {}", issueKey, e.toString());
             return BugResolutionSummary.fallback();
+        }
+    }
+
+    // STUDY: 버그 원인 카테고리 분류. 가벼운 택1 작업이라 fast-model(Haiku) 사용. 실패는 비치명적(empty 반환,
+    //        카테고리 속성만 비고 나머지 적재는 진행). prompts/bug-category.md 없으면 분류 생략.
+    @Override
+    public BugCategoryResult classifyBugCategory(String summary, String description) {
+        if (!promptFileExists(BUG_CATEGORY_PROMPT_FILE)) {
+            log.warn("bug-category prompt file missing; skip categorization");
+            return BugCategoryResult.empty();
+        }
+        try {
+            String stdin = "TITLE: " + (summary == null ? "" : summary) + "\n\nDESCRIPTION:\n"
+                    + (description == null || description.isBlank() ? "(none)" : description);
+            ProcessRunner.Result result = processRunner.run(
+                    buildCommand(props.fastModel(), BUG_CATEGORY_PROMPT_FILE),
+                    stdin, Duration.ofSeconds(props.timeoutSeconds()));
+            if (result.timedOut() || result.exitCode() != 0
+                    || result.stdout() == null || result.stdout().isBlank()) {
+                log.warn("bug category classify failed (timeout={}, exit={})",
+                        result.timedOut(), result.exitCode());
+                return BugCategoryResult.empty();
+            }
+            JsonNode env = objectMapper.readTree(result.stdout());
+            if (env.path("is_error").asBoolean(false)) return BugCategoryResult.empty();
+            String inner = env.path("result").asText("");
+            if (inner.isBlank()) return BugCategoryResult.empty();
+            return objectMapper.readValue(stripToJsonObject(inner), BugCategoryResult.class);
+        } catch (Exception e) {
+            log.warn("bug category classify error: {}", e.toString());
+            return BugCategoryResult.empty();
         }
     }
 

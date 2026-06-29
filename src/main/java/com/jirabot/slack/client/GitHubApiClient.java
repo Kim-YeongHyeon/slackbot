@@ -34,4 +34,10 @@ public interface GitHubApiClient {
      * PR 작성자 → Jira 사용자 매핑(Jira user search)용. 토큰 미설정/404/오류 시 empty.
      */
     Optional<String> getUserDisplayName(String login);
+
+    /**
+     * 이슈 키(예: ES2-123)를 참조하는 PR들의 html_url 목록을 GitHub 검색으로 찾는다.
+     * 버그 완료 시 Notion '버그 현황'에 해결 PR 링크를 채우는 데 사용. 토큰 미설정/오류 시 빈 목록.
+     */
+    List<String> searchPullRequestUrls(String issueKey);
 }

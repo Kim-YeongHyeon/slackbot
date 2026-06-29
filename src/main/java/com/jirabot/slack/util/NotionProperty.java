@@ -52,6 +52,39 @@ public final class NotionProperty {
         return m;
     }
 
+    // STUDY: multi_select — 여러 태그. Notion 은 미정의 옵션을 적으면 자동 생성하므로 옵션 사전등록 불필요.
+    //        옵션명에 콤마(,)는 금지된다(우리 카테고리 라벨엔 없음).
+    public static Map<String, Object> multiSelect(java.util.List<String> names) {
+        Map<String, Object> m = new HashMap<>();
+        java.util.List<Map<String, String>> opts = new java.util.ArrayList<>();
+        if (names != null) {
+            for (String n : names) {
+                if (n != null && !n.isBlank()) opts.add(Map.of("name", n.replace(",", " ")));
+            }
+        }
+        m.put("multi_select", opts);
+        return m;
+    }
+
+    // STUDY: rich_text 에 클릭 가능한 링크들을 ' · ' 로 구분해 넣는다. 라벨은 PR URL 의 "repo #번호".
+    public static Map<String, Object> richTextLinks(java.util.List<String> urls) {
+        Map<String, Object> m = new HashMap<>();
+        java.util.List<Map<String, Object>> parts = new java.util.ArrayList<>();
+        if (urls != null) {
+            int i = 0;
+            for (String u : urls) {
+                if (u == null || u.isBlank()) continue;
+                if (i++ > 0) parts.add(Map.of("type", "text", "text", Map.of("content", "  ·  ")));
+                java.util.regex.Matcher num = java.util.regex.Pattern.compile("/pull/(\\d+)").matcher(u);
+                java.util.regex.Matcher repo = java.util.regex.Pattern.compile("github\\.com/[^/]+/([^/]+)").matcher(u);
+                String label = (repo.find() ? repo.group(1) + " " : "") + (num.find() ? "#" + num.group(1) : u);
+                parts.add(Map.of("type", "text", "text", Map.of("content", label, "link", Map.of("url", u))));
+            }
+        }
+        m.put("rich_text", parts);
+        return m;
+    }
+
     private static String truncate(String s) {
         if (s == null) {
             return "";

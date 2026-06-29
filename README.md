@@ -114,6 +114,16 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 (`MAX_ATTEMPTS=3`)로 통일하고, **타임아웃도 재시도 대상**에 포함(이전엔 Sonnet 은 타임아웃 재시도 안 함).
 Haiku 타임아웃 후 재시도는 짧은 타임아웃(15s) 유지로 최악 누적 지연 제한. 분류는 비동기라 Slack 3초 ack 와 무관.
 
+### 버그 원인 자동분류 + 해결 지식 통합 (v0.0.51)
+
+버그가 완료로 전환되면 Notion '버그 현황' DB **한 곳**에 다음을 자동 적재한다:
+- **원인분류**(대분류 select) + **세부원인**(소분류 multi_select, 다중) — `prompts/bug-category.md` 체계(10/30)로
+  Haiku 분류(`classifyBugCategory`). 소분류 추가는 `prompts/bug-category.md` + `BugCategory.java` 라벨맵만 고치면 됨.
+- **근본원인 / 해결방법** — 기존 Claude 요약(`summarizeBugResolution`) 재활용
+- **PR링크** — GitHub 이슈키 검색(`searchPullRequestUrls`)으로 해결 PR 링크(클릭 가능)
+- 별도 '버그 해결 기록'(resolution) DB 적재 경로는 **제거** → 그 DB 안전하게 삭제 가능 (`.env` `NOTION_DATABASE_ID`도 불필요)
+- 모든 enrich 단계는 실패해도 비치명적(해당 속성만 비고 진행). 분류는 비동기라 Slack ack 무관.
+
 ### 의도 분류기 타임아웃 재시도 + 상향 (v0.0.49)
 
 v0.0.48 후에도 "보고자가 나인데 완료 안된 task?" 가 "이해하지 못했어요"로 응답. 원인은 exit≠0 이 아니라
