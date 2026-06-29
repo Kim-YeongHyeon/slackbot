@@ -81,14 +81,29 @@ class ClaudeApiClientImplTest {
     }
 
     @Test
-    void timeout_doesNotRetry() {
+    void timeout_isRetried_upToMaxAttempts() {
         when(runner.run(any(), anyString(), any(Duration.class)))
-                .thenReturn(new ProcessRunner.Result(-1, "", "", true));   // 타임아웃
+                .thenReturn(new ProcessRunner.Result(-1, "", "", true));   // 매번 타임아웃
 
         client.classify("오래 걸리는 입력");
 
-        // 타임아웃은 재시도 금지(지연 2배 방지) → run 1회만.
-        verify(runner, org.mockito.Mockito.times(1))
+        // 신뢰성 우선: 타임아웃도 재시도 → 최대 MAX_ATTEMPTS 회 호출.
+        verify(runner, org.mockito.Mockito.times(ClaudeApiClientImpl.MAX_ATTEMPTS))
+                .run(any(List.class), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void twoFailures_thenSuccess_recoversWithinMaxAttempts() {
+        String inner = "{\"type\":\"BUG\",\"storyPoint\":2,\"title\":\"T\",\"summary\":\"S\"}";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(1, "", "", false))            // 1차 실패
+                .thenReturn(new ProcessRunner.Result(-1, "", "", true))            // 2차 타임아웃
+                .thenReturn(new ProcessRunner.Result(0, envelope(inner, false), "", false)); // 3차 성공
+
+        IssueClassification result = client.classify("로그인 500 에러");
+
+        assertThat(result.type()).isEqualTo(IssueClassification.IssueType.BUG);
+        verify(runner, org.mockito.Mockito.times(3))
                 .run(any(List.class), anyString(), any(Duration.class));
     }
 

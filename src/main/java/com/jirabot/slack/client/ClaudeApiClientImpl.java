@@ -110,29 +110,29 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         return classify(rawText, null);
     }
 
-    // 한 번의 시도 결과. RETRYABLE = 일시적 실패(재시도 가치 있음), TIMEOUT = 재시도 금지(지연 2배 방지).
+    // 한 번의 시도 결과. (타임아웃도 재시도 대상 — 신뢰성 우선, 응답 즉시성보다 정확 분류 우선.)
     private enum Outcome { OK, RETRYABLE, TIMEOUT }
     private record Attempt(Outcome outcome, IssueClassification result) {}
+
+    // STUDY: Sonnet CLI 가 간헐적으로 exit≠0/빈출력/파싱실패/타임아웃으로 떨어진다(원문이 제목 되는 fallback 유발).
+    //        분류 결과 정확도가 응답 속도보다 중요하므로(비동기 처리라 Slack ack 와 무관) 최대 3회까지 재시도.
+    static final int MAX_ATTEMPTS = 3;
 
     @Override
     public IssueClassification classify(String rawText, IntentResult intentHint) {
         if (rawText == null || rawText.isBlank()) {
             return IssueClassification.fallback(rawText);
         }
-        // STUDY: Sonnet CLI 가 간헐적으로 exit≠0/빈출력/파싱실패로 떨어진다(원문이 제목 되는 fallback 유발).
-        //        타임아웃이 아닌 일시적 실패는 1회 재시도. 타임아웃은 재시도하면 최악 지연이 2배라 즉시 fallback.
-        for (int attempt = 1; attempt <= 2; attempt++) {
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             Attempt a = attemptClassify(rawText, intentHint);
             if (a.outcome() == Outcome.OK) {
                 return a.result();
             }
-            if (a.outcome() == Outcome.TIMEOUT) {
-                break;
-            }
-            if (attempt == 1) {
-                log.info("Claude classify 일시 실패 → 1회 재시도");
+            if (attempt < MAX_ATTEMPTS) {
+                log.info("Claude classify {} (attempt {}/{}) → 재시도", a.outcome(), attempt, MAX_ATTEMPTS);
             }
         }
+        log.warn("Claude classify {}회 모두 실패 → fallback", MAX_ATTEMPTS);
         return fallbackForIntent(rawText, intentHint);
     }
 

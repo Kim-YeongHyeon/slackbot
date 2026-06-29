@@ -34,8 +34,10 @@ public class IntentClassifierImpl implements IntentClassifier {
     private enum Outcome { OK, RETRYABLE, TIMEOUT }
     private record Attempt(Outcome outcome, IntentResult result) {}
 
-    // STUDY: Haiku 응답 지연은 변동이 크다(6~24s 관측). 타임아웃 outlier 도 보통 일시적이라 재시도하면
-    //        다음 호출은 빠른 경우가 많다. 단 최악 지연 폭증을 막으려고 재시도는 짧은 타임아웃으로 건다.
+    // STUDY: Haiku 응답 지연은 변동이 크다(6~24s 관측). 타임아웃 outlier 도 보통 일시적이라 재시도가 빠르게
+    //        성공하는 경우가 많다. 분류 정확도가 응답 즉시성보다 중요하므로 최대 3회까지 재시도한다.
+    //        타임아웃 후 재시도는 짧은 타임아웃으로 걸어 최악 누적 지연을 제한한다.
+    static final int MAX_ATTEMPTS = 3;
     private static final long RETRY_TIMEOUT_SECONDS = 15;
 
     @Override
@@ -44,16 +46,23 @@ public class IntentClassifierImpl implements IntentClassifier {
             return IntentResult.unknown(rawText);
         }
         // STUDY: Haiku CLI 가 간헐적으로 exit≠0/빈출력/파싱실패/타임아웃으로 떨어진다(→ unknown = "명령 못 알아들음").
-        //        일시적 실패는 1회 재시도. 타임아웃도 재시도하되 둘째는 짧은 타임아웃으로 최악 지연을 제한.
-        Attempt first = attemptClassify(rawText, props.timeoutSeconds());
-        if (first.outcome() == Outcome.OK) {
-            return first.result();
+        long timeout = props.timeoutSeconds();
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            Attempt a = attemptClassify(rawText, timeout);
+            if (a.outcome() == Outcome.OK) {
+                return a.result();
+            }
+            // 타임아웃 이후 재시도는 짧은 타임아웃으로(outlier 는 보통 일시적이라 다음 호출은 빠름).
+            if (a.outcome() == Outcome.TIMEOUT) {
+                timeout = RETRY_TIMEOUT_SECONDS;
+            }
+            if (attempt < MAX_ATTEMPTS) {
+                log.info("Haiku intent classify {} (attempt {}/{}) → 재시도(timeout {}s)",
+                        a.outcome(), attempt, MAX_ATTEMPTS, timeout);
+            }
         }
-        long retryTimeout = first.outcome() == Outcome.TIMEOUT
-                ? RETRY_TIMEOUT_SECONDS : props.timeoutSeconds();
-        log.info("Haiku intent classify 일시 실패({}) → 1회 재시도(timeout {}s)", first.outcome(), retryTimeout);
-        Attempt second = attemptClassify(rawText, retryTimeout);
-        return second.outcome() == Outcome.OK ? second.result() : IntentResult.unknown(rawText);
+        log.warn("Haiku intent classify {}회 모두 실패 → unknown", MAX_ATTEMPTS);
+        return IntentResult.unknown(rawText);
     }
 
     private Attempt attemptClassify(String rawText, long timeoutSeconds) {

@@ -80,25 +80,27 @@ class IntentClassifierImplTest {
     }
 
     @Test
-    void timeout_bothAttempts_returnsUnknown() {
+    void allTimeouts_returnsUnknown_afterMaxAttempts() {
         when(runner.run(any(), anyString(), any(Duration.class)))
                 .thenReturn(new ProcessRunner.Result(-1, "", "", true));
 
         IntentResult r = classifier.classify("오래 걸리는 입력");
 
         assertThat(r.intent()).isEqualTo("unknown");
-        verify(runner, times(2)).run(any(List.class), anyString(), any(Duration.class));
+        verify(runner, times(IntentClassifierImpl.MAX_ATTEMPTS))
+                .run(any(List.class), anyString(), any(Duration.class));
     }
 
     @Test
-    void bothAttemptsFail_returnsUnknown() {
+    void allAttemptsFail_returnsUnknown_afterMaxAttempts() {
         when(runner.run(any(), anyString(), any(Duration.class)))
                 .thenReturn(new ProcessRunner.Result(1, "", "", false));
 
         IntentResult r = classifier.classify("뭔가");
 
         assertThat(r.intent()).isEqualTo("unknown");
-        verify(runner, times(2)).run(any(List.class), anyString(), any(Duration.class));
+        verify(runner, times(IntentClassifierImpl.MAX_ATTEMPTS))
+                .run(any(List.class), anyString(), any(Duration.class));
     }
 
     @Test
