@@ -391,6 +391,61 @@ async function addFeature() {
   }
 }
 
+/* ---------- 버그 지식베이스 ---------- */
+let kbData = [];
+
+async function loadKnowledge() {
+  kbData = await get('/bug-knowledge');
+  fillSelect('kb-category', [...new Set(kbData.map(r => r.category).filter(Boolean))].sort());
+  renderKnowledge();
+}
+
+function renderKnowledge() {
+  const q = document.getElementById('kb-q').value.trim().toLowerCase();
+  const cat = document.getElementById('kb-category').value;
+  const st = document.getElementById('kb-status').value;
+  const list = kbData
+    .filter(r => !cat || r.category === cat)
+    .filter(r => !st || r.status === st)
+    .filter(r => !q || [r.key, r.title, r.rootCause, r.fix].some(
+        v => (v || '').toLowerCase().includes(q)));
+
+  // 카테고리 분포 카드 (현재 필터 반영)
+  const byCat = {};
+  list.forEach(r => { if (r.category) byCat[r.category] = (byCat[r.category] || 0) + 1; });
+  const top = Object.entries(byCat).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  document.getElementById('kb-cards').innerHTML =
+    card('표시 중', list.length === kbData.length ? list.length : `${list.length} <span class="muted">/ ${kbData.length}</span>`) +
+    top.map(([c, n]) => card(c, n)).join('');
+
+  rows('table-knowledge', list.map(r =>
+    `<tr><td>${r.jiraUrl ? `<a href="${r.jiraUrl}" target="_blank">${esc(r.key)}</a>` : esc(r.key)}</td>` +
+    `<td>${esc(r.title)}</td>` +
+    `<td>${r.category ? `<span class="badge progress">${esc(r.category)}</span>` : '-'}</td>` +
+    `<td class="muted">${r.subcategories.map(esc).join(', ')}</td>` +
+    `<td style="max-width:260px">${esc(r.rootCause)}</td>` +
+    `<td style="max-width:260px">${esc(r.fix)}</td>` +
+    `<td>${r.prLinks.map(p => `<a href="${p.url}" target="_blank">${esc(p.label)}</a>`).join('<br>') || '-'}</td>` +
+    `<td class="muted">${esc(r.resolvedDate || '-')}</td></tr>`).join('')
+    || '<tr><td colspan="8" class="muted">결과 없음</td></tr>');
+}
+
+/* ---------- GitHub ↔ Jira 매핑 ---------- */
+async function loadGhMappings() {
+  const res = await fetch('/api/github-mappings');
+  const d = await res.json();
+  rows('table-gh', d.map(m =>
+    `<tr><td>${esc(m.githubLogin)}</td><td>${esc(m.jiraDisplayName)}</td>` +
+    `<td class="muted">${m.jiraAccountId ? '✓' : '-'}</td>` +
+    `<td><button class="btn danger" data-ghdel="${esc(m.githubLogin)}">삭제</button></td></tr>`).join('')
+    || '<tr><td colspan="4" class="muted">매핑 없음</td></tr>');
+  document.querySelectorAll('#table-gh [data-ghdel]').forEach(b => b.onclick = async () => {
+    if (!confirm(b.dataset.ghdel + ' 매핑을 삭제할까요?')) return;
+    await fetch('/api/github-mappings/' + b.dataset.ghdel, { method: 'DELETE' });
+    loadGhMappings();
+  });
+}
+
 async function loadBot() {
   let health = '🔴 DOWN';
   try {
@@ -427,7 +482,8 @@ async function loadBot() {
 
 const LOADERS = { overview: loadOverview, sprint: loadSprint, trends: loadTrends,
   workload: loadWorkload, bugs: loadBugs, prs: loadPrs, issues: loadIssues,
-  users: loadUsers, bot: loadBot, features: loadFeatures };
+  users: async () => { await loadUsers(); await loadGhMappings(); },
+  knowledge: loadKnowledge, bot: loadBot, features: loadFeatures };
 
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -444,6 +500,25 @@ document.getElementById('btn-filter').onclick = loadIssues;
 document.getElementById('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadIssues(); });
 document.getElementById('wl-scope').onchange = loadWorkload;
 document.getElementById('bug-scope').onchange = loadBugs;
+document.getElementById('kb-q').addEventListener('input', renderKnowledge);
+['kb-category', 'kb-status'].forEach(id => document.getElementById(id).onchange = renderKnowledge);
+document.getElementById('btn-gh-add').onclick = async () => {
+  const githubLogin = document.getElementById('gh-login').value.trim();
+  const jiraDisplayName = document.getElementById('gh-jira').value.trim();
+  const msg = document.getElementById('gh-msg');
+  if (!githubLogin || !jiraDisplayName) {
+    msg.className = 'msg err'; msg.textContent = 'GitHub 로그인과 Jira 이름을 모두 입력하세요.'; return;
+  }
+  const res = await fetch('/api/github-mappings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ githubLogin, jiraDisplayName })
+  });
+  const d = await res.json();
+  if (!res.ok) { msg.className = 'msg err'; msg.textContent = d.error ?? '등록 실패'; return; }
+  msg.className = 'msg ok'; msg.textContent = `${d.status === 'created' ? '등록' : '갱신'} 완료`;
+  document.getElementById('gh-login').value = ''; document.getElementById('gh-jira').value = '';
+  loadGhMappings();
+};
 document.getElementById('issues-sort-key').onclick = () => {
   issueKeyDir = issueKeyDir === 'asc' ? 'desc' : 'asc';
   renderIssues();

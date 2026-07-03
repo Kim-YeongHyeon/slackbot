@@ -19,6 +19,8 @@ public class CacheConfig {
     public static final String ACTIVE_SPRINT_CACHE = "activeSprint";
     // 대시보드 PR 현황 — repo 수만큼 GitHub 왕복이라 캐시 필수 (rate limit + 응답속도).
     public static final String OPEN_PRS_CACHE = "openPrs";
+    // 버그 지식베이스 — Notion 전체 조회(페이지네이션)라 느림 → 캐시.
+    public static final String BUG_KNOWLEDGE_CACHE = "bugKnowledge";
 
     // STUDY: TTL 5분 — 스프린트 시작/종료, PR 생성/머지가 캐시에 반영되기까지의 최대 지연.
     //        두 캐시 모두 "자주 읽고 천천히 변하는" 외부 API 응답이라 동일 정책을 공유한다.
@@ -26,7 +28,8 @@ public class CacheConfig {
 
     @Bean
     public CacheManager cacheManager() {
-        CaffeineCacheManager manager = new CaffeineCacheManager(ACTIVE_SPRINT_CACHE, OPEN_PRS_CACHE);
+        CaffeineCacheManager manager =
+                new CaffeineCacheManager(ACTIVE_SPRINT_CACHE, OPEN_PRS_CACHE, BUG_KNOWLEDGE_CACHE);
         manager.setCaffeine(Caffeine.newBuilder()
                 .expireAfterWrite(CACHE_TTL)
                 .maximumSize(10));

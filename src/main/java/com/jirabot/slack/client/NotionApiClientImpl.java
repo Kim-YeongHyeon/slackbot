@@ -29,6 +29,9 @@ public class NotionApiClientImpl implements NotionApiClient {
                 .defaultHeader("Authorization", "Bearer " + (props.token() == null ? "" : props.token()))
                 .defaultHeader("Notion-Version", props.version())
                 .defaultHeader("Content-Type", "application/json")
+                // STUDY: 100-page query 응답이 기본 256KB 버퍼를 넘겨 DataBufferLimitException 으로 조용히
+                //        빈 결과가 되는 버그(jira/github WebClient 와 동일 부류, lessons 참고) → 8MB 상향.
+                .codecs(c -> c.defaultCodecs().maxInMemorySize(8 * 1024 * 1024))
                 .build();
     }
 
@@ -84,6 +87,34 @@ public class NotionApiClientImpl implements NotionApiClient {
         } catch (Exception e) {
             log.warn("Notion createRow failed db={}: {}", databaseId, e.toString());
         }
+    }
+
+    @Override
+    public java.util.List<JsonNode> queryAllPages(String databaseId) {
+        java.util.List<JsonNode> pages = new java.util.ArrayList<>();
+        try {
+            String cursor = null;
+            int guard = 0;
+            do {
+                Map<String, Object> body = cursor == null
+                        ? Map.of("page_size", 100)
+                        : Map.of("page_size", 100, "start_cursor", cursor);
+                String resp = notionWebClient.post()
+                        .uri("/databases/{id}/query", databaseId)
+                        .bodyValue(body)
+                        .retrieve().bodyToMono(String.class).block();
+                JsonNode root = objectMapper.readTree(resp);
+                for (JsonNode row : root.path("results")) {
+                    pages.add(row);
+                }
+                cursor = root.path("has_more").asBoolean(false)
+                        ? root.path("next_cursor").asText(null) : null;
+                guard++;
+            } while (cursor != null && guard < 20);
+        } catch (Exception e) {
+            log.warn("Notion queryAllPages failed db={}: {}", databaseId, e.toString());
+        }
+        return pages;
     }
 
     @Override

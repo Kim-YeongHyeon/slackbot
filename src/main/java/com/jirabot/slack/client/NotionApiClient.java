@@ -15,4 +15,10 @@ public interface NotionApiClient {
 
     /** 기존 row(page) 의 properties 를 갱신한다. */
     void updateRow(String pageId, Map<String, Object> properties);
+
+    /**
+     * DB 의 전체 row(page) 를 페이지네이션 순회로 모두 가져온다(properties 원본 JSON).
+     * 대시보드 버그 지식베이스 조회용. 실패 시 빈 목록.
+     */
+    java.util.List<com.fasterxml.jackson.databind.JsonNode> queryAllPages(String databaseId);
 }

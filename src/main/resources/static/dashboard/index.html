@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>지라봇 대시보드</title>
-  <link rel="stylesheet" href="style.css?v=0.0.42">
+  <link rel="stylesheet" href="style.css?v=0.0.52">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -25,6 +25,7 @@
   <button class="tab" data-tab="prs">PR 현황</button>
   <button class="tab" data-tab="issues">이슈 목록</button>
   <button class="tab" data-tab="users">사용자 관리</button>
+  <button class="tab" data-tab="knowledge">버그 지식</button>
   <button class="tab" data-tab="bot">봇 상태</button>
   <button class="tab" data-tab="features">기능요청</button>
 </nav>
@@ -142,6 +143,28 @@
     </div>
     <div id="user-msg" class="msg"></div>
     <table id="table-users"><thead><tr><th>Slack</th><th>Jira 이름</th><th>accountId</th><th>리마인더</th><th>할당알림</th><th></th></tr></thead><tbody></tbody></table>
+
+    <h3>GitHub ↔ Jira 매핑 <span class="muted">(PR import 시 보고자/담당자 해석 1순위)</span></h3>
+    <div class="form-row">
+      <input id="gh-login" type="text" placeholder="GitHub 로그인 (예: Kim-YeongHyeon)">
+      <input id="gh-jira" type="text" placeholder="Jira 표시 이름 (예: YeongHyeonKim)">
+      <button id="btn-gh-add" class="btn primary">등록 / 갱신</button>
+    </div>
+    <div id="gh-msg" class="msg"></div>
+    <table id="table-gh"><thead><tr><th>GitHub</th><th>Jira 이름</th><th>accountId</th><th></th></tr></thead><tbody></tbody></table>
+  </section>
+
+  <!-- 버그 지식베이스 -->
+  <section id="panel-knowledge" class="panel">
+    <h2>버그 지식베이스 <span class="muted">(Notion '버그 현황' 동기화 · 5분 캐시)</span>
+      <a class="btn" href="/api/dashboard/export/bug-knowledge.csv" download>CSV 내보내기</a></h2>
+    <div class="filters">
+      <input id="kb-q" type="text" placeholder="검색 (제목·근본원인·해결방법·키)" style="flex:1;min-width:240px">
+      <select id="kb-category"><option value="">원인분류 전체</option></select>
+      <select id="kb-status"><option value="">상태 전체</option><option>미해결</option><option>해결</option></select>
+    </div>
+    <div class="cards" id="kb-cards"></div>
+    <table id="table-knowledge"><thead><tr><th>키</th><th>제목</th><th>원인분류</th><th>세부원인</th><th>근본원인</th><th>해결방법</th><th>PR</th><th>해결일</th></tr></thead><tbody></tbody></table>
   </section>
 
   <!-- 봇 상태 -->
@@ -172,6 +195,6 @@
 </main>
 
 <footer class="muted">사내망 전용 · 데이터는 로컬 DB 기준 (Jira 와의 차이는 [지금 동기화] 후 새로고침)</footer>
-<script src="app.js?v=0.0.42"></script>
+<script src="app.js?v=0.0.52"></script>
 </body>
 </html>

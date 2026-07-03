@@ -37,4 +37,7 @@ public interface DashboardService {
 
     /** 열린 PR 현황 + 연결 Jira 이슈 (5분 캐시 — CacheConfig.OPEN_PRS_CACHE). */
     com.jirabot.slack.dto.dashboard.DashboardDtos.PrBoard prs();
+
+    /** 버그 지식베이스 — Notion '버그 현황' DB 전체 (5분 캐시). 검색/필터는 프런트에서. */
+    List<com.jirabot.slack.dto.dashboard.DashboardDtos.BugKnowledgeRow> bugKnowledge();
 }

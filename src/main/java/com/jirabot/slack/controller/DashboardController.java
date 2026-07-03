@@ -99,6 +99,36 @@ public class DashboardController {
         return dashboardService.responseMetrics();
     }
 
+    // 버그 지식베이스 — Notion '버그 현황' 원본 (5분 캐시). 검색/필터는 프런트에서.
+    @GetMapping("/bug-knowledge")
+    public List<com.jirabot.slack.dto.dashboard.DashboardDtos.BugKnowledgeRow> bugKnowledge() {
+        return dashboardService.bugKnowledge();
+    }
+
+    // CSV 내보내기 — 유료 서비스형 리포팅. Excel 호환 위해 UTF-8 BOM 포함.
+    @GetMapping(value = "/export/bug-knowledge.csv", produces = "text/csv")
+    public org.springframework.http.ResponseEntity<byte[]> exportBugKnowledgeCsv() {
+        StringBuilder sb = new StringBuilder("﻿");
+        sb.append("key,title,status,category,subcategories,rootCause,fix,prLinks,resolvedDate\n");
+        for (var r : dashboardService.bugKnowledge()) {
+            sb.append(String.join(",",
+                    csv(r.key()), csv(r.title()), csv(r.status()), csv(r.category()),
+                    csv(String.join(" | ", r.subcategories())),
+                    csv(r.rootCause()), csv(r.fix()),
+                    csv(r.prLinks().stream().map(p -> p.url()).reduce((a, b) -> a + " | " + b).orElse("")),
+                    csv(r.resolvedDate()))).append('\n');
+        }
+        return org.springframework.http.ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=\"bug-knowledge.csv\"")
+                .body(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static String csv(String s) {
+        if (s == null) return "";
+        String v = s.replace("\"", "\"\"").replace("\n", " ");
+        return "\"" + v + "\"";
+    }
+
     // STUDY: 수동 동기화 — fullSync 는 2~5초 동기 실행. 대시보드 버튼 1회성 호출 용도라
     //        비동기로 빼지 않는다 (브라우저가 결과 메시지를 바로 보여줄 수 있음).
     @PostMapping("/actions/sync")

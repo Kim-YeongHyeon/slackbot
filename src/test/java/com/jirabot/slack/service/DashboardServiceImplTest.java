@@ -30,6 +30,7 @@ class DashboardServiceImplTest {
     private JiraSyncService jiraSyncService;
     private com.jirabot.slack.client.GitHubApiClient gitHubApiClient;
     private com.jirabot.slack.client.JiraApiClient jiraApiClient;
+    private com.jirabot.slack.client.NotionApiClient notionApiClient;
     private DashboardServiceImpl service;
 
     private DashboardServiceImpl build(com.jirabot.slack.config.GitHubProperties gitHubProps) {
@@ -39,7 +40,9 @@ class DashboardServiceImplTest {
                 null, new JiraProperties.IssueTypes("버그", "작업", "하위 작업"));
         return new DashboardServiceImpl(issueRepository, userMappingRepository,
                 intentFailureRepository, responseMetricRepository, jiraSyncService, reminderProps,
-                gitHubApiClient, gitHubProps, jiraApiClient, jiraProps);
+                gitHubApiClient, gitHubProps, jiraApiClient, notionApiClient,
+                new com.jirabot.slack.config.NotionProperties(true, "tok", null, "page", null, "status-db"),
+                jiraProps);
     }
 
     @BeforeEach
@@ -51,6 +54,7 @@ class DashboardServiceImplTest {
         jiraSyncService = mock(JiraSyncService.class);
         gitHubApiClient = mock(com.jirabot.slack.client.GitHubApiClient.class);
         jiraApiClient = mock(com.jirabot.slack.client.JiraApiClient.class);
+        notionApiClient = mock(com.jirabot.slack.client.NotionApiClient.class);
         when(jiraSyncService.lastSyncAt()).thenReturn(Optional.empty());
         service = build(new com.jirabot.slack.config.GitHubProperties(
                 "tok", "CryptoLabInc", List.of("evi"), "https://api.github.com"));
@@ -386,6 +390,37 @@ class DashboardServiceImplTest {
         assertThat(board.weekly().count()).isZero();
         assertThat(board.weekly().p95Ms()).isZero();
         assertThat(board.recent()).isEmpty();
+    }
+
+    @Test
+    void bugKnowledge_parsesNotionPageProperties() throws Exception {
+        String pageJson = """
+            {"properties":{
+              "이슈":{"title":[{"plain_text":"ES2-2075 kms-tee CGo 포인터 규칙 위반"}]},
+              "상태":{"select":{"name":"해결"}},
+              "원인분류":{"select":{"name":"C 키·암호"}},
+              "세부원인":{"multi_select":[{"name":"C3 KMS·CGo"}]},
+              "근본원인":{"rich_text":[{"plain_text":"Go 포인터를 C로 직접 전달"}]},
+              "해결방법":{"rich_text":[{"plain_text":"uintptr 저장으로 변경"}]},
+              "PR링크":{"rich_text":[{"plain_text":"evi #723","text":{"link":{"url":"https://github.com/CryptoLabInc/evi/pull/723"}}}]},
+              "Jira링크":{"url":"https://j.example.com/browse/ES2-2075"},
+              "해결일":{"date":{"start":"2026-06-16"}}
+            }}""";
+        var node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(pageJson);
+        when(notionApiClient.queryAllPages("status-db")).thenReturn(List.of(node));
+
+        var rows = service.bugKnowledge();
+
+        assertThat(rows).hasSize(1);
+        var r = rows.get(0);
+        assertThat(r.key()).isEqualTo("ES2-2075");
+        assertThat(r.title()).isEqualTo("kms-tee CGo 포인터 규칙 위반");
+        assertThat(r.category()).isEqualTo("C 키·암호");
+        assertThat(r.subcategories()).containsExactly("C3 KMS·CGo");
+        assertThat(r.fix()).contains("uintptr");
+        assertThat(r.prLinks()).hasSize(1);
+        assertThat(r.prLinks().get(0).url()).contains("/pull/723");
+        assertThat(r.resolvedDate()).isEqualTo("2026-06-16");
     }
 
     private void setFailedAt(IntentFailureEntity e, Instant at) {

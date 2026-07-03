@@ -84,4 +84,12 @@ public final class DashboardDtos {
 
     /** 응답 시간 보드 — GET /api/dashboard/response-metrics */
     public record ResponseMetricBoard(ResponseMetricStats weekly, List<ResponseMetricRow> recent) {}
+
+    /** 버그 지식베이스 한 줄 — Notion '버그 현황' DB 원본 (5분 캐시) */
+    public record BugKnowledgeRow(String key, String title, String status, String category,
+                                  List<String> subcategories, String rootCause, String fix,
+                                  List<PrLink> prLinks, String jiraUrl, String resolvedDate) {}
+
+    /** PR 링크 (라벨 + URL) */
+    public record PrLink(String label, String url) {}
 }

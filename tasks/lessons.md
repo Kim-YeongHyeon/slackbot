@@ -243,3 +243,18 @@ keychain 읽기까지 스킵해서 구독(OAuth) 인증 토큰을 못 읽는다.
 
 **How to apply**: Jira(또는 임의 SaaS) 날짜를 Instant 로 바꾸는 지점을 보면 오프셋 형식(`+0900` vs `+09:00` vs `Z`)을
 실측하고 견고 파서를 쓴다. 동기화가 채우는 컬럼은 배포 후 `SELECT count(col)` 로 null 비율을 확인.
+
+---
+
+## L14 — 자체 생성 WebClient 는 기본 256KB 버퍼: 큰 응답이 "조용히 빈 결과"가 된다 (3회 반복)
+
+**Context**: 같은 함정을 세 번 밟음 — ①jiraWebClient(JQL 대량 조회, v0.0.34) ②githubWebClient(PR 많은 repo, v0.0.43)
+③NotionApiClientImpl 자체 WebClient(100-page query, v0.0.52). 모두 `DataBufferLimitException: 262144` 인데
+HTTP 는 200 이라 에러 플래그로 안 잡히고, catch 가 빈 목록을 반환해 **데이터가 조용히 사라진 것처럼** 보였다.
+
+**Rule**:
+- WebClient 를 새로 만들면(전역 config 밖 로컬 빌더 포함) **`.codecs(c -> c.defaultCodecs().maxInMemorySize(8MB))` 를 기본으로** 넣는다.
+- "외부 API가 0건을 반환한다" 증상이면 로그에서 `DataBufferLimitException` 을 1순위로 grep.
+- 신규 외부 연동 리뷰 체크리스트에 버퍼 설정 포함.
+
+**How to apply**: `grep -rn "WebClient.builder" src/` 로 로컬 생성 지점을 찾아 maxInMemorySize 유무를 확인한다.

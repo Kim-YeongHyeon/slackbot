@@ -54,6 +54,8 @@ public class DashboardServiceImpl implements DashboardService {
     private final com.jirabot.slack.client.GitHubApiClient gitHubApiClient;
     private final com.jirabot.slack.config.GitHubProperties gitHubProps;
     private final com.jirabot.slack.client.JiraApiClient jiraApiClient;
+    private final com.jirabot.slack.client.NotionApiClient notionApiClient;
+    private final com.jirabot.slack.config.NotionProperties notionProps;
     private final String jiraBaseUrl;
     private final String bugTypeName;
     private final String projectKey;
@@ -67,6 +69,8 @@ public class DashboardServiceImpl implements DashboardService {
                                 com.jirabot.slack.client.GitHubApiClient gitHubApiClient,
                                 com.jirabot.slack.config.GitHubProperties gitHubProps,
                                 com.jirabot.slack.client.JiraApiClient jiraApiClient,
+                                com.jirabot.slack.client.NotionApiClient notionApiClient,
+                                com.jirabot.slack.config.NotionProperties notionProps,
                                 JiraProperties jiraProps) {
         this.issueRepository = issueRepository;
         this.userMappingRepository = userMappingRepository;
@@ -77,6 +81,8 @@ public class DashboardServiceImpl implements DashboardService {
         this.gitHubApiClient = gitHubApiClient;
         this.gitHubProps = gitHubProps;
         this.jiraApiClient = jiraApiClient;
+        this.notionApiClient = notionApiClient;
+        this.notionProps = notionProps;
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl().replaceAll("/+$", "");
         this.jiraBaseUrl = base;
         this.bugTypeName = jiraProps.issueTypes() != null && jiraProps.issueTypes().bug() != null
@@ -370,6 +376,60 @@ public class DashboardServiceImpl implements DashboardService {
     private static long percentile(long[] sorted, int p) {
         int idx = (int) Math.ceil(p / 100.0 * sorted.length) - 1;
         return sorted[Math.max(0, Math.min(idx, sorted.length - 1))];
+    }
+
+    // --- 버그 지식베이스 (Notion '버그 현황' DB) ---
+
+    // STUDY: Notion 전체 조회는 페이지네이션 왕복이라 느림 → 5분 캐시. 검색/카테고리 필터는
+    //        데이터가 수백 건 수준이라 프런트(클라이언트 사이드)에서 처리한다(PR 탭과 동일 패턴).
+    @Override
+    @org.springframework.cache.annotation.Cacheable(com.jirabot.slack.config.CacheConfig.BUG_KNOWLEDGE_CACHE)
+    public List<com.jirabot.slack.dto.dashboard.DashboardDtos.BugKnowledgeRow> bugKnowledge() {
+        String dbId = notionProps.statusDbId();
+        if (!notionProps.effectivelyEnabled() || dbId == null || dbId.isBlank()) {
+            return List.of();
+        }
+        List<com.jirabot.slack.dto.dashboard.DashboardDtos.BugKnowledgeRow> rows = new ArrayList<>();
+        for (com.fasterxml.jackson.databind.JsonNode page : notionApiClient.queryAllPages(dbId)) {
+            com.fasterxml.jackson.databind.JsonNode p = page.path("properties");
+            String title = plainText(p.path("이슈").path("title"));
+            String key = title.isBlank() ? "" : title.split(" ", 2)[0];
+            List<com.jirabot.slack.dto.dashboard.DashboardDtos.PrLink> prs = new ArrayList<>();
+            for (com.fasterxml.jackson.databind.JsonNode t : p.path("PR링크").path("rich_text")) {
+                String url = t.path("text").path("link").path("url").asText(null);
+                if (url != null) {
+                    prs.add(new com.jirabot.slack.dto.dashboard.DashboardDtos.PrLink(
+                            t.path("plain_text").asText(url), url));
+                }
+            }
+            List<String> subs = new ArrayList<>();
+            for (com.fasterxml.jackson.databind.JsonNode s : p.path("세부원인").path("multi_select")) {
+                subs.add(s.path("name").asText(""));
+            }
+            rows.add(new com.jirabot.slack.dto.dashboard.DashboardDtos.BugKnowledgeRow(
+                    key,
+                    title.contains(" ") ? title.substring(title.indexOf(' ') + 1) : title,
+                    p.path("상태").path("select").path("name").asText(""),
+                    p.path("원인분류").path("select").path("name").asText(""),
+                    subs,
+                    plainText(p.path("근본원인").path("rich_text")),
+                    plainText(p.path("해결방법").path("rich_text")),
+                    prs,
+                    p.path("Jira링크").path("url").asText(null),
+                    p.path("해결일").path("date").path("start").asText(null)));
+        }
+        rows.sort(Comparator.comparing(
+                com.jirabot.slack.dto.dashboard.DashboardDtos.BugKnowledgeRow::resolvedDate,
+                Comparator.nullsLast(Comparator.reverseOrder())));
+        return rows;
+    }
+
+    private static String plainText(com.fasterxml.jackson.databind.JsonNode arr) {
+        StringBuilder sb = new StringBuilder();
+        for (com.fasterxml.jackson.databind.JsonNode t : arr) {
+            sb.append(t.path("plain_text").asText(""));
+        }
+        return sb.toString();
     }
 
     // --- PR 현황 ---
