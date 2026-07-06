@@ -914,19 +914,6 @@ class SlackEventControllerTest {
         assertThat(msg.getValue()).contains("Blocks");
     }
 
-    @Test
-    void unlinkCommand_repliesNotYetSupported() throws Exception {
-        mockMvc.perform(post("/api/slack/event")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(appMentionEvent("<@U0BOT> ES2-10 ES2-20 링크 해제해줘", freshTs())))
-                .andExpect(status().isOk());
-
-        verify(jiraApiClient, never()).linkIssues(anyString(), anyString(), anyString());
-        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
-        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
-        assertThat(msg.getValue()).contains("지원 예정");
-    }
-
     // --- 필드 수정 / 스프린트 이동 ---
 
     @Test
@@ -1014,6 +1001,68 @@ class SlackEventControllerTest {
                 .andExpect(status().isOk());
 
         verify(jiraApiClient).moveToActiveSprint("ES2-123");
+    }
+
+    // --- 링크 조회 / 해제 ---
+
+    @Test
+    void linkList_rendersLinks() throws Exception {
+        when(jiraApiClient.getIssueLinks("ES2-1")).thenReturn(List.of(
+                new com.jirabot.slack.client.dto.IssueLinkInfo("5001", "blocks", "ES2-2", "결제"),
+                new com.jirabot.slack.client.dto.IssueLinkInfo("5002", "is blocked by", "ES2-3", "인증")));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1 링크 보여줘", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("ES2-2").contains("blocks").contains("ES2-3");
+    }
+
+    @Test
+    void linkList_noLinks_repliesEmpty() throws Exception {
+        when(jiraApiClient.getIssueLinks("ES2-1")).thenReturn(List.of());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1 링크 목록 알려줘", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("링크가 없");
+    }
+
+    @Test
+    void unlink_findsLinkIdAndDeletes() throws Exception {
+        when(jiraApiClient.getIssueLinks("ES2-1")).thenReturn(List.of(
+                new com.jirabot.slack.client.dto.IssueLinkInfo("5001", "blocks", "ES2-2", "결제")));
+        when(jiraApiClient.deleteIssueLink("5001")).thenReturn(true);
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1 ES2-2 링크 해제해줘", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).deleteIssueLink("5001");
+    }
+
+    @Test
+    void unlink_noLinkBetweenPair_repliesNotFound() throws Exception {
+        when(jiraApiClient.getIssueLinks("ES2-1")).thenReturn(List.of(
+                new com.jirabot.slack.client.dto.IssueLinkInfo("5001", "blocks", "ES2-9", "다른것")));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1 ES2-2 링크 해제", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).deleteIssueLink(anyString());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("링크가 없");
     }
 
     // --- 할당알림 토글 ---

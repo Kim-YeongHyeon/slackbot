@@ -138,12 +138,34 @@ public final class IssueCommandParser {
     private static final Pattern ACTIVE = Pattern.compile(
             "(?i)((를|을)\\s*(?:block|블락|블록|막)|\\bblocks\\b)");
 
-    /** 링크 해제 명령인지(키 2개 + 해제 동사 + 링크/연결 언급). Phase 4 전까지 "지원 예정" 응답용. */
-    public static boolean isUnlink(String text) {
-        if (text == null) return false;
-        return UNLINK_KW.matcher(text).find()
-                && (RELATES_KW.matcher(text).find() || text.toLowerCase().contains("링크"))
-                && twoKeys(text) != null;
+    private static final Pattern LINK_MENTION = Pattern.compile("(?i)(링크|link)");
+    private static final Pattern LINK_LIST_VERB = Pattern.compile("(?i)(보여|목록|조회|리스트|show|list|알려)");
+
+    /** 링크 해제 명령이면 [키A, 키B](대문자), 아니면 empty. (키 2개 + 해제 동사 + 링크 언급) */
+    public static Optional<String[]> parseUnlink(String text) {
+        if (text == null || text.isBlank()) {
+            return Optional.empty();
+        }
+        if (!UNLINK_KW.matcher(text).find() || !LINK_MENTION.matcher(text).find()) {
+            return Optional.empty();
+        }
+        String[] keys = twoKeys(text);
+        return keys == null ? Optional.empty() : Optional.of(keys);
+    }
+
+    /** 링크 목록 조회 명령이면 대상 키, 아니면 empty. (키 1개 + 링크 + 조회 동사) */
+    public static Optional<String> parseLinkList(String text) {
+        if (text == null || text.isBlank()) {
+            return Optional.empty();
+        }
+        if (!LINK_MENTION.matcher(text).find() || !LINK_LIST_VERB.matcher(text).find()) {
+            return Optional.empty();
+        }
+        // 해제 명령과 구분(해제 동사가 있으면 목록이 아님)
+        if (UNLINK_KW.matcher(text).find()) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(oneKey(text));
     }
 
     /**

@@ -189,9 +189,30 @@ class IssueCommandParserTest {
     }
 
     @Test
-    void isUnlink_detectsRemovalWithTwoKeys() {
-        assertThat(IssueCommandParser.isUnlink("ES2-10 ES2-20 링크 해제해줘")).isTrue();
-        assertThat(IssueCommandParser.isUnlink("ES2-10이 ES2-20에 막혀있어 연결")).isFalse();
+    void parseUnlink_detectsRemovalWithTwoKeys() {
+        var u = IssueCommandParser.parseUnlink("ES2-10 ES2-20 링크 해제해줘");
+        assertThat(u).isPresent();
+        assertThat(u.get()).containsExactly("ES2-10", "ES2-20");
+        // 링크 생성 명령은 해제로 잡히면 안 됨
+        assertThat(IssueCommandParser.parseUnlink("ES2-10이 ES2-20에 막혀있어 연결")).isEmpty();
+    }
+
+    @Test
+    void parseLinkList_detectsWithOneKey() {
+        assertThat(IssueCommandParser.parseLinkList("ES2-123 링크 보여줘")).contains("ES2-123");
+        assertThat(IssueCommandParser.parseLinkList("ES2-123 링크 목록 알려줘")).contains("ES2-123");
+    }
+
+    @Test
+    void parseLinkList_notWhenRemoval() {
+        // 해제 동사가 있으면 목록 조회가 아님
+        assertThat(IssueCommandParser.parseLinkList("ES2-1 ES2-2 링크 해제")).isEmpty();
+    }
+
+    @Test
+    void parseLinkList_notWithoutLinkOrVerb() {
+        assertThat(IssueCommandParser.parseLinkList("ES2-123 보여줘")).isEmpty();
+        assertThat(IssueCommandParser.parseLinkList("ES2-123 링크")).isEmpty();
     }
 
     // ==================== 필드 수정 / 스프린트 이동 ====================

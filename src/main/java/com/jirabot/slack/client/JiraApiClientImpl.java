@@ -262,6 +262,59 @@ public class JiraApiClientImpl implements JiraApiClient {
         }
     }
 
+    // STUDY: 이슈 링크 목록 — issuelinks 항목은 조회자 상대적. outwardIssue 가 있으면 this→outward→그 이슈,
+    //        inwardIssue 가 있으면 this→inward→그 이슈. 상대 이슈/관계 설명/링크 ID 를 추출한다.
+    @Override
+    public List<com.jirabot.slack.client.dto.IssueLinkInfo> getIssueLinks(String issueKey) {
+        List<com.jirabot.slack.client.dto.IssueLinkInfo> result = new ArrayList<>();
+        try {
+            String json = jiraWebClient.get()
+                    .uri("/rest/api/3/issue/{key}?fields=issuelinks", issueKey)
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode links = objectMapper.readTree(json).path("fields").path("issuelinks");
+            for (JsonNode link : links) {
+                String linkId = link.path("id").asText(null);
+                JsonNode type = link.path("type");
+                JsonNode outward = link.path("outwardIssue");
+                JsonNode inward = link.path("inwardIssue");
+                String desc;
+                JsonNode other;
+                if (!outward.isMissingNode() && !outward.isNull()) {
+                    desc = type.path("outward").asText("");
+                    other = outward;
+                } else {
+                    desc = type.path("inward").asText("");
+                    other = inward;
+                }
+                if (other.isMissingNode() || other.isNull()) {
+                    continue;
+                }
+                result.add(new com.jirabot.slack.client.dto.IssueLinkInfo(
+                        linkId, desc,
+                        other.path("key").asText(null),
+                        other.path("fields").path("summary").asText(null)));
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch issue links for {}: {}", issueKey, e.toString());
+        }
+        return result;
+    }
+
+    // STUDY: 링크 삭제 — DELETE /rest/api/3/issueLink/{id} 는 204. 실패 시 false.
+    @Override
+    public boolean deleteIssueLink(String linkId) {
+        try {
+            jiraWebClient.delete()
+                    .uri("/rest/api/3/issueLink/{id}", linkId)
+                    .retrieve().bodyToMono(String.class).block();
+            log.info("Deleted issue link {}", linkId);
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to delete issue link {}: {}", linkId, e.toString());
+            return false;
+        }
+    }
+
     // STUDY: @Cacheable — 호출마다 Jira 왕복 2회(보드+스프린트)를 5분 TTL 캐시(CacheConfig)로 흡수.
     //        스프린트는 2주 주기로 바뀌므로 5분 staleness 는 무해. Optional 자체가 캐시되므로
     //        "활성 스프린트 없음"(empty) 도 5분간 재조회하지 않는다.

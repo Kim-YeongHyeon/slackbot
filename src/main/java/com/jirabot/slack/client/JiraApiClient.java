@@ -59,6 +59,18 @@ public interface JiraApiClient {
     boolean updateIssueFields(String issueKey, java.util.Map<String, Object> fields);
 
     /**
+     * 이슈의 링크 목록을 조회한다(조회자 기준). GET /rest/api/3/issue/{key}?fields=issuelinks.
+     */
+    List<com.jirabot.slack.client.dto.IssueLinkInfo> getIssueLinks(String issueKey);
+
+    /**
+     * 링크를 삭제한다. DELETE /rest/api/3/issueLink/{id}.
+     *
+     * @return 성공 여부 (204)
+     */
+    boolean deleteIssueLink(String linkId);
+
+    /**
      * Jira displayName으로 유저를 검색하여 accountId를 반환한다.
      */
     String findAccountId(String displayName);

@@ -77,6 +77,8 @@ public class SlackEventController {
               `@지라 ES2-1이 ES2-2에 막혀있어` — 이슈 링크 생성 (blocks/relates/duplicate, 방향 모호 시 확인 버튼)
               `@지라 ES2-123 SP 3으로 변경` — SP/제목/마감일/우선순위 수정 (제목은 따옴표 필요)
               `@지라 ES2-123 스프린트로 옮겨줘` — 현재 활성 스프린트로 이동
+              `@지라 ES2-123 링크 보여줘` — 이슈 링크 목록 조회
+              `@지라 ES2-1 ES2-2 링크 해제` — 두 이슈 사이 링크 제거
               `@지라 할당알림 on` / `off` / `상태` — 이슈가 나에게 할당되면 DM 알림 (기본 ON)
               `@지라 리마인더 on` / `off` / `상태` — 평일 09:00 미해결 이슈 DM 알림 토글
               `@지라 notion백필` — Jira 전체 버그를 Notion '버그 현황' DB로 동기화
@@ -345,10 +347,15 @@ public class SlackEventController {
             return;
         }
 
-        // 1.44차: 이슈 링크. 키 2개 + 관계 동사(block/막/중복/duplicate/relate/연결)면 결정적으로 링크.
-        //        해제(해제/삭제/제거)는 링크 생성보다 먼저 확인 — Phase 4 전까지 안내만.
-        if (IssueCommandParser.isUnlink(cleaned)) {
-            replyThread(event, ":information_source: 링크 *해제* 는 아직 지원 예정이에요. Jira 이슈 화면에서 해제해주세요.");
+        // 1.44차: 이슈 링크. 해제(2키+해제+링크) → 조회(1키+링크+조회) → 생성(2키+관계동사) 순.
+        Optional<String[]> unlinkKeys = IssueCommandParser.parseUnlink(cleaned);
+        if (unlinkKeys.isPresent()) {
+            handleUnlink(event, unlinkKeys.get()[0], unlinkKeys.get()[1]);
+            return;
+        }
+        Optional<String> linkListKey = IssueCommandParser.parseLinkList(cleaned);
+        if (linkListKey.isPresent()) {
+            handleLinkList(event, linkListKey.get());
             return;
         }
         Optional<IssueCommandParser.LinkCommand> linkCmd = IssueCommandParser.parseLink(cleaned);
@@ -769,6 +776,54 @@ public class SlackEventController {
             } catch (Exception e) {
                 log.error("Sprint move failed for {}: {}", issueKey, e.toString());
                 replyInThread(event, replyTs, ":x: 스프린트 이동 중 오류가 발생했어요: " + e.getMessage());
+            }
+        });
+    }
+
+    // STUDY: 이슈 링크 목록 조회 — 조회자 기준 관계 설명(description)으로 렌더.
+    private void handleLinkList(SlackEventInner event, String issueKey) {
+        String replyTs = event.thread_ts() != null ? event.thread_ts() : event.ts();
+        slackExecutor.execute(() -> {
+            try {
+                var links = jiraApiClient.getIssueLinks(issueKey);
+                if (links.isEmpty()) {
+                    replyInThread(event, replyTs, String.format(":link: *%s* 에 연결된 링크가 없어요.", issueKey));
+                    return;
+                }
+                StringBuilder sb = new StringBuilder(String.format(":link: *%s* 링크 (%d개)\n", issueKey, links.size()));
+                for (var l : links) {
+                    sb.append(String.format("• %s *%s*%s\n", l.description(), l.otherKey(),
+                            l.otherSummary() == null ? "" : " — " + l.otherSummary()));
+                }
+                replyInThread(event, replyTs, sb.toString().stripTrailing());
+            } catch (Exception e) {
+                log.error("Link list failed for {}: {}", issueKey, e.toString());
+                replyInThread(event, replyTs, ":x: 링크 조회 중 오류가 발생했어요: " + e.getMessage());
+            }
+        });
+    }
+
+    // STUDY: 링크 해제 — a 의 링크 중 상대가 b 인 것을 찾아 linkId 로 삭제. 재연결이 싸므로 확인 없이 즉시 실행.
+    private void handleUnlink(SlackEventInner event, String a, String b) {
+        String replyTs = event.thread_ts() != null ? event.thread_ts() : event.ts();
+        slackExecutor.execute(() -> {
+            try {
+                var links = jiraApiClient.getIssueLinks(a);
+                var target = links.stream()
+                        .filter(l -> b.equalsIgnoreCase(l.otherKey()))
+                        .findFirst();
+                if (target.isEmpty() || target.get().linkId() == null) {
+                    replyInThread(event, replyTs, String.format(
+                            ":information_source: *%s* 와 *%s* 사이에 링크가 없어요.", a, b));
+                    return;
+                }
+                boolean ok = jiraApiClient.deleteIssueLink(target.get().linkId());
+                replyInThread(event, replyTs, ok
+                        ? String.format(":broken_chain: *%s* ↔ *%s* 링크를 해제했어요.", a, b)
+                        : String.format(":x: *%s* ↔ *%s* 링크 해제에 실패했어요.", a, b));
+            } catch (Exception e) {
+                log.error("Unlink failed for {} / {}: {}", a, b, e.toString());
+                replyInThread(event, replyTs, ":x: 링크 해제 중 오류가 발생했어요: " + e.getMessage());
             }
         });
     }

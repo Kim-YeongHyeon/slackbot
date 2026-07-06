@@ -108,6 +108,15 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 이슈 링크 조회 / 해제 (v0.0.57)
+
+"ES2-123 링크 보여줘"(조회), "ES2-1 ES2-2 링크 해제"(해제)를 자연어로 처리. 링크 생성(v0.0.55)의 짝.
+- 신규 `IssueCommandParser.parseLinkList`(1키+링크+조회 동사)·`parseUnlink`(2키+링크+해제 동사).
+- 신규 클라이언트 `getIssueLinks`(GET issuelinks)·`deleteIssueLink`(DELETE, 204).
+  **조회자 상대적** 처리: outwardIssue 항목은 "this <outward> 상대", inwardIssue 항목은 "this <inward> 상대"로 렌더.
+- 해제는 대상 이슈의 링크 중 상대 키가 일치하는 linkId 를 찾아 삭제(재연결이 싸므로 확인 버튼 없이 즉시 실행).
+  두 이슈 사이 링크가 없으면 안내.
+
 ### 기존 이슈 필드 수정 + 스프린트 이동 (v0.0.56)
 
 "ES2-123 SP 3으로 변경", "제목을 '..'로", "마감일 금요일로", "우선순위 높음", "ES2-123 스프린트로 옮겨줘"를

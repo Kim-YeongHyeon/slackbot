@@ -194,6 +194,44 @@ class JiraApiClientImplTest {
         assertThat(client.updateIssueFields("PROJ-1", java.util.Map.of("duedate", "2026-07-10"))).isFalse();
     }
 
+    // ==================== 링크 조회 / 해제 ====================
+
+    @Test
+    void getIssueLinks_rendersViewerRelativeDirection() {
+        // outwardIssue 항목 → "this <outward> other" (여기선 this blocks ES2-2)
+        // inwardIssue 항목 → "this <inward> other" (여기선 this is blocked by ES2-3)
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody("{\"fields\":{\"issuelinks\":["
+                        + "{\"id\":\"5001\",\"type\":{\"inward\":\"is blocked by\",\"outward\":\"blocks\"},"
+                        + "\"outwardIssue\":{\"key\":\"ES2-2\",\"fields\":{\"summary\":\"결제\"}}},"
+                        + "{\"id\":\"5002\",\"type\":{\"inward\":\"is blocked by\",\"outward\":\"blocks\"},"
+                        + "\"inwardIssue\":{\"key\":\"ES2-3\",\"fields\":{\"summary\":\"인증\"}}}]}}"));
+
+        var links = client.getIssueLinks("ES2-1");
+        assertThat(links).hasSize(2);
+        assertThat(links.get(0).description()).isEqualTo("blocks");
+        assertThat(links.get(0).otherKey()).isEqualTo("ES2-2");
+        assertThat(links.get(1).description()).isEqualTo("is blocked by");
+        assertThat(links.get(1).otherKey()).isEqualTo("ES2-3");
+    }
+
+    @Test
+    void deleteIssueLink_success() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(204));
+
+        assertThat(client.deleteIssueLink("5001")).isTrue();
+        var req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("DELETE");
+        assertThat(req.getPath()).contains("/rest/api/3/issueLink/5001");
+    }
+
+    @Test
+    void deleteIssueLink_404_returnsFalse() {
+        server.enqueue(new MockResponse().setResponseCode(404).setBody("gone"));
+        assertThat(client.deleteIssueLink("9999")).isFalse();
+    }
+
     @Test
     void createIssue_400_throwsNonTransient() {
         server.enqueue(new MockResponse().setResponseCode(400).setBody("bad"));
