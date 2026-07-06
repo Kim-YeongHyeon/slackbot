@@ -108,6 +108,18 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 에픽 하위 티켓 생성 (v0.0.53)
+
+"'X' 라는 이름으로 `<에픽명>` epic 아래에 task로 생성해줘" 처럼 상위 에픽을 지정한 자연어 생성이
+에픽에 연결되지 않던 문제 수정. 원인: `createIssue`/`buildRequest` 에 parent 필드 자체가 없었고
+에픽명→키 조회 경로도 없었음. 조치:
+- `createIssue(..., parentKey)` 오버로드 + `buildRequest` 에 `fields.parent.key` 세팅(에픽 타입 자신엔 미적용).
+  (이 사이트는 company-managed classic 이지만 task→epic 연결에 `parent.key` 를 씀 — 실측 확인.)
+- `findEpicKeyByName`: JQL `issuetype = Epic`(L7: 영문 정식명) 로 에픽 목록 조회 후 **정확 일치 우선,
+  없으면 양방향 부분 일치**(요약이 추출 문구를 포함/피포함) 로 매칭. 못 찾으면 parent 없이 일반 생성(비치명적).
+- `resolveParentEpic`: EPIC_BEFORE(`X epic 아래`) / EPIC_AFTER(`under epic X`) 두 정규식으로 에픽명 추출.
+- 실측: "enword DBMS" → **ES2-2141** 매칭 확인. 테스트 2건 추가(연결/미발견 폴백), 전체 370건 통과.
+
 ### 분류 재시도 횟수 상향 (v0.0.50)
 
 응답 즉시성보다 정확 분류를 우선(사용자 결정). 두 분류기(Haiku 의도 / Sonnet 상세) 모두 **최대 3회 재시도**

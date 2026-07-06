@@ -110,8 +110,14 @@ public class IssueCreateServiceImpl implements IssueCreateService {
             String reporterName = mappingEntity.getJiraDisplayName();
             stage = System.nanoTime();
             String jiraAccountId = resolveJiraAccountId(mappingEntity);
-            JiraCreateResponse created = jira.createIssue(classification, reporterName, jiraAccountId);
+            // STUDY: "X epic 아래" 같은 상위 에픽 지정이 있으면 에픽 키를 찾아 parent 로 연결. 에픽 자신은 제외.
+            String parentKey = resolveParentEpic(command.rawText(), classification);
+            JiraCreateResponse created =
+                    jira.createIssue(classification, reporterName, jiraAccountId, parentKey);
             timings.jiraMs = elapsedMs(stage);
+            if (parentKey != null) {
+                log.info("Issue {} linked under epic {}", created.key(), parentKey);
+            }
             String url = buildIssueUrl(created.key());
             log.info("Issue created key={} url={} type={} sp={}", created.key(), url,
                     classification.type(), classification.storyPoint());
@@ -289,5 +295,35 @@ public class IssueCreateServiceImpl implements IssueCreateService {
         }
         String trimmed = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
         return trimmed + "/browse/" + key;
+    }
+
+    private static final int RX = java.util.regex.Pattern.CASE_INSENSITIVE
+            | java.util.regex.Pattern.UNICODE_CHARACTER_CLASS;
+    // 한국어 어순: "<에픽명> epic/에픽 (아래|밑|하위|에)". 에픽명이 앞.
+    private static final java.util.regex.Pattern EPIC_BEFORE = java.util.regex.Pattern.compile(
+            "([\\p{L}\\p{N}][\\p{L}\\p{N} .+_/\\-]*?)\\s*(?:epic|에픽)\\s*(?:아래|밑|하위|에)?", RX);
+    // 영어 어순: "(under) epic <에픽명>". 에픽명이 뒤 — 조사/구두점/끝을 경계로.
+    private static final java.util.regex.Pattern EPIC_AFTER = java.util.regex.Pattern.compile(
+            "(?:under\\s+)?(?:epic|에픽)\\s+([\\p{L}\\p{N}][\\p{L}\\p{N} .+_/\\-]*?)"
+            + "(?=\\s*(?:로|으로|아래|밑|하위|을|를|에|,|$))", RX);
+
+    // 에픽 자신 생성이면 parent 없음. rawText 의 에픽 지정 어구(앞/뒤 어순 모두)에서 에픽명을 뽑아 키를 찾는다.
+    private String resolveParentEpic(String rawText, IssueClassification classification) {
+        if (rawText == null || classification.type() == IssueClassification.IssueType.EPIC) {
+            return null;
+        }
+        for (java.util.regex.Pattern p : List.of(EPIC_BEFORE, EPIC_AFTER)) {
+            java.util.regex.Matcher m = p.matcher(rawText);
+            if (!m.find()) continue;
+            String epicName = m.group(1).strip();
+            if (epicName.isEmpty()) continue;
+            try {
+                var key = jira.findEpicKeyByName(epicName);
+                if (key.isPresent()) return key.get();
+            } catch (Exception e) {
+                log.warn("에픽 조회 실패 '{}': {}", epicName, e.toString());
+            }
+        }
+        return null;
     }
 }

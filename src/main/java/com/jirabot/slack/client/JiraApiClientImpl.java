@@ -48,7 +48,15 @@ public class JiraApiClientImpl implements JiraApiClient {
             backoff = @Backoff(delay = 500, multiplier = 2.0))
     public JiraCreateResponse createIssue(IssueClassification classification, String reporterName,
                                           String jiraAccountId) {
-        Map<String, Object> request = buildRequest(classification, reporterName, jiraAccountId);
+        return createIssue(classification, reporterName, jiraAccountId, null);
+    }
+
+    @Override
+    @Retryable(retryFor = JiraTransientException.class, maxAttempts = 3,
+            backoff = @Backoff(delay = 500, multiplier = 2.0))
+    public JiraCreateResponse createIssue(IssueClassification classification, String reporterName,
+                                          String jiraAccountId, String parentKey) {
+        Map<String, Object> request = buildRequest(classification, reporterName, jiraAccountId, parentKey);
         try {
             JiraCreateResponse resp = jiraWebClient.post()
                     .uri("/rest/api/3/issue")
@@ -59,7 +67,7 @@ public class JiraApiClientImpl implements JiraApiClient {
             if (resp == null || resp.key() == null) {
                 throw new JiraApiException("Jira returned empty response");
             }
-            log.info("Jira issue created key={} reporter={}", resp.key(), reporterName);
+            log.info("Jira issue created key={} reporter={} parent={}", resp.key(), reporterName, parentKey);
             return resp;
         } catch (WebClientResponseException e) {
             int status = e.getStatusCode().value();
@@ -78,7 +86,7 @@ public class JiraApiClientImpl implements JiraApiClient {
     // STUDY: SP 커스텀 필드 ID가 사이트마다 다르므로 @JsonProperty 고정이 불가.
     //        Map으로 빌드하면 동적 필드명을 자유롭게 추가할 수 있다.
     private Map<String, Object> buildRequest(IssueClassification c, String reporterName,
-                                             String jiraAccountId) {
+                                             String jiraAccountId, String parentKey) {
         // STUDY: 이슈 타입명은 분류에 따라 매핑. EPIC 은 키워드 트리거로만 강제되는 특이 케이스.
         String issueTypeName = switch (c.type()) {
             case BUG -> props.issueTypes().bug();
@@ -109,7 +117,34 @@ public class JiraApiClientImpl implements JiraApiClient {
             fields.put("reporter", accountRef);
             fields.put("assignee", accountRef);
         }
+        // STUDY: 상위 에픽 연결 — 이 사이트는 fields.parent.key 로 task→epic 을 잇는다(실측). 에픽 자신엔 안 붙인다.
+        if (parentKey != null && !parentKey.isBlank() && !isEpic) {
+            fields.put("parent", Map.of("key", parentKey));
+        }
         return Map.of("fields", fields);
+    }
+
+    @Override
+    public java.util.Optional<String> findEpicKeyByName(String epicName) {
+        if (epicName == null || epicName.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        String needle = epicName.strip().toLowerCase();
+        // 정확 일치를 부분 일치보다 우선. issuetype=Epic 은 영문 정식명이라 JQL 매칭됨(L7).
+        String jql = "project = " + props.projectKey() + " AND issuetype = Epic ORDER BY created DESC";
+        String partial = null;
+        for (SprintIssue e : searchByJql(jql)) {
+            String s = e.summary() == null ? "" : e.summary().strip();
+            if (s.equalsIgnoreCase(epicName.strip())) {
+                return java.util.Optional.of(e.key());
+            }
+            // 양방향 부분일치: 추출 구절이 에픽명을 포함(넓게 잡힌 경우)하거나 그 반대.
+            String sl = s.toLowerCase();
+            if (partial == null && !sl.isEmpty() && (sl.contains(needle) || needle.contains(sl))) {
+                partial = e.key();
+            }
+        }
+        return java.util.Optional.ofNullable(partial);
     }
 
     @Override

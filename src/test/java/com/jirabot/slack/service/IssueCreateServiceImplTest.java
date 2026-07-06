@@ -59,7 +59,7 @@ class IssueCreateServiceImplTest {
                 IssueClassification.IssueType.BUG, 2, "title", "summary");
         when(claude.classify(anyString(), any())).thenReturn(classification);
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.createIssue(eq(classification), anyString(), any()))
+        when(jira.createIssue(eq(classification), anyString(), any(), any()))
                 .thenReturn(new JiraCreateResponse("10001", "PROJ-1", "https://..."));
 
         var cmd = new IssueCreateCommand("login broken", "U123", "C1", "123.0");
@@ -71,6 +71,49 @@ class IssueCreateServiceImplTest {
         verify(claude).classify(eq("login broken"), any());
         verify(issueRepository).save(any());
         verify(slackNotifier).postBlockMessage(eq("C1"), eq("123.0"), any(), any());
+        // 에픽 지정이 없으면 parent=null 로 생성.
+        verify(jira).createIssue(eq(classification), anyString(), any(), eq(null));
+    }
+
+    @Test
+    void epicMention_linksIssueUnderResolvedEpic() throws Exception {
+        when(userMappingRepository.findBySlackUserId("U123"))
+                .thenReturn(Optional.of(new UserMappingEntity("U123", "Kim", "김영현")));
+        var classification = new IssueClassification(
+                IssueClassification.IssueType.FEATURE, 3, "PostgreSQL multi-connection", "요약");
+        when(claude.classify(anyString(), any())).thenReturn(classification);
+        when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
+        when(jira.findEpicKeyByName(anyString())).thenReturn(Optional.of("ES2-2141"));
+        when(jira.createIssue(any(), anyString(), any(), any()))
+                .thenReturn(new JiraCreateResponse("1", "ES2-300", "u"));
+
+        var cmd = new IssueCreateCommand(
+                "\"enWord + PostgreSQL multi-connection support\" 라는 이름으로 enword DBMS epic 아래에 task로 생성",
+                "U123", "C1", "1.0");
+        var result = service.createFromSlackText(cmd).get();
+
+        assertThat(result.success()).isTrue();
+        // 에픽명이 조회되어 parent=ES2-2141 로 연결.
+        verify(jira).createIssue(eq(classification), anyString(), any(), eq("ES2-2141"));
+    }
+
+    @Test
+    void epicMention_notFound_createsWithoutParent() throws Exception {
+        when(userMappingRepository.findBySlackUserId("U123"))
+                .thenReturn(Optional.of(new UserMappingEntity("U123", "Kim", "김영현")));
+        var classification = new IssueClassification(
+                IssueClassification.IssueType.FEATURE, 3, "t", "s");
+        when(claude.classify(anyString(), any())).thenReturn(classification);
+        when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
+        when(jira.findEpicKeyByName(anyString())).thenReturn(Optional.empty());
+        when(jira.createIssue(any(), anyString(), any(), any()))
+                .thenReturn(new JiraCreateResponse("1", "ES2-301", "u"));
+
+        var cmd = new IssueCreateCommand("없는에픽 epic 아래에 task 만들어줘", "U123", "C1", "1.0");
+        var result = service.createFromSlackText(cmd).get();
+
+        assertThat(result.success()).isTrue();  // 에픽 못 찾아도 일반 생성(회귀 없음)
+        verify(jira).createIssue(eq(classification), anyString(), any(), eq(null));
     }
 
     @Test
@@ -80,7 +123,7 @@ class IssueCreateServiceImplTest {
         when(claude.classify(anyString(), any()))
                 .thenReturn(IssueClassification.fallback("x"));
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.createIssue(any(), anyString(), any())).thenThrow(new JiraApiException("400 bad"));
+        when(jira.createIssue(any(), anyString(), any(), any())).thenThrow(new JiraApiException("400 bad"));
 
         var cmd = new IssueCreateCommand("x", "U1", "C", "0");
         var result = service.createFromSlackText(cmd).get();
@@ -107,7 +150,7 @@ class IssueCreateServiceImplTest {
 
         // Should NOT call Claude classify or Jira API
         verify(claude, never()).classify(anyString(), any());
-        verify(jira, never()).createIssue(any(), anyString(), any());
+        verify(jira, never()).createIssue(any(), anyString(), any(), any());
         verify(issueRepository, never()).save(any());
     }
 
@@ -142,7 +185,7 @@ class IssueCreateServiceImplTest {
 
         // Should NOT call Claude classify or Jira API
         verify(claude, never()).classify(anyString(), any());
-        verify(jira, never()).createIssue(any(), anyString(), any());
+        verify(jira, never()).createIssue(any(), anyString(), any(), any());
     }
 
     @Test
@@ -155,7 +198,7 @@ class IssueCreateServiceImplTest {
                 IssueClassification.IssueType.FEATURE, 5, "GCP 배포 확장", "요약");
         when(claude.classify(anyString(), any())).thenReturn(sonnet);
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.createIssue(any(), anyString(), any()))
+        when(jira.createIssue(any(), anyString(), any(), any()))
                 .thenReturn(new JiraCreateResponse("10009", "PROJ-9", "https://..."));
 
         var intent = new IntentResult("register_epic", 1.0, Map.of(), "에픽 GCP 배포 확장");
@@ -164,7 +207,7 @@ class IssueCreateServiceImplTest {
 
         assertThat(result.success()).isTrue();
         ArgumentCaptor<IssueClassification> cap = ArgumentCaptor.forClass(IssueClassification.class);
-        verify(jira).createIssue(cap.capture(), anyString(), any());
+        verify(jira).createIssue(cap.capture(), anyString(), any(), any());
         assertThat(cap.getValue().type()).isEqualTo(IssueClassification.IssueType.EPIC);
         assertThat(cap.getValue().storyPoint()).isZero();
         assertThat(cap.getValue().title()).isEqualTo("GCP 배포 확장");
@@ -181,7 +224,7 @@ class IssueCreateServiceImplTest {
                 IssueClassification.IssueType.FEATURE, 2, "audit log 확인", "요약");
         when(claude.classify(anyString(), any())).thenReturn(classification);
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.createIssue(eq(classification), anyString(), any()))
+        when(jira.createIssue(eq(classification), anyString(), any(), any()))
                 .thenReturn(new JiraCreateResponse("10003", "PROJ-3", "https://..."));
 
         var cmd = new IssueCreateCommand("audit log 확인", "U03L1TJ0EBB", "C1", "1.0");
@@ -202,7 +245,7 @@ class IssueCreateServiceImplTest {
                 IssueClassification.IssueType.BUG, 2, "title", "summary");
         when(claude.classify(anyString(), any())).thenReturn(classification);
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.createIssue(eq(classification), anyString(), any()))
+        when(jira.createIssue(eq(classification), anyString(), any(), any()))
                 .thenReturn(new JiraCreateResponse("10001", "PROJ-1", "https://..."));
 
         var result = service.createFromSlackText(new IssueCreateCommand("x", "U1", "C1", "1.0")).get();
@@ -230,7 +273,7 @@ class IssueCreateServiceImplTest {
                 .thenReturn(Optional.of(new UserMappingEntity("U1", "User", "유저")));
         when(claude.classify(anyString(), any())).thenReturn(IssueClassification.fallback("x"));
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.createIssue(any(), anyString(), any())).thenThrow(new JiraApiException("400 bad"));
+        when(jira.createIssue(any(), anyString(), any(), any())).thenThrow(new JiraApiException("400 bad"));
 
         var result = service.createFromSlackText(new IssueCreateCommand("x", "U1", "C", "0")).get();
 
@@ -255,7 +298,7 @@ class IssueCreateServiceImplTest {
                 IssueClassification.IssueType.BUG, 2, "title", "summary");
         when(claude.classify(anyString(), any())).thenReturn(classification);
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.createIssue(eq(classification), anyString(), any()))
+        when(jira.createIssue(eq(classification), anyString(), any(), any()))
                 .thenReturn(new JiraCreateResponse("10001", "PROJ-1", "https://..."));
         doThrow(new RuntimeException("DB down"))
                 .when(responseMetricRepository).save(any(ResponseMetricEntity.class));
@@ -278,7 +321,7 @@ class IssueCreateServiceImplTest {
                 IssueClassification.IssueType.FEATURE, 3, "새 기능 추가", "새 기능 요약");
         when(claude.classify(anyString(), any())).thenReturn(classification);
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.createIssue(eq(classification), eq("등록된사용자"), any()))
+        when(jira.createIssue(eq(classification), eq("등록된사용자"), any(), any()))
                 .thenReturn(new JiraCreateResponse("10002", "PROJ-2", "https://..."));
 
         var cmd = new IssueCreateCommand("새 기능 추가해주세요", "U_REG", "C2", "222.0");
@@ -289,7 +332,7 @@ class IssueCreateServiceImplTest {
 
         // Verify full flow executed
         verify(claude).classify(eq("새 기능 추가해주세요"), any());
-        verify(jira).createIssue(eq(classification), eq("등록된사용자"), any());
+        verify(jira).createIssue(eq(classification), eq("등록된사용자"), any(), any());
         verify(issueRepository).save(any());
     }
 }

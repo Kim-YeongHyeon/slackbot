@@ -13,6 +13,19 @@ public interface JiraApiClient {
                                    String jiraAccountId);
 
     /**
+     * 상위 에픽(parentKey)에 연결해 이슈를 생성한다. parentKey 가 null/blank 면 일반 생성과 동일.
+     * (이 사이트는 company-managed classic 이지만 task→epic 연결에 fields.parent.key 를 쓴다 — 실측 확인.)
+     */
+    JiraCreateResponse createIssue(IssueClassification classification, String reporterName,
+                                   String jiraAccountId, String parentKey);
+
+    /**
+     * 에픽 이름으로 에픽 이슈 키를 찾는다(정확 일치 우선, 없으면 부분 일치). 못 찾으면 empty.
+     * (L7: JQL issuetype=Epic 은 영문 정식명이라 매칭됨. 이름 비교는 응답 summary 로.)
+     */
+    java.util.Optional<String> findEpicKeyByName(String epicName);
+
+    /**
      * Jira displayName으로 유저를 검색하여 accountId를 반환한다.
      */
     String findAccountId(String displayName);
