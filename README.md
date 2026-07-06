@@ -108,6 +108,18 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 기존 이슈 필드 수정 + 스프린트 이동 (v0.0.56)
+
+"ES2-123 SP 3으로 변경", "제목을 '..'로", "마감일 금요일로", "우선순위 높음", "ES2-123 스프린트로 옮겨줘"를
+자연어로 처리(기존 미지원 — 생성 시에만 설정 가능했음). 결정적 파싱(키 정확히 1개 + 필드 키워드):
+- 신규 `IssueCommandParser.parseUpdate`: SP/제목/마감일/우선순위. 키의 숫자(-123)를 값으로 오인하지 않도록 키 제거 후 파싱.
+  **SP는 팀 스케일 {1,2,3,5,8} 검증**(docs/story-point-guide.md), 벗어나면 거부. 제목은 따옴표 필수. 마감일은 절대/상대(오늘·내일·요일).
+- 신규 클라이언트 `updateIssueFields(key, fields)`(PUT /rest/api/3/issue/{key}, 204)·`getPriorities`(@Cacheable).
+  우선순위는 사용자 표현(높음/긴급/보통/낮음)→정규 버킷→사이트 실제 name(getPriorities 매칭, 로컬라이즈 대비, L4)으로 해석.
+- 마감일 상대어(오늘/내일/모레/글피/다음주/요일)는 KST 기준으로 ISO 날짜 해석(요일은 다음 도래일).
+- 제목/SP 성공 시 로컬 IssueEntity 도 동기화(대시보드/카드 일관성). 스프린트 이동은 기존 `moveToActiveSprint` 재사용.
+- 실측: 라이브 우선순위 목록(Highest/High/Medium/Low/Lowest) 확인.
+
 ### 이슈 링크 생성 — blocks/relates/duplicate (v0.0.55)
 
 "ES2-1352가 ES2-1532에 block 되고 있으니 연결해줘" 같은 자연어로 이슈 링크를 생성한다(기존 미지원).

@@ -46,6 +46,19 @@ public interface JiraApiClient {
     boolean linkIssues(String inwardKey, String outwardKey, String linkTypeName);
 
     /**
+     * 사이트에 정의된 우선순위 목록(Highest/High/…)을 조회한다. 캐시됨.
+     */
+    List<com.jirabot.slack.client.dto.PriorityInfo> getPriorities();
+
+    /**
+     * 이슈의 필드를 갱신한다(PUT /rest/api/3/issue/{key}). fields 맵은 Jira 필드 스키마 그대로.
+     * (예: summary=String, duedate="YYYY-MM-DD", priority=Map.of("name","High"), 스토리포인트=double)
+     *
+     * @return 성공 여부 (204)
+     */
+    boolean updateIssueFields(String issueKey, java.util.Map<String, Object> fields);
+
+    /**
      * Jira displayName으로 유저를 검색하여 accountId를 반환한다.
      */
     String findAccountId(String displayName);

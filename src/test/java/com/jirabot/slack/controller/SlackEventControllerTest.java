@@ -927,6 +927,95 @@ class SlackEventControllerTest {
         assertThat(msg.getValue()).contains("지원 예정");
     }
 
+    // --- 필드 수정 / 스프린트 이동 ---
+
+    @Test
+    void updateStoryPoint_validScale_updatesField() throws Exception {
+        when(jiraApiClient.updateIssueFields(eq("ES2-100"), any())).thenReturn(true);
+        when(issueRepository.findByIssueKey("ES2-100")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-100 SP 3으로 변경", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Map<String, Object>> fields = ArgumentCaptor.forClass(Map.class);
+        verify(jiraApiClient).updateIssueFields(eq("ES2-100"), fields.capture());
+        // 기본 SP 필드는 customfield_10036, 값은 double 3.0
+        assertThat(fields.getValue()).containsEntry("customfield_10036", 3.0);
+    }
+
+    @Test
+    void updateStoryPoint_offScale_rejectedWithoutApiCall() throws Exception {
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-100 SP 4로 변경", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).updateIssueFields(anyString(), any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("1·2·3·5·8");
+    }
+
+    @Test
+    void updateSummary_quoted_updatesField() throws Exception {
+        when(jiraApiClient.updateIssueFields(eq("ES2-9"), any())).thenReturn(true);
+        when(issueRepository.findByIssueKey("ES2-9")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-9 제목을 '새 로그인 플로우'로 변경", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Map<String, Object>> fields = ArgumentCaptor.forClass(Map.class);
+        verify(jiraApiClient).updateIssueFields(eq("ES2-9"), fields.capture());
+        assertThat(fields.getValue()).containsEntry("summary", "새 로그인 플로우");
+    }
+
+    @Test
+    void updatePriority_resolvesNameFromSite() throws Exception {
+        when(jiraApiClient.getPriorities()).thenReturn(List.of(
+                new com.jirabot.slack.client.dto.PriorityInfo("2", "High"),
+                new com.jirabot.slack.client.dto.PriorityInfo("3", "Medium")));
+        when(jiraApiClient.updateIssueFields(eq("ES2-1"), any())).thenReturn(true);
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1 우선순위 높음으로", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Map<String, Object>> fields = ArgumentCaptor.forClass(Map.class);
+        verify(jiraApiClient).updateIssueFields(eq("ES2-1"), fields.capture());
+        assertThat(fields.getValue()).containsEntry("priority", Map.of("name", "High"));
+    }
+
+    @Test
+    void updateDueDate_absolute_setsIso() throws Exception {
+        when(jiraApiClient.updateIssueFields(eq("ES2-1"), any())).thenReturn(true);
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1 마감일 2026-07-10", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<Map<String, Object>> fields = ArgumentCaptor.forClass(Map.class);
+        verify(jiraApiClient).updateIssueFields(eq("ES2-1"), fields.capture());
+        assertThat(fields.getValue()).containsEntry("duedate", "2026-07-10");
+    }
+
+    @Test
+    void sprintMove_movesToActiveSprint() throws Exception {
+        when(jiraApiClient.moveToActiveSprint("ES2-123")).thenReturn(true);
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-123 스프린트로 옮겨줘", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).moveToActiveSprint("ES2-123");
+    }
+
     // --- 할당알림 토글 ---
 
     @Test

@@ -162,6 +162,38 @@ class JiraApiClientImplTest {
         assertThat(client.linkIssues("ES2-1", "ES2-2", "Blocks")).isFalse();
     }
 
+    // ==================== 필드 수정 / 우선순위 ====================
+
+    @Test
+    void getPriorities_parsesList() {
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody("[{\"id\":\"1\",\"name\":\"Highest\"},{\"id\":\"3\",\"name\":\"Medium\"}]"));
+
+        var ps = client.getPriorities();
+        assertThat(ps).hasSize(2);
+        assertThat(ps.get(0).name()).isEqualTo("Highest");
+    }
+
+    @Test
+    void updateIssueFields_wrapsInFieldsObject() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(204));
+
+        boolean ok = client.updateIssueFields("PROJ-1", java.util.Map.of("summary", "새 제목"));
+
+        assertThat(ok).isTrue();
+        var req = server.takeRequest();
+        assertThat(req.getMethod()).isEqualTo("PUT");
+        assertThat(req.getPath()).contains("/rest/api/3/issue/PROJ-1");
+        assertThat(req.getBody().readUtf8()).contains("\"fields\":{\"summary\":\"새 제목\"}");
+    }
+
+    @Test
+    void updateIssueFields_400_returnsFalse() {
+        server.enqueue(new MockResponse().setResponseCode(400).setBody("bad"));
+        assertThat(client.updateIssueFields("PROJ-1", java.util.Map.of("duedate", "2026-07-10"))).isFalse();
+    }
+
     @Test
     void createIssue_400_throwsNonTransient() {
         server.enqueue(new MockResponse().setResponseCode(400).setBody("bad"));

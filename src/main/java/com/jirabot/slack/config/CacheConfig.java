@@ -23,6 +23,8 @@ public class CacheConfig {
     public static final String BUG_KNOWLEDGE_CACHE = "bugKnowledge";
     // 이슈 링크 타입(Blocks/Relates/Duplicate…) — 사이트 설정이라 거의 안 변함. 링크 생성마다 재조회 회피.
     public static final String ISSUE_LINK_TYPES_CACHE = "issueLinkTypes";
+    // 우선순위 목록(Highest/High/…) — 사이트 설정이라 거의 안 변함.
+    public static final String PRIORITIES_CACHE = "priorities";
 
     // STUDY: TTL 5분 — 스프린트 시작/종료, PR 생성/머지가 캐시에 반영되기까지의 최대 지연.
     //        두 캐시 모두 "자주 읽고 천천히 변하는" 외부 API 응답이라 동일 정책을 공유한다.
@@ -31,7 +33,8 @@ public class CacheConfig {
     @Bean
     public CacheManager cacheManager() {
         CaffeineCacheManager manager = new CaffeineCacheManager(
-                ACTIVE_SPRINT_CACHE, OPEN_PRS_CACHE, BUG_KNOWLEDGE_CACHE, ISSUE_LINK_TYPES_CACHE);
+                ACTIVE_SPRINT_CACHE, OPEN_PRS_CACHE, BUG_KNOWLEDGE_CACHE,
+                ISSUE_LINK_TYPES_CACHE, PRIORITIES_CACHE);
         manager.setCaffeine(Caffeine.newBuilder()
                 .expireAfterWrite(CACHE_TTL)
                 .maximumSize(10));

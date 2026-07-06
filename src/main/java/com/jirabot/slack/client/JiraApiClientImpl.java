@@ -226,6 +226,42 @@ public class JiraApiClientImpl implements JiraApiClient {
         }
     }
 
+    // STUDY: 우선순위 목록도 사이트 설정이라 거의 안 변함 → 캐시.
+    @Override
+    @org.springframework.cache.annotation.Cacheable(com.jirabot.slack.config.CacheConfig.PRIORITIES_CACHE)
+    public List<com.jirabot.slack.client.dto.PriorityInfo> getPriorities() {
+        List<com.jirabot.slack.client.dto.PriorityInfo> result = new ArrayList<>();
+        try {
+            String json = jiraWebClient.get()
+                    .uri("/rest/api/3/priority")
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode arr = objectMapper.readTree(json);
+            for (JsonNode p : arr) {
+                result.add(new com.jirabot.slack.client.dto.PriorityInfo(
+                        p.path("id").asText(null), p.path("name").asText(null)));
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch priorities: {}", e.toString());
+        }
+        return result;
+    }
+
+    // STUDY: 이슈 필드 부분 갱신 — PUT /rest/api/3/issue/{key} 는 204(No Content). 실패 시 false.
+    @Override
+    public boolean updateIssueFields(String issueKey, Map<String, Object> fields) {
+        try {
+            jiraWebClient.put()
+                    .uri("/rest/api/3/issue/{key}", issueKey)
+                    .bodyValue(Map.of("fields", fields))
+                    .retrieve().bodyToMono(String.class).block();
+            log.info("Updated fields on {}: {}", issueKey, fields.keySet());
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to update fields on {}: {}", issueKey, e.toString());
+            return false;
+        }
+    }
+
     // STUDY: @Cacheable — 호출마다 Jira 왕복 2회(보드+스프린트)를 5분 TTL 캐시(CacheConfig)로 흡수.
     //        스프린트는 2주 주기로 바뀌므로 5분 staleness 는 무해. Optional 자체가 캐시되므로
     //        "활성 스프린트 없음"(empty) 도 5분간 재조회하지 않는다.

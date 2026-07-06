@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.jirabot.slack.util.IssueCommandParser.LinkCommand;
 import com.jirabot.slack.util.IssueCommandParser.LinkRelation;
 import com.jirabot.slack.util.IssueCommandParser.SubtaskCommand;
+import com.jirabot.slack.util.IssueCommandParser.UpdateCommand;
+import com.jirabot.slack.util.IssueCommandParser.UpdateField;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -190,6 +192,96 @@ class IssueCommandParserTest {
     void isUnlink_detectsRemovalWithTwoKeys() {
         assertThat(IssueCommandParser.isUnlink("ES2-10 ES2-20 링크 해제해줘")).isTrue();
         assertThat(IssueCommandParser.isUnlink("ES2-10이 ES2-20에 막혀있어 연결")).isFalse();
+    }
+
+    // ==================== 필드 수정 / 스프린트 이동 ====================
+
+    @Test
+    void update_storyPoint_afterKeyword() {
+        UpdateCommand c = IssueCommandParser.parseUpdate("ES2-123 SP 3으로 변경해줘").orElseThrow();
+        assertThat(c.key()).isEqualTo("ES2-123");
+        assertThat(c.field()).isEqualTo(UpdateField.STORY_POINT);
+        assertThat(c.value()).isEqualTo(3);
+    }
+
+    @Test
+    void update_storyPoint_beforeUnit() {
+        UpdateCommand c = IssueCommandParser.parseUpdate("ES2-5 스토리포인트 5점으로").orElseThrow();
+        assertThat(c.field()).isEqualTo(UpdateField.STORY_POINT);
+        assertThat(c.value()).isEqualTo(5);
+    }
+
+    @Test
+    void update_storyPoint_keyDigitsNotMistaken() {
+        // 키 ES2-123 의 123 을 SP 로 오인하면 안 됨 → SP 8
+        UpdateCommand c = IssueCommandParser.parseUpdate("ES2-123 포인트 8로").orElseThrow();
+        assertThat(c.value()).isEqualTo(8);
+    }
+
+    @Test
+    void update_storyPoint_offScaleStillParsed_forControllerToReject() {
+        // 파서는 4도 추출(검증은 컨트롤러) — 스케일 밖 값 거부는 컨트롤러 책임
+        UpdateCommand c = IssueCommandParser.parseUpdate("ES2-1 SP 4로").orElseThrow();
+        assertThat(c.value()).isEqualTo(4);
+        assertThat(IssueCommandParser.VALID_STORY_POINTS).doesNotContain(4);
+    }
+
+    @Test
+    void update_summary_quoted() {
+        UpdateCommand c = IssueCommandParser.parseUpdate("ES2-9 제목을 '새 로그인 플로우'로 변경").orElseThrow();
+        assertThat(c.field()).isEqualTo(UpdateField.SUMMARY);
+        assertThat(c.value()).isEqualTo("새 로그인 플로우");
+    }
+
+    @Test
+    void update_summary_unquoted_valueNull() {
+        UpdateCommand c = IssueCommandParser.parseUpdate("ES2-9 제목을 새 로그인으로 변경").orElseThrow();
+        assertThat(c.field()).isEqualTo(UpdateField.SUMMARY);
+        assertThat(c.value()).isNull();
+    }
+
+    @Test
+    void update_dueDate_absoluteToken() {
+        UpdateCommand c = IssueCommandParser.parseUpdate("ES2-9 마감일 2026-07-10").orElseThrow();
+        assertThat(c.field()).isEqualTo(UpdateField.DUE_DATE);
+        assertThat(c.value()).isEqualTo("2026-07-10");
+    }
+
+    @Test
+    void update_dueDate_relativeToken() {
+        UpdateCommand c = IssueCommandParser.parseUpdate("ES2-9 마감일 금요일로").orElseThrow();
+        assertThat(c.field()).isEqualTo(UpdateField.DUE_DATE);
+        assertThat(c.value()).isEqualTo("금요일");
+    }
+
+    @Test
+    void update_priority_buckets() {
+        assertThat(IssueCommandParser.parseUpdate("ES2-1 우선순위 높음").orElseThrow().value()).isEqualTo("High");
+        assertThat(IssueCommandParser.parseUpdate("ES2-1 우선순위 긴급").orElseThrow().value()).isEqualTo("Highest");
+        assertThat(IssueCommandParser.parseUpdate("ES2-1 우선순위 보통").orElseThrow().value()).isEqualTo("Medium");
+        assertThat(IssueCommandParser.parseUpdate("ES2-1 우선순위 낮음").orElseThrow().value()).isEqualTo("Low");
+    }
+
+    @Test
+    void update_noKeyword_returnsEmpty() {
+        assertThat(IssueCommandParser.parseUpdate("ES2-1 이거 확인해줘")).isEmpty();
+    }
+
+    @Test
+    void update_twoKeys_returnsEmpty() {
+        // 키 2개면 단일 필드 수정 대상 모호 → empty
+        assertThat(IssueCommandParser.parseUpdate("ES2-1 ES2-2 SP 3으로")).isEmpty();
+    }
+
+    @Test
+    void sprintMove_detected() {
+        assertThat(IssueCommandParser.parseSprintMove("ES2-123 스프린트로 옮겨줘")).contains("ES2-123");
+        assertThat(IssueCommandParser.parseSprintMove("ES2-123 현재 스프린트에 넣어줘")).contains("ES2-123");
+    }
+
+    @Test
+    void sprintMove_noMoveVerb_empty() {
+        assertThat(IssueCommandParser.parseSprintMove("ES2-123 스프린트 상황 알려줘")).isEmpty();
     }
 
     @Test

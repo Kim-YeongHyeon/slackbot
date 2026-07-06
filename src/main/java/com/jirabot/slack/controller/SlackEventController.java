@@ -75,6 +75,8 @@ public class SlackEventController {
               `@지라 할당 ES2-123 홍길동` — 이슈 담당자 지정 (@멘션도 가능)
               `@지라 하위작업 ES2-123 <내용>` — 특정 이슈 아래 하위작업 생성 (스레드 밖에서도 키/이름으로 지정 가능)
               `@지라 ES2-1이 ES2-2에 막혀있어` — 이슈 링크 생성 (blocks/relates/duplicate, 방향 모호 시 확인 버튼)
+              `@지라 ES2-123 SP 3으로 변경` — SP/제목/마감일/우선순위 수정 (제목은 따옴표 필요)
+              `@지라 ES2-123 스프린트로 옮겨줘` — 현재 활성 스프린트로 이동
               `@지라 할당알림 on` / `off` / `상태` — 이슈가 나에게 할당되면 DM 알림 (기본 ON)
               `@지라 리마인더 on` / `off` / `상태` — 평일 09:00 미해결 이슈 DM 알림 토글
               `@지라 notion백필` — Jira 전체 버그를 Notion '버그 현황' DB로 동기화
@@ -328,6 +330,18 @@ public class SlackEventController {
         String cardKey = extractCardIssueKey(cleaned);
         if (cardKey != null) {
             handleIssueCard(event, cardKey);
+            return;
+        }
+
+        // 1.43차: 단일 이슈 필드 수정(SP/제목/마감일/우선순위) 및 스프린트 이동. 키 1개 + 해당 키워드일 때.
+        Optional<IssueCommandParser.UpdateCommand> updateCmd = IssueCommandParser.parseUpdate(cleaned);
+        if (updateCmd.isPresent()) {
+            handleUpdateCommand(event, updateCmd.get());
+            return;
+        }
+        Optional<String> sprintMoveKey = IssueCommandParser.parseSprintMove(cleaned);
+        if (sprintMoveKey.isPresent()) {
+            handleSprintMove(event, sprintMoveKey.get());
             return;
         }
 
@@ -588,6 +602,175 @@ public class SlackEventController {
             }
         }
         return Optional.empty();
+    }
+
+    // STUDY: 단일 이슈 필드 수정(SP/제목/마감일/우선순위). 값이 없거나 유효하지 않으면 안내만 하고 API 호출 안 함.
+    private void handleUpdateCommand(SlackEventInner event, IssueCommandParser.UpdateCommand cmd) {
+        String replyTs = event.thread_ts() != null ? event.thread_ts() : event.ts();
+        slackExecutor.execute(() -> {
+            try {
+                switch (cmd.field()) {
+                    case STORY_POINT -> {
+                        Integer sp = (Integer) cmd.value();
+                        if (sp == null) {
+                            replyInThread(event, replyTs, String.format(
+                                    ":warning: 변경할 Story Point를 적어주세요. 예: `@지라 %s SP 3으로 변경`", cmd.key()));
+                            return;
+                        }
+                        if (!IssueCommandParser.VALID_STORY_POINTS.contains(sp)) {
+                            replyInThread(event, replyTs, String.format(
+                                    ":warning: Story Point는 1·2·3·5·8 중 하나여야 해요 (입력: %d).\n"
+                                    + "1=반나절, 2=하루, 3=1~2일, 5=2~3일, 8=3~4일(스프린트 최대)", sp));
+                            return;
+                        }
+                        boolean ok = jiraApiClient.updateIssueFields(
+                                cmd.key(), Map.of(jiraProps.storyPointField(), (double) sp));
+                        if (ok) {
+                            issueRepository.findByIssueKey(cmd.key()).ifPresent(i -> {
+                                i.setStoryPoint((double) sp);
+                                issueRepository.save(i);
+                            });
+                        }
+                        replyInThread(event, replyTs, ok
+                                ? String.format(":pencil2: *%s* Story Point를 %d로 변경했어요.", cmd.key(), sp)
+                                : String.format(":x: *%s* SP 변경에 실패했어요.", cmd.key()));
+                    }
+                    case SUMMARY -> {
+                        String title = (String) cmd.value();
+                        if (title == null || title.isBlank()) {
+                            replyInThread(event, replyTs, String.format(
+                                    ":warning: 새 제목을 따옴표로 감싸주세요. 예: `@지라 %s 제목을 '새 제목'으로 변경`", cmd.key()));
+                            return;
+                        }
+                        boolean ok = jiraApiClient.updateIssueFields(cmd.key(), Map.of("summary", title));
+                        if (ok) {
+                            issueRepository.findByIssueKey(cmd.key()).ifPresent(i -> {
+                                i.setSummary(title);
+                                issueRepository.save(i);
+                            });
+                        }
+                        replyInThread(event, replyTs, ok
+                                ? String.format(":pencil2: *%s* 제목을 \"%s\"(으)로 변경했어요.", cmd.key(), title)
+                                : String.format(":x: *%s* 제목 변경에 실패했어요.", cmd.key()));
+                    }
+                    case DUE_DATE -> {
+                        String token = (String) cmd.value();
+                        Optional<LocalDate> date = token == null ? Optional.empty() : resolveDueDate(token);
+                        if (date.isEmpty()) {
+                            replyInThread(event, replyTs, String.format(
+                                    ":warning: 마감일을 인식하지 못했어요. 예: `@지라 %s 마감일 2026-07-10` / `금요일` / `내일`", cmd.key()));
+                            return;
+                        }
+                        String iso = date.get().toString();
+                        boolean ok = jiraApiClient.updateIssueFields(cmd.key(), Map.of("duedate", iso));
+                        replyInThread(event, replyTs, ok
+                                ? String.format(":calendar: *%s* 마감일을 %s(으)로 설정했어요.", cmd.key(), iso)
+                                : String.format(":x: *%s* 마감일 설정에 실패했어요.", cmd.key()));
+                    }
+                    case PRIORITY -> {
+                        String bucket = (String) cmd.value();
+                        Optional<String> name = bucket == null ? Optional.empty() : resolvePriorityName(bucket);
+                        if (name.isEmpty()) {
+                            String available = jiraApiClient.getPriorities().stream()
+                                    .map(com.jirabot.slack.client.dto.PriorityInfo::name)
+                                    .reduce((x, y) -> x + ", " + y).orElse("(없음)");
+                            replyInThread(event, replyTs, String.format(
+                                    ":warning: 우선순위를 인식하지 못했어요. 사용 가능: %s", available));
+                            return;
+                        }
+                        boolean ok = jiraApiClient.updateIssueFields(
+                                cmd.key(), Map.of("priority", Map.of("name", name.get())));
+                        replyInThread(event, replyTs, ok
+                                ? String.format(":arrow_up_small: *%s* 우선순위를 %s(으)로 변경했어요.", cmd.key(), name.get())
+                                : String.format(":x: *%s* 우선순위 변경에 실패했어요.", cmd.key()));
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Update command failed for {}: {}", cmd.key(), e.toString());
+                replyInThread(event, replyTs, ":x: 필드 수정 중 오류가 발생했어요: " + e.getMessage());
+            }
+        });
+    }
+
+    // STUDY: 마감일 토큰 → KST 기준 ISO 날짜. 절대(yyyy.MM.dd / MM.dd) + 상대(오늘/내일/모레/글피/다음주) + 요일(다음 도래일).
+    private Optional<LocalDate> resolveDueDate(String token) {
+        String t = token.strip().toLowerCase();
+        LocalDate today = LocalDate.now(KST);
+        Matcher full = java.util.regex.Pattern.compile("(\\d{4})[.\\-/](\\d{1,2})[.\\-/](\\d{1,2})").matcher(t);
+        if (full.find()) {
+            try {
+                return Optional.of(LocalDate.of(Integer.parseInt(full.group(1)),
+                        Integer.parseInt(full.group(2)), Integer.parseInt(full.group(3))));
+            } catch (Exception e) {
+                return Optional.empty();
+            }
+        }
+        switch (t) {
+            case "오늘": return Optional.of(today);
+            case "내일": return Optional.of(today.plusDays(1));
+            case "모레": return Optional.of(today.plusDays(2));
+            case "글피": return Optional.of(today.plusDays(3));
+            case "다음주", "다음 주": return Optional.of(today.plusDays(7));
+            default: break;
+        }
+        java.time.DayOfWeek dow = parseDayOfWeek(t);
+        if (dow != null) {
+            int diff = (dow.getValue() - today.getDayOfWeek().getValue() + 7) % 7;
+            return Optional.of(today.plusDays(diff == 0 ? 7 : diff)); // 같은 요일이면 다음 주로
+        }
+        Matcher md = java.util.regex.Pattern.compile("(?<!\\d)(\\d{1,2})[.\\-/](\\d{1,2})(?!\\d)").matcher(t);
+        if (md.find()) {
+            try {
+                return Optional.of(LocalDate.of(today.getYear(),
+                        Integer.parseInt(md.group(1)), Integer.parseInt(md.group(2))));
+            } catch (Exception e) {
+                return Optional.empty();
+            }
+        }
+        return Optional.empty();
+    }
+
+    private java.time.DayOfWeek parseDayOfWeek(String t) {
+        if (t.contains("월요일") || t.contains("monday")) return java.time.DayOfWeek.MONDAY;
+        if (t.contains("화요일") || t.contains("tuesday")) return java.time.DayOfWeek.TUESDAY;
+        if (t.contains("수요일") || t.contains("wednesday")) return java.time.DayOfWeek.WEDNESDAY;
+        if (t.contains("목요일") || t.contains("thursday")) return java.time.DayOfWeek.THURSDAY;
+        if (t.contains("금요일") || t.contains("friday")) return java.time.DayOfWeek.FRIDAY;
+        if (t.contains("토요일") || t.contains("saturday")) return java.time.DayOfWeek.SATURDAY;
+        if (t.contains("일요일") || t.contains("sunday")) return java.time.DayOfWeek.SUNDAY;
+        return null;
+    }
+
+    // STUDY: 정규 버킷(Highest/High/…) → 사이트 실제 우선순위 name. 정확 일치 우선, 없으면 부분 일치.
+    private Optional<String> resolvePriorityName(String bucket) {
+        var priorities = jiraApiClient.getPriorities();
+        for (var p : priorities) {
+            if (p.name() != null && p.name().equalsIgnoreCase(bucket)) {
+                return Optional.of(p.name());
+            }
+        }
+        for (var p : priorities) {
+            if (p.name() != null && p.name().toLowerCase().contains(bucket.toLowerCase())) {
+                return Optional.of(p.name());
+            }
+        }
+        return Optional.empty();
+    }
+
+    // STUDY: 활성 스프린트로 이동. moveToActiveSprint 내부에서 활성 스프린트를 조회하므로 없으면 false.
+    private void handleSprintMove(SlackEventInner event, String issueKey) {
+        String replyTs = event.thread_ts() != null ? event.thread_ts() : event.ts();
+        slackExecutor.execute(() -> {
+            try {
+                boolean ok = jiraApiClient.moveToActiveSprint(issueKey);
+                replyInThread(event, replyTs, ok
+                        ? String.format(":runner: *%s* 를 현재 스프린트로 옮겼어요.", issueKey)
+                        : String.format(":x: *%s* 스프린트 이동에 실패했어요 (활성 스프린트가 없을 수 있어요).", issueKey));
+            } catch (Exception e) {
+                log.error("Sprint move failed for {}: {}", issueKey, e.toString());
+                replyInThread(event, replyTs, ":x: 스프린트 이동 중 오류가 발생했어요: " + e.getMessage());
+            }
+        });
     }
 
     // STUDY: 이슈 타입명이 에픽인지 — 설정값(영문 정식명)과 한글 표시명 "에픽" 둘 다 비교(L4: 사이트가 한글 표시명 반환).

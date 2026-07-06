@@ -208,6 +208,160 @@ public final class IssueCommandParser {
         return new String[]{a.toUpperCase(), b.toUpperCase()};
     }
 
+    // ==================== 필드 수정 / 스프린트 이동 ====================
+
+    /** 수정 대상 필드. */
+    public enum UpdateField { STORY_POINT, SUMMARY, DUE_DATE, PRIORITY }
+
+    /**
+     * 필드 수정 명령. value 타입은 field 별로 다름:
+     * STORY_POINT=Integer, SUMMARY=String(새 제목), PRIORITY=String(정규 버킷명 Highest/High/…),
+     * DUE_DATE=String(원문 토큰 — 컨트롤러가 KST 기준으로 ISO 날짜로 해석).
+     */
+    public record UpdateCommand(String key, UpdateField field, Object value) {}
+
+    private static final Pattern SP_KW = Pattern.compile(
+            "(?i)(sp|스토리\\s*포인트|story\\s*points?|포인트)");
+    private static final Pattern SP_AFTER_KW = Pattern.compile(
+            "(?i)(?:sp|스토리\\s*포인트|story\\s*points?|포인트)\\D{0,6}(\\d+)");
+    private static final Pattern SP_BEFORE_UNIT = Pattern.compile("(\\d+)\\s*점");
+    private static final Pattern SUMMARY_KW = Pattern.compile("(?i)(제목|타이틀|summary)");
+    private static final Pattern DUE_KW = Pattern.compile("(?i)(마감|기한|due)");
+    private static final Pattern PRIORITY_KW = Pattern.compile("(?i)(우선\\s*순위|priority)");
+
+    // 절대 날짜: yyyy.MM.dd / yyyy-MM-dd / MM.dd / MM/dd
+    private static final Pattern ABS_DATE_FULL = Pattern.compile("(\\d{4})[.\\-/](\\d{1,2})[.\\-/](\\d{1,2})");
+    private static final Pattern ABS_DATE_MD = Pattern.compile("(?<!\\d)(\\d{1,2})[.\\-/](\\d{1,2})(?!\\d)");
+
+    /** 팀 스토리포인트 스케일(docs/story-point-guide.md). */
+    public static final java.util.Set<Integer> VALID_STORY_POINTS = java.util.Set.of(1, 2, 3, 5, 8);
+
+    /**
+     * "ES2-123 SP 3으로 / 제목을 '..'로 / 마감일 금요일로 / 우선순위 높음" 형태의 단일 이슈 필드 수정 파싱.
+     * 이슈 키가 정확히 1개이고 필드 키워드가 있을 때만 발동.
+     */
+    public static Optional<UpdateCommand> parseUpdate(String text) {
+        if (text == null || text.isBlank()) {
+            return Optional.empty();
+        }
+        String t = text.strip();
+        String key = oneKey(t);
+        if (key == null) {
+            return Optional.empty();
+        }
+        // 키를 제거해 키의 숫자(-123)를 값으로 오인하지 않도록.
+        String rest = t.replace(key, " ").replace(key.toLowerCase(), " ");
+
+        // 1) 제목 변경 — 따옴표 새 제목 필수
+        if (SUMMARY_KW.matcher(rest).find()) {
+            Matcher q = QUOTED.matcher(t);
+            if (q.find()) {
+                return Optional.of(new UpdateCommand(key, UpdateField.SUMMARY, q.group(1).strip()));
+            }
+            // 따옴표 없으면 값 모호 → SUMMARY 지정하되 value=null (컨트롤러가 사용법 안내)
+            return Optional.of(new UpdateCommand(key, UpdateField.SUMMARY, null));
+        }
+
+        // 2) Story Point
+        if (SP_KW.matcher(rest).find()) {
+            Integer sp = extractStoryPoint(rest);
+            return Optional.of(new UpdateCommand(key, UpdateField.STORY_POINT, sp)); // sp=null → 컨트롤러가 안내
+        }
+
+        // 3) 마감일
+        if (DUE_KW.matcher(rest).find()) {
+            String token = extractDueToken(rest);
+            return Optional.of(new UpdateCommand(key, UpdateField.DUE_DATE, token)); // token=null → 안내
+        }
+
+        // 4) 우선순위
+        if (PRIORITY_KW.matcher(rest).find()) {
+            String bucket = extractPriorityBucket(rest);
+            return Optional.of(new UpdateCommand(key, UpdateField.PRIORITY, bucket)); // bucket=null → 안내
+        }
+
+        return Optional.empty();
+    }
+
+    private static Integer extractStoryPoint(String rest) {
+        Matcher m = SP_AFTER_KW.matcher(rest);
+        if (m.find()) {
+            return safeInt(m.group(1));
+        }
+        Matcher u = SP_BEFORE_UNIT.matcher(rest);
+        if (u.find()) {
+            return safeInt(u.group(1));
+        }
+        return null;
+    }
+
+    private static Integer safeInt(String s) {
+        try {
+            return Integer.valueOf(s);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    // 마감일 원문 토큰 추출(절대/상대/요일). 컨트롤러가 KST 기준으로 ISO 날짜 해석.
+    private static String extractDueToken(String rest) {
+        Matcher full = ABS_DATE_FULL.matcher(rest);
+        if (full.find()) {
+            return full.group();
+        }
+        Matcher rel = Pattern.compile("(오늘|내일|모레|글피|다음\\s*주|"
+                + "월요일|화요일|수요일|목요일|금요일|토요일|일요일|"
+                + "monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
+                Pattern.CASE_INSENSITIVE).matcher(rest);
+        if (rel.find()) {
+            return rel.group();
+        }
+        Matcher md = ABS_DATE_MD.matcher(rest);
+        if (md.find()) {
+            return md.group();
+        }
+        return null;
+    }
+
+    private static String extractPriorityBucket(String rest) {
+        String r = rest.toLowerCase();
+        if (r.matches(".*(긴급|최고|가장\\s*높|매우\\s*높|highest).*")) return "Highest";
+        if (r.matches(".*(최저|가장\\s*낮|매우\\s*낮|lowest).*")) return "Lowest";
+        if (r.matches(".*(높|high).*")) return "High";
+        if (r.matches(".*(낮|low).*")) return "Low";
+        if (r.matches(".*(보통|중간|medium|normal).*")) return "Medium";
+        return null;
+    }
+
+    private static final Pattern SPRINT_MOVE = Pattern.compile(
+            "(?i)스프린트\\s*(?:로|에|으로)?\\s*(?:옮겨|이동|넣어|추가|올려|보내)");
+
+    /**
+     * "ES2-123 스프린트로 옮겨줘" 형태의 활성 스프린트 이동 명령. 이슈 키가 정확히 1개일 때만.
+     */
+    public static Optional<String> parseSprintMove(String text) {
+        if (text == null || text.isBlank()) {
+            return Optional.empty();
+        }
+        String key = oneKey(text);
+        if (key == null) {
+            return Optional.empty();
+        }
+        return SPRINT_MOVE.matcher(text).find() ? Optional.of(key) : Optional.empty();
+    }
+
+    /** 이슈 키가 정확히 1개면 그 키(대문자), 아니면 null. */
+    private static String oneKey(String t) {
+        Matcher km = ISSUE_KEY.matcher(t);
+        String key = null;
+        int count = 0;
+        while (km.find()) {
+            count++;
+            if (key == null) key = km.group();
+        }
+        return count == 1 ? key.toUpperCase() : null;
+    }
+
     /**
      * 하위작업 제목 추출: 따옴표 콘텐츠 우선, 없으면 키/이름/키워드/명령어미를 제거한 나머지.
      */
