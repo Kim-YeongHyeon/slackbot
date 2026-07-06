@@ -741,6 +741,125 @@ class SlackEventControllerTest {
         assertThat(msg.getValue()).contains("사용법");
     }
 
+    // --- 하위작업 by 키/이름 (스레드 밖) ---
+
+    private static com.jirabot.slack.client.dto.SprintIssue sprintIssue(
+            String key, String type, boolean subtask) {
+        return new com.jirabot.slack.client.dto.SprintIssue(
+                key, "부모 요약", "진행 중", "진행 중", "Alice", "Alice", type, subtask,
+                3.0, null, null, null, null);
+    }
+
+    @Test
+    void subtaskByKey_createsUnderResolvedParent() throws Exception {
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.getIssue("SLAC-100")).thenReturn(
+                java.util.Optional.of(sprintIssue("SLAC-100", "스토리", false)));
+        when(issueCreateService.classifyOnly(anyString(), any())).thenReturn(
+                new com.jirabot.slack.client.dto.IssueClassification(
+                        com.jirabot.slack.client.dto.IssueClassification.IssueType.FEATURE, 2, "테스트 작성", "테스트 작성"));
+        when(jiraApiClient.createSubTask(eq("SLAC-100"), anyString(), org.mockito.ArgumentMatchers.anyInt(), any()))
+                .thenReturn("SLAC-101");
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> SLAC-100에 하위작업으로 '테스트 작성' 추가해줘", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).createSubTask(eq("SLAC-100"), eq("테스트 작성"), org.mockito.ArgumentMatchers.eq(2), eq("acc-1"));
+        verify(issueCreateService, never()).createFromSlackText(any(), any());
+    }
+
+    @Test
+    void subtaskByName_resolvesNameThenCreates() throws Exception {
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.findIssueKeyByName("결제 모듈")).thenReturn(java.util.Optional.of("SLAC-50"));
+        when(jiraApiClient.getIssue("SLAC-50")).thenReturn(
+                java.util.Optional.of(sprintIssue("SLAC-50", "스토리", false)));
+        when(issueCreateService.classifyOnly(anyString(), any())).thenReturn(
+                new com.jirabot.slack.client.dto.IssueClassification(
+                        com.jirabot.slack.client.dto.IssueClassification.IssueType.FEATURE, 1, "환불 처리", "환불 처리"));
+        when(jiraApiClient.createSubTask(eq("SLAC-50"), anyString(), org.mockito.ArgumentMatchers.anyInt(), any()))
+                .thenReturn("SLAC-51");
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 결제 모듈 스토리 아래에 하위작업으로 '환불 처리' 추가", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).findIssueKeyByName("결제 모듈");
+        verify(jiraApiClient).createSubTask(eq("SLAC-50"), eq("환불 처리"), org.mockito.ArgumentMatchers.eq(1), eq("acc-1"));
+    }
+
+    @Test
+    void subtaskUnderEpic_rejectedWithGuidance() throws Exception {
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.getIssue("SLAC-200")).thenReturn(
+                java.util.Optional.of(sprintIssue("SLAC-200", "에픽", false)));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> SLAC-200에 하위작업으로 '무언가' 추가", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).createSubTask(any(), any(), org.mockito.ArgumentMatchers.anyInt(), any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("에픽");
+    }
+
+    @Test
+    void subtaskUnderSubtask_rejected() throws Exception {
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.getIssue("SLAC-300")).thenReturn(
+                java.util.Optional.of(sprintIssue("SLAC-300", "하위 작업", true)));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> SLAC-300에 하위작업으로 '무언가' 추가", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).createSubTask(any(), any(), org.mockito.ArgumentMatchers.anyInt(), any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("하위작업");
+    }
+
+    @Test
+    void subtaskByName_notFound_repliesNotFound() throws Exception {
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.findIssueKeyByName("없는 이슈")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 없는 이슈 스토리 아래에 하위작업으로 '무언가' 추가", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).createSubTask(any(), any(), org.mockito.ArgumentMatchers.anyInt(), any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("찾을 수 없");
+    }
+
+    @Test
+    void subtaskByKey_unregisteredUser_blocked() throws Exception {
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.empty());
+        when(jiraApiClient.getIssue("SLAC-100")).thenReturn(
+                java.util.Optional.of(sprintIssue("SLAC-100", "스토리", false)));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> SLAC-100에 하위작업으로 '무언가' 추가", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).createSubTask(any(), any(), org.mockito.ArgumentMatchers.anyInt(), any());
+    }
+
     // --- 할당알림 토글 ---
 
     @Test

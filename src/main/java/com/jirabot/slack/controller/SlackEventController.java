@@ -25,6 +25,7 @@ import com.jirabot.slack.service.IssueSearchService;
 import com.jirabot.slack.service.JiraSyncService;
 import com.jirabot.slack.service.ReminderSubscriptionService;
 import com.jirabot.slack.service.ScrumReportService;
+import com.jirabot.slack.util.IssueCommandParser;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -72,6 +73,7 @@ public class SlackEventController {
               `@지라 검색 <키워드>` — 이슈 제목/설명으로 검색 (예: `@지라 검색 preset`)
               `@지라 ES2-123` — 이슈 키로 상세 카드 조회 (상태 전환 버튼 포함)
               `@지라 할당 ES2-123 홍길동` — 이슈 담당자 지정 (@멘션도 가능)
+              `@지라 하위작업 ES2-123 <내용>` — 특정 이슈 아래 하위작업 생성 (스레드 밖에서도 키/이름으로 지정 가능)
               `@지라 할당알림 on` / `off` / `상태` — 이슈가 나에게 할당되면 DM 알림 (기본 ON)
               `@지라 리마인더 on` / `off` / `상태` — 평일 09:00 미해결 이슈 DM 알림 토글
               `@지라 notion백필` — Jira 전체 버그를 Notion '버그 현황' DB로 동기화
@@ -328,6 +330,15 @@ public class SlackEventController {
             return;
         }
 
+        // 1.45차: 특정 부모 이슈 아래 하위작업 생성 (키/이름으로 지정, 스레드 밖에서도 동작).
+        //        "ES2-123에 하위작업으로 'X' 추가" / "하위작업 ES2-123 X" / "<이름> 스토리 아래 하위작업 X".
+        //        에픽 키워드 체크(1.5차)보다 먼저 실행 — "에픽 아래 하위작업"을 에픽 생성으로 오인하지 않도록.
+        Optional<IssueCommandParser.SubtaskCommand> subtaskCmd = IssueCommandParser.parseSubtask(cleaned);
+        if (subtaskCmd.isPresent()) {
+            handleSubtaskCommand(event, subtaskCmd.get());
+            return;
+        }
+
         // 1.5차: 에픽 키워드 트리거 — `에픽`/`epic` 이 단어로 포함되면 AI 분류를 거치지 않고
         //        결정적으로 에픽 생성. 스토리/버그(Haiku/Sonnet 분류)와 확실히 구별되는 특이 케이스.
         //        스레드 안에서도 우선 적용 — 에픽은 하위작업이 될 수 없기 때문.
@@ -359,7 +370,7 @@ public class SlackEventController {
         // 스레드 키워드 매칭
         if (lower.startsWith("하위작업 ") || lower.startsWith("subtask ")) {
             String content = cleaned.substring(cleaned.indexOf(' ') + 1).strip();
-            executeSubTask(event, parentIssue, content);
+            executeSubTask(event, parentIssue.getIssueKey(), content, threadTs);
             return;
         }
         if (lower.startsWith("댓글 ") || lower.startsWith("comment ")) {
@@ -401,7 +412,7 @@ public class SlackEventController {
 
             String content = action.extracted() != null ? action.extracted().getOrDefault("content", cleaned) : cleaned;
             switch (action.action()) {
-                case "sub_task" -> executeSubTask(event, parentIssue, content);
+                case "sub_task" -> executeSubTask(event, parentIssue.getIssueKey(), content, threadTs);
                 case "comment" -> executeComment(event, parentIssue, content);
                 case "modify" -> executeModify(event, parentIssue, content);
                 case "complete" -> handleComplete(event);
@@ -413,14 +424,15 @@ public class SlackEventController {
 
     // STUDY: 하위작업 생성도 Jira 이슈를 만드는 행위이므로 등록 여부를 체크한다.
     //        미등록 사용자는 등록 안내 메시지를 받고, 등록된 사용자만 하위작업을 생성할 수 있다.
-    private void executeSubTask(SlackEventInner event, IssueEntity parentIssue, String content) {
+    //        replyTs 로 응답 위치를 통일한다 — 스레드 경로는 thread_ts, 스레드 밖 명령은 event.ts.
+    private void executeSubTask(SlackEventInner event, String parentKey, String content, String replyTs) {
         slackExecutor.execute(() -> {
             try {
                 // 등록 여부 확인
                 var mapping = userMappingRepository.findBySlackUserId(event.user());
                 if (mapping.isEmpty()) {
                     log.info("Sub-task creation blocked - unregistered user={}", event.user());
-                    replyInThread(event, event.thread_ts(),
+                    replyInThread(event, replyTs,
                             ":warning: Jira 계정이 연결되지 않았습니다.\n"
                             + "먼저 아래 명령으로 등록해주세요:\n"
                             + "`@지라 등록 <Jira에 표시되는 이름>`\n"
@@ -435,17 +447,82 @@ public class SlackEventController {
 
                 String jiraAccountId = mapping.get().getJiraAccountId();
                 String subKey = jiraApiClient.createSubTask(
-                        parentIssue.getIssueKey(), classification.title(),
+                        parentKey, classification.title(),
                         classification.storyPoint(), jiraAccountId);
-                replyInThread(event, event.thread_ts(), String.format(
+                replyInThread(event, replyTs, String.format(
                         ":white_check_mark: 하위작업 생성: *%s* %s (SP %d)\n상위: %s",
-                        subKey, classification.title(), classification.storyPoint(), parentIssue.getIssueKey()));
+                        subKey, classification.title(), classification.storyPoint(), parentKey));
             } catch (Exception e) {
                 log.error("Sub-task creation failed: {}", e.toString());
-                replyInThread(event, event.thread_ts(),
+                replyInThread(event, replyTs,
                         ":x: 하위작업 생성에 실패했습니다: " + e.getMessage());
             }
         });
+    }
+
+    // STUDY: 특정 부모(키/이름) 아래 하위작업 생성 — 스레드 밖 명령. 네트워크 검증(이슈 조회)이 있어
+    //        slackExecutor 에서 수행한 뒤 executeSubTask 로 실제 생성을 위임한다(응답은 원 메시지 스레드).
+    private void handleSubtaskCommand(SlackEventInner event, IssueCommandParser.SubtaskCommand cmd) {
+        String replyTs = event.thread_ts() != null ? event.thread_ts() : event.ts();
+        slackExecutor.execute(() -> {
+            try {
+                String parentKey = cmd.parentKey();
+                if (parentKey == null) {
+                    // 이름형 — 에픽 언급이면 하위작업 불가 안내(에픽 직속 하위작업 금지)
+                    if (containsEpicKeyword(cmd.parentName())) {
+                        replyInThread(event, replyTs,
+                                ":no_entry: 에픽 아래에는 하위작업을 직접 만들 수 없어요.\n"
+                                + "`<에픽명> 에픽 아래 스토리 만들어줘` 로 스토리를 연결한 뒤 그 스토리에 하위작업을 달아보세요.");
+                        return;
+                    }
+                    var found = jiraApiClient.findIssueKeyByName(cmd.parentName());
+                    if (found.isEmpty()) {
+                        replyInThread(event, replyTs, String.format(
+                                ":mag: '%s' 이슈를 찾을 수 없어요. 이슈 키(예: ES2-123)로 지정해보세요.", cmd.parentName()));
+                        return;
+                    }
+                    parentKey = found.get();
+                }
+
+                if (cmd.content() == null || cmd.content().isBlank()) {
+                    replyInThread(event, replyTs, String.format(
+                            ":warning: 하위작업 내용을 함께 적어주세요. 예: `@지라 하위작업 %s 로그인 리팩토링`", parentKey));
+                    return;
+                }
+
+                // 부모 이슈 검증 — 존재/서브태스크/에픽 여부
+                var parent = jiraApiClient.getIssue(parentKey);
+                if (parent.isEmpty()) {
+                    replyInThread(event, replyTs, String.format(
+                            ":mag: *%s* 이슈를 찾을 수 없어요. 키를 확인해주세요.", parentKey));
+                    return;
+                }
+                var p = parent.get();
+                if (p.subtask()) {
+                    replyInThread(event, replyTs, String.format(
+                            ":no_entry: *%s* 은(는) 하위작업이라 그 아래에 하위작업을 만들 수 없어요.", parentKey));
+                    return;
+                }
+                if (isEpicType(p.issueType())) {
+                    replyInThread(event, replyTs, String.format(
+                            ":no_entry: *%s* 은(는) 에픽이라 하위작업을 직접 만들 수 없어요.\n"
+                            + "`%s 에픽 아래 스토리 만들어줘` 로 스토리를 연결해보세요.", parentKey, parentKey));
+                    return;
+                }
+
+                executeSubTask(event, parentKey, cmd.content(), replyTs);
+            } catch (Exception e) {
+                log.error("Subtask command failed: {}", e.toString());
+                replyInThread(event, replyTs, ":x: 하위작업 처리 중 오류가 발생했어요: " + e.getMessage());
+            }
+        });
+    }
+
+    // STUDY: 이슈 타입명이 에픽인지 — 설정값(영문 정식명)과 한글 표시명 "에픽" 둘 다 비교(L4: 사이트가 한글 표시명 반환).
+    private boolean isEpicType(String issueType) {
+        if (issueType == null) return false;
+        String t = issueType.strip();
+        return t.equalsIgnoreCase(jiraProps.issueTypes().epic()) || t.equals("에픽");
     }
 
     private void executeComment(SlackEventInner event, IssueEntity parentIssue, String content) {

@@ -126,19 +126,33 @@ public class JiraApiClientImpl implements JiraApiClient {
 
     @Override
     public java.util.Optional<String> findEpicKeyByName(String epicName) {
-        if (epicName == null || epicName.isBlank()) {
+        // issuetype=Epic 은 영문 정식명이라 JQL 매칭됨(L7).
+        return findKeyByName(epicName,
+                "project = " + props.projectKey() + " AND issuetype = Epic ORDER BY created DESC");
+    }
+
+    @Override
+    public java.util.Optional<String> findIssueKeyByName(String name) {
+        // STUDY: 하위작업 부모 후보 — 에픽은 제외(하위작업은 에픽 직속이 될 수 없음). issuetype != Epic 은
+        //        영문 정식명(L7). 서브태스크 부모 여부는 호출부(getIssue().subtask())에서 재확인하므로
+        //        JQL 에는 존재하지 않을 수 있는 Sub-task 타입명을 넣지 않는다(오타 시 JQL 400 방지).
+        return findKeyByName(name,
+                "project = " + props.projectKey() + " AND issuetype != Epic ORDER BY created DESC");
+    }
+
+    // STUDY: 요약(summary)으로 이슈 키를 찾는 공용 로직. 정확 일치 우선, 없으면 양방향 부분 일치.
+    //        양방향: 추출 구절이 요약을 포함(넓게 잡힌 경우)하거나 그 반대.
+    private java.util.Optional<String> findKeyByName(String name, String jql) {
+        if (name == null || name.isBlank()) {
             return java.util.Optional.empty();
         }
-        String needle = epicName.strip().toLowerCase();
-        // 정확 일치를 부분 일치보다 우선. issuetype=Epic 은 영문 정식명이라 JQL 매칭됨(L7).
-        String jql = "project = " + props.projectKey() + " AND issuetype = Epic ORDER BY created DESC";
+        String needle = name.strip().toLowerCase();
         String partial = null;
         for (SprintIssue e : searchByJql(jql)) {
             String s = e.summary() == null ? "" : e.summary().strip();
-            if (s.equalsIgnoreCase(epicName.strip())) {
+            if (s.equalsIgnoreCase(name.strip())) {
                 return java.util.Optional.of(e.key());
             }
-            // 양방향 부분일치: 추출 구절이 에픽명을 포함(넓게 잡힌 경우)하거나 그 반대.
             String sl = s.toLowerCase();
             if (partial == null && !sl.isEmpty() && (sl.contains(needle) || needle.contains(sl))) {
                 partial = e.key();

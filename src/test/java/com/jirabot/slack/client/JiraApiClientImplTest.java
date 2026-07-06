@@ -68,6 +68,62 @@ class JiraApiClientImplTest {
         assertThat(body).doesNotContain("sp-");
     }
 
+    // STUDY: /rest/api/3/search/jql 응답 한 페이지(nextPageToken 없음)를 만든다.
+    private static String searchResponse(String... summaries) {
+        StringBuilder sb = new StringBuilder("{\"issues\":[");
+        for (int i = 0; i < summaries.length; i++) {
+            if (i > 0) sb.append(",");
+            sb.append("{\"key\":\"PROJ-").append(100 + i)
+              .append("\",\"fields\":{\"summary\":\"").append(summaries[i])
+              .append("\",\"issuetype\":{\"name\":\"Story\",\"subtask\":false}}}");
+        }
+        sb.append("]}");
+        return sb.toString();
+    }
+
+    @Test
+    void findIssueKeyByName_exactMatchWins() {
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody(searchResponse("결제 모듈 개선", "결제 모듈", "결제")));
+
+        // 인덱스 1이 정확 일치 → PROJ-101
+        assertThat(client.findIssueKeyByName("결제 모듈")).contains("PROJ-101");
+    }
+
+    @Test
+    void findIssueKeyByName_partialMatchWhenNoExact() {
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody(searchResponse("로그인 리팩토링", "결제 모듈 리스트")));
+
+        // 정확 일치 없음 → 부분 일치(요약이 needle 포함) 첫 후보 PROJ-101
+        assertThat(client.findIssueKeyByName("결제 모듈")).contains("PROJ-101");
+    }
+
+    @Test
+    void findIssueKeyByName_noMatch_returnsEmpty() {
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody(searchResponse("전혀 다른 이슈", "또 다른 것")));
+
+        assertThat(client.findIssueKeyByName("결제 모듈")).isEmpty();
+    }
+
+    @Test
+    void findIssueKeyByName_excludesEpicViaJql() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody(searchResponse("결제 모듈")));
+
+        client.findIssueKeyByName("결제 모듈");
+
+        String path = server.takeRequest().getPath();
+        // JQL 에 issuetype != Epic 이 포함되어야 함(에픽은 하위작업 부모가 될 수 없음)
+        assertThat(java.net.URLDecoder.decode(path, java.nio.charset.StandardCharsets.UTF_8))
+                .contains("issuetype != Epic");
+    }
+
     @Test
     void createIssue_400_throwsNonTransient() {
         server.enqueue(new MockResponse().setResponseCode(400).setBody("bad"));

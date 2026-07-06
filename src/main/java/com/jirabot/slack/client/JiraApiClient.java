@@ -26,6 +26,12 @@ public interface JiraApiClient {
     java.util.Optional<String> findEpicKeyByName(String epicName);
 
     /**
+     * 이슈 이름(요약)으로 이슈 키를 찾는다(정확 일치 우선, 없으면 부분 일치). 에픽은 제외한다.
+     * 하위작업 부모를 이름으로 지정할 때 사용. 못 찾으면 empty.
+     */
+    java.util.Optional<String> findIssueKeyByName(String name);
+
+    /**
      * Jira displayName으로 유저를 검색하여 accountId를 반환한다.
      */
     String findAccountId(String displayName);
