@@ -182,6 +182,50 @@ public class JiraApiClientImpl implements JiraApiClient {
         }
     }
 
+    // STUDY: 이슈 링크 타입은 사이트 설정이라 거의 안 변함 → 캐시. self-invocation 주의(외부 빈에서 호출돼야 캐시 탐).
+    @Override
+    @org.springframework.cache.annotation.Cacheable(com.jirabot.slack.config.CacheConfig.ISSUE_LINK_TYPES_CACHE)
+    public List<com.jirabot.slack.client.dto.IssueLinkType> getIssueLinkTypes() {
+        List<com.jirabot.slack.client.dto.IssueLinkType> result = new ArrayList<>();
+        try {
+            String json = jiraWebClient.get()
+                    .uri("/rest/api/3/issueLinkType")
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode types = objectMapper.readTree(json).path("issueLinkTypes");
+            for (JsonNode t : types) {
+                result.add(new com.jirabot.slack.client.dto.IssueLinkType(
+                        t.path("id").asText(null),
+                        t.path("name").asText(null),
+                        t.path("inward").asText(null),
+                        t.path("outward").asText(null)));
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch issue link types: {}", e.toString());
+        }
+        return result;
+    }
+
+    // STUDY: 링크 방향 — {inwardIssue <inward> outwardIssue}. Blocks 는 outwardIssue 가 inwardIssue 를 막는다.
+    //        POST /rest/api/3/issueLink 는 201(No Content) 반환. 실패 시 false.
+    @Override
+    public boolean linkIssues(String inwardKey, String outwardKey, String linkTypeName) {
+        try {
+            var body = Map.of(
+                    "type", Map.of("name", linkTypeName),
+                    "inwardIssue", Map.of("key", inwardKey),
+                    "outwardIssue", Map.of("key", outwardKey));
+            jiraWebClient.post()
+                    .uri("/rest/api/3/issueLink")
+                    .bodyValue(body)
+                    .retrieve().bodyToMono(String.class).block();
+            log.info("Linked {} <-{}- {} (inward<-type-outward)", inwardKey, linkTypeName, outwardKey);
+            return true;
+        } catch (Exception e) {
+            log.error("Failed to link {} and {} ({}): {}", inwardKey, outwardKey, linkTypeName, e.toString());
+            return false;
+        }
+    }
+
     // STUDY: @Cacheable — 호출마다 Jira 왕복 2회(보드+스프린트)를 5분 TTL 캐시(CacheConfig)로 흡수.
     //        스프린트는 2주 주기로 바뀌므로 5분 staleness 는 무해. Optional 자체가 캐시되므로
     //        "활성 스프린트 없음"(empty) 도 5분간 재조회하지 않는다.

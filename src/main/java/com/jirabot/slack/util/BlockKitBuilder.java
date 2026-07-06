@@ -23,6 +23,7 @@ public final class BlockKitBuilder {
     public static final String ACTION_DONE = "jira_transition_done";
     public static final String ACTION_QUICK_DONE = "jira_quick_done";
     public static final String ACTION_CREATE_BRANCH = "jira_create_branch";
+    public static final String ACTION_LINK_CONFIRM = "jira_link_confirm";
 
     private BlockKitBuilder() {}
 
@@ -44,6 +45,35 @@ public final class BlockKitBuilder {
             elements.add(buildButton(repo, ACTION_CREATE_BRANCH + "_" + i++,
                     issueKey + "|" + repo + "|" + branchName, null, null));
         }
+        ObjectNode actions = MAPPER.createObjectNode();
+        actions.put("type", "actions");
+        actions.set("elements", elements);
+        blocks.add(actions);
+
+        return serialize(blocks);
+    }
+
+    /**
+     * 링크 방향이 모호할 때 방향 확인 버튼 블록을 생성한다.
+     * 버튼 value = "inwardKey|outwardKey|typeName" (클릭 시 그대로 linkIssues 에 전달).
+     * action_id 는 ACTION_LINK_CONFIRM prefix + suffix 로 유일화(같은 메시지 내 중복 금지).
+     *
+     * @param verb 링크 타입의 outward 설명(예: "blocks") — 버튼 라벨 표기용
+     */
+    public static String buildLinkConfirmButtons(String keyA, String keyB, String verb, String typeName) {
+        ArrayNode blocks = MAPPER.createArrayNode();
+        blocks.add(buildMrkdwnSection(String.format(
+                ":link: *%s* 와(과) *%s* 의 링크 방향을 확인해주세요.", keyA, keyB)));
+
+        ArrayNode elements = MAPPER.createArrayNode();
+        // 옵션 1: A verb B → outward=A(동작 주체), inward=B → value = "inward|outward|type" = "B|A|type"
+        elements.add(buildButton(String.format("%s %s %s", keyA, verb, keyB),
+                ACTION_LINK_CONFIRM + "_1", keyB + "|" + keyA + "|" + typeName, "primary", null));
+        // 옵션 2: B verb A → outward=B, inward=A → value = "A|B|type"
+        elements.add(buildButton(String.format("%s %s %s", keyB, verb, keyA),
+                ACTION_LINK_CONFIRM + "_2", keyA + "|" + keyB + "|" + typeName, null, null));
+        elements.add(buildButton("취소", ACTION_LINK_CONFIRM + "_cancel", "cancel", null, null));
+
         ObjectNode actions = MAPPER.createObjectNode();
         actions.put("type", "actions");
         actions.set("elements", elements);

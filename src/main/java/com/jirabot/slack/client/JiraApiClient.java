@@ -32,6 +32,20 @@ public interface JiraApiClient {
     java.util.Optional<String> findIssueKeyByName(String name);
 
     /**
+     * 사이트에 정의된 이슈 링크 타입 목록(Blocks/Relates/Duplicate…)을 조회한다. 캐시됨.
+     */
+    List<com.jirabot.slack.client.dto.IssueLinkType> getIssueLinkTypes();
+
+    /**
+     * 두 이슈를 링크한다. 방향: {@code inwardIssue <inward> outwardIssue}
+     * (예: Blocks 는 outwardIssue 가 inwardIssue 를 막음).
+     *
+     * @param linkTypeName Jira 에 정의된 정확한 타입 name (예: "Blocks")
+     * @return 성공 여부 (201)
+     */
+    boolean linkIssues(String inwardKey, String outwardKey, String linkTypeName);
+
+    /**
      * Jira displayName으로 유저를 검색하여 accountId를 반환한다.
      */
     String findAccountId(String displayName);

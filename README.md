@@ -108,6 +108,19 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 이슈 링크 생성 — blocks/relates/duplicate (v0.0.55)
+
+"ES2-1352가 ES2-1532에 block 되고 있으니 연결해줘" 같은 자연어로 이슈 링크를 생성한다(기존 미지원).
+결정적 파싱(프롬프트 무변경):
+- 신규 `IssueCommandParser.parseLink`: 이슈 키 정확히 2개 + 관계 동사(block/막/블락/의존/중복/duplicate/relate/연결)일 때만 발동.
+  한/영 어순과 능동·피동을 구분해 Jira 방향(`inwardIssue <inward> outwardIssue`)을 결정 — "A가 B에 막힘"=A is blocked by B(inward=A),
+  "A가 B를 막음"=A blocks B(inward=B), "A duplicates B"(outward=A) 등. 방향 판별 불가 시 `ambiguous`.
+- 신규 클라이언트 `getIssueLinkTypes`(@Cacheable, 사이트 정의 Blocks/Relates/Duplicate…)·`linkIssues(inward, outward, typeName)`(POST /rest/api/3/issueLink).
+  관계→실제 타입은 name/inward/outward 부분일치로 해석(로컬라이즈 대비), POST엔 API가 준 정확한 name 사용.
+- 방향 모호 시 확인 버튼 카드(`ACTION_LINK_CONFIRM`, value `inward|outward|type`)로 사용자가 방향 선택 → SlackInteractionController가 확정.
+- `관련/연관` 단독은 오탐 방지 위해 링크로 보지 않음(명시적 연결/링크/relate 필요). 링크 해제는 안내만(Phase 4 예정).
+- 실측: 라이브 issueLinkType 조회로 Blocks(outward="blocks")/Duplicate/Relates 방향 확인.
+
 ### 특정 이슈 아래 하위작업 생성 — 키/이름 지정 (v0.0.54)
 
 기존엔 하위작업이 **스레드 안에서만** 가능했다(스레드 root 이슈가 부모). 스레드 밖에서

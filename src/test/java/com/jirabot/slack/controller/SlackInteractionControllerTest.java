@@ -175,6 +175,31 @@ class SlackInteractionControllerTest {
     }
 
     @Test
+    void linkConfirmButton_decodesValueAndCreatesLink() {
+        when(jiraApiClient.linkIssues("ES2-20", "ES2-10", "Blocks")).thenReturn(true);
+
+        // 버튼 value = "inward|outward|type"
+        controller.onInteraction(mockRequest(
+                buildPayload(BlockKitBuilder.ACTION_LINK_CONFIRM + "_1", "ES2-20|ES2-10|Blocks")));
+
+        verify(jiraApiClient).linkIssues("ES2-20", "ES2-10", "Blocks");
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).updateMessage(eq("C456"), eq("1234567890.123456"), msg.capture(), any());
+        assertThat(msg.getValue()).contains("링크");
+    }
+
+    @Test
+    void linkConfirmCancel_updatesMessageWithoutLinking() {
+        controller.onInteraction(mockRequest(
+                buildPayload(BlockKitBuilder.ACTION_LINK_CONFIRM + "_cancel", "cancel")));
+
+        verify(jiraApiClient, never()).linkIssues(anyString(), anyString(), anyString());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).updateMessage(eq("C456"), eq("1234567890.123456"), msg.capture(), any());
+        assertThat(msg.getValue()).contains("취소");
+    }
+
+    @Test
     void inReviewTransition_showsDoneButton() {
         when(jiraApiClient.transitionIssue("PROJ-1", "검토 중")).thenReturn(true);
         IssueEntity issue = new IssueEntity("PROJ-1", "Test", "Task", "진행 중", "진행 중",

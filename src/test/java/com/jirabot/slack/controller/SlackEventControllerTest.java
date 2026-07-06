@@ -860,6 +860,73 @@ class SlackEventControllerTest {
         verify(jiraApiClient, never()).createSubTask(any(), any(), org.mockito.ArgumentMatchers.anyInt(), any());
     }
 
+    // --- 이슈 링크 ---
+
+    private void stubBlocksLinkType() {
+        when(jiraApiClient.getIssueLinkTypes()).thenReturn(List.of(
+                new com.jirabot.slack.client.dto.IssueLinkType("10000", "Blocks", "is blocked by", "blocks"),
+                new com.jirabot.slack.client.dto.IssueLinkType("10003", "Relates", "relates to", "relates to")));
+    }
+
+    @Test
+    void linkCommand_confidentDirection_createsLinkWithCorrectSlots() throws Exception {
+        stubBlocksLinkType();
+        when(jiraApiClient.linkIssues(anyString(), anyString(), anyString())).thenReturn(true);
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1352가 ES2-1532에 block 되고 있으니 연결해줘", freshTs())))
+                .andExpect(status().isOk());
+
+        // 1352 is blocked by 1532 → inward=1352, outward=1532
+        verify(jiraApiClient).linkIssues(eq("ES2-1352"), eq("ES2-1532"), eq("Blocks"));
+    }
+
+    @Test
+    void linkCommand_ambiguousDirection_postsConfirmButtons() throws Exception {
+        stubBlocksLinkType();
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-10 ES2-20 block 연결", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).linkIssues(anyString(), anyString(), anyString());
+        ArgumentCaptor<String> blocks = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postBlockMessage(any(), any(), any(), blocks.capture());
+        assertThat(blocks.getValue()).contains(com.jirabot.slack.util.BlockKitBuilder.ACTION_LINK_CONFIRM);
+    }
+
+    @Test
+    void linkCommand_unknownType_repliesAvailableList() throws Exception {
+        // Duplicate 타입이 없는 사이트 → 사용 가능 목록 안내
+        when(jiraApiClient.getIssueLinkTypes()).thenReturn(List.of(
+                new com.jirabot.slack.client.dto.IssueLinkType("10000", "Blocks", "is blocked by", "blocks")));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-10이 ES2-20과 중복이야 연결해줘", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).linkIssues(anyString(), anyString(), anyString());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("Blocks");
+    }
+
+    @Test
+    void unlinkCommand_repliesNotYetSupported() throws Exception {
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-10 ES2-20 링크 해제해줘", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).linkIssues(anyString(), anyString(), anyString());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("지원 예정");
+    }
+
     // --- 할당알림 토글 ---
 
     @Test

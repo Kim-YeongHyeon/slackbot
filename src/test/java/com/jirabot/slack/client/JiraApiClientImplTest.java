@@ -124,6 +124,44 @@ class JiraApiClientImplTest {
                 .contains("issuetype != Epic");
     }
 
+    // ==================== 이슈 링크 ====================
+
+    @Test
+    void getIssueLinkTypes_parsesNameInwardOutward() {
+        server.enqueue(new MockResponse().setResponseCode(200)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody("{\"issueLinkTypes\":["
+                        + "{\"id\":\"10000\",\"name\":\"Blocks\",\"inward\":\"is blocked by\",\"outward\":\"blocks\"},"
+                        + "{\"id\":\"10003\",\"name\":\"Relates\",\"inward\":\"relates to\",\"outward\":\"relates to\"}]}"));
+
+        var types = client.getIssueLinkTypes();
+        assertThat(types).hasSize(2);
+        assertThat(types.get(0).name()).isEqualTo("Blocks");
+        assertThat(types.get(0).outward()).isEqualTo("blocks");
+        assertThat(types.get(0).inward()).isEqualTo("is blocked by");
+    }
+
+    @Test
+    void linkIssues_putsKeysInCorrectDirectionSlots() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(201));
+
+        boolean ok = client.linkIssues("ES2-1352", "ES2-1532", "Blocks");
+
+        assertThat(ok).isTrue();
+        String body = server.takeRequest().getBody().readUtf8();
+        // 방향 버그 트립와이어: inwardIssue=1352(막힌 쪽), outwardIssue=1532(막는 쪽)
+        assertThat(body).contains("\"inwardIssue\":{\"key\":\"ES2-1352\"}");
+        assertThat(body).contains("\"outwardIssue\":{\"key\":\"ES2-1532\"}");
+        assertThat(body).contains("\"type\":{\"name\":\"Blocks\"}");
+    }
+
+    @Test
+    void linkIssues_400_returnsFalse() {
+        server.enqueue(new MockResponse().setResponseCode(400).setBody("bad link"));
+
+        assertThat(client.linkIssues("ES2-1", "ES2-2", "Blocks")).isFalse();
+    }
+
     @Test
     void createIssue_400_throwsNonTransient() {
         server.enqueue(new MockResponse().setResponseCode(400).setBody("bad"));

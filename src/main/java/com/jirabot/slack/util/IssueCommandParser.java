@@ -111,6 +111,103 @@ public final class IssueCommandParser {
         return Optional.empty();
     }
 
+    // ==================== 이슈 링크 ====================
+
+    /** 지원하는 링크 관계. Jira 타입명 매핑은 클라이언트에서 수행. */
+    public enum LinkRelation { BLOCKS, RELATES, DUPLICATE }
+
+    /**
+     * 이슈 링크 명령. Jira 방향 규칙 {@code inwardIssue <inward> outwardIssue} 기준으로
+     * inwardKey/outwardKey 를 채운다. 방향 판별이 불가하면 ambiguous=true (호출부가 확인 버튼 제시).
+     */
+    public record LinkCommand(String inwardKey, String outwardKey, LinkRelation relation, boolean ambiguous) {}
+
+    private static final Pattern DUP_KW = Pattern.compile("(?i)(중복|duplicate)");
+    private static final Pattern BLOCK_KW = Pattern.compile("(?i)(block|블락|블록|막)");
+    private static final Pattern DEPEND_KW = Pattern.compile("(?i)(의존|depend)");
+    // RELATES 는 명시적 연결 의도(관련/연관 단독은 오탐이 많아 제외).
+    private static final Pattern RELATES_KW = Pattern.compile("(?i)(relate|연결|링크|\\blink\\b)");
+    // 링크 해제 동사 — 링크 생성보다 먼저 확인해야 한다(Phase 4 에서 처리).
+    private static final Pattern UNLINK_KW = Pattern.compile("(?i)(해제|삭제|제거|끊|unlink|remove)");
+
+    // 피동(A가 B에 막힘 → A is blocked by B): inward=A, outward=B
+    private static final Pattern PASSIVE = Pattern.compile(
+            "(?i)(막혀|막힌|막힘|막혔|블락\\s*(되|당)|블록\\s*(되|당)|block\\s*(되|당)|blocked\\s+by|"
+                    + "때문에|에\\s*의해|의존|depend)");
+    // 능동(A가 B를 막음 → A blocks B): inward=B, outward=A
+    private static final Pattern ACTIVE = Pattern.compile(
+            "(?i)((를|을)\\s*(?:block|블락|블록|막)|\\bblocks\\b)");
+
+    /** 링크 해제 명령인지(키 2개 + 해제 동사 + 링크/연결 언급). Phase 4 전까지 "지원 예정" 응답용. */
+    public static boolean isUnlink(String text) {
+        if (text == null) return false;
+        return UNLINK_KW.matcher(text).find()
+                && (RELATES_KW.matcher(text).find() || text.toLowerCase().contains("링크"))
+                && twoKeys(text) != null;
+    }
+
+    /**
+     * 텍스트가 두 이슈 링크 명령이면 파싱한다. 정확히 이슈 키 2개 + 관계 동사가 있어야 한다.
+     */
+    public static Optional<LinkCommand> parseLink(String text) {
+        if (text == null || text.isBlank()) {
+            return Optional.empty();
+        }
+        String t = text.strip();
+        String[] keys = twoKeys(t);
+        if (keys == null) {
+            return Optional.empty(); // 정확히 2개가 아니면 링크 명령 아님
+        }
+        String a = keys[0], b = keys[1];
+
+        boolean dup = DUP_KW.matcher(t).find();
+        boolean block = BLOCK_KW.matcher(t).find();
+        boolean depend = DEPEND_KW.matcher(t).find();
+        boolean relates = RELATES_KW.matcher(t).find();
+
+        if (!dup && !block && !depend && !relates) {
+            return Optional.empty(); // 관계 동사 없음
+        }
+
+        // 1) Duplicate 우선 — "A duplicates B" → outward=A(duplicates), inward=B
+        if (dup) {
+            return Optional.of(new LinkCommand(b, a, LinkRelation.DUPLICATE, false));
+        }
+
+        // 2) Blocks / depends — 방향 판별
+        if (block || depend) {
+            boolean passive = PASSIVE.matcher(t).find();
+            boolean active = ACTIVE.matcher(t).find();
+            if (passive && !active) {
+                // A is blocked by B → inward=A, outward=B
+                return Optional.of(new LinkCommand(a, b, LinkRelation.BLOCKS, false));
+            }
+            if (active && !passive) {
+                // A blocks B → inward=B, outward=A
+                return Optional.of(new LinkCommand(b, a, LinkRelation.BLOCKS, false));
+            }
+            // 방향 모호 → 확인 버튼(기본 표기는 a,b 순서)
+            return Optional.of(new LinkCommand(a, b, LinkRelation.BLOCKS, true));
+        }
+
+        // 3) Relates — 방향 무관
+        return Optional.of(new LinkCommand(a, b, LinkRelation.RELATES, false));
+    }
+
+    /** 정확히 2개의 이슈 키가 있으면 [첫째, 둘째] 대문자 배열, 아니면 null. */
+    private static String[] twoKeys(String t) {
+        Matcher km = ISSUE_KEY.matcher(t);
+        String a = null, b = null;
+        int count = 0;
+        while (km.find()) {
+            count++;
+            if (a == null) a = km.group();
+            else if (b == null) b = km.group();
+        }
+        if (count != 2) return null;
+        return new String[]{a.toUpperCase(), b.toUpperCase()};
+    }
+
     /**
      * 하위작업 제목 추출: 따옴표 콘텐츠 우선, 없으면 키/이름/키워드/명령어미를 제거한 나머지.
      */

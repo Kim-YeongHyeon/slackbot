@@ -124,6 +124,12 @@ public class SlackInteractionController {
             return;
         }
 
+        // STUDY: 링크 방향 확인 버튼 — action_id 는 ACTION_LINK_CONFIRM prefix(_1/_2/_cancel), value 에 정보가 있다.
+        if (actionId != null && actionId.startsWith(BlockKitBuilder.ACTION_LINK_CONFIRM)) {
+            handleLinkConfirm(issueKey, userName, channelId, messageTs);
+            return;
+        }
+
         switch (actionId) {
             case BlockKitBuilder.ACTION_TODO ->
                     doTransition(issueKey, "해야 할 일", ":clipboard:", "해야 할 일",
@@ -242,6 +248,38 @@ public class SlackInteractionController {
         } catch (Exception e) {
             log.error("Create-branch error value={}: {}", value, e.toString(), e);
             slackNotifier.postThreadReply(channelId, messageTs, ":x: 브랜치 생성 중 오류가 발생했어요.");
+        }
+    }
+
+    // STUDY: 링크 방향 확인 버튼 클릭 처리. value = "inwardKey|outwardKey|typeName" 또는 "cancel".
+    //        확정 시 linkIssues 호출 후 원 메시지의 버튼을 제거(updateMessage)한다.
+    private void handleLinkConfirm(String value, String userName, String channelId, String messageTs) {
+        if ("cancel".equals(value)) {
+            if (channelId != null && messageTs != null) {
+                slackNotifier.updateMessage(channelId, messageTs, ":x: 링크를 취소했어요.", "[]");
+            }
+            return;
+        }
+        String[] parts = value == null ? new String[0] : value.split("\\|", 3);
+        if (parts.length < 3) {
+            log.warn("Bad link-confirm value: {}", value);
+            return;
+        }
+        String inward = parts[0], outward = parts[1], typeName = parts[2];
+        try {
+            boolean ok = jiraApiClient.linkIssues(inward, outward, typeName);
+            if (channelId != null && messageTs != null) {
+                String msg = ok
+                        ? String.format(":link: *%s* ↔ *%s* 링크를 만들었어요 (%s, by %s).",
+                                outward, inward, typeName, userName)
+                        : String.format(":x: *%s* ↔ *%s* 링크 생성에 실패했어요.", outward, inward);
+                slackNotifier.updateMessage(channelId, messageTs, msg, "[]");
+            }
+        } catch (Exception e) {
+            log.error("Link confirm error value={}: {}", value, e.toString(), e);
+            if (channelId != null && messageTs != null) {
+                slackNotifier.postThreadReply(channelId, messageTs, ":x: 링크 생성 중 오류가 발생했어요.");
+            }
         }
     }
 

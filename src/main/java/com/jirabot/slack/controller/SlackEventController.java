@@ -74,6 +74,7 @@ public class SlackEventController {
               `@지라 ES2-123` — 이슈 키로 상세 카드 조회 (상태 전환 버튼 포함)
               `@지라 할당 ES2-123 홍길동` — 이슈 담당자 지정 (@멘션도 가능)
               `@지라 하위작업 ES2-123 <내용>` — 특정 이슈 아래 하위작업 생성 (스레드 밖에서도 키/이름으로 지정 가능)
+              `@지라 ES2-1이 ES2-2에 막혀있어` — 이슈 링크 생성 (blocks/relates/duplicate, 방향 모호 시 확인 버튼)
               `@지라 할당알림 on` / `off` / `상태` — 이슈가 나에게 할당되면 DM 알림 (기본 ON)
               `@지라 리마인더 on` / `off` / `상태` — 평일 09:00 미해결 이슈 DM 알림 토글
               `@지라 notion백필` — Jira 전체 버그를 Notion '버그 현황' DB로 동기화
@@ -330,6 +331,18 @@ public class SlackEventController {
             return;
         }
 
+        // 1.44차: 이슈 링크. 키 2개 + 관계 동사(block/막/중복/duplicate/relate/연결)면 결정적으로 링크.
+        //        해제(해제/삭제/제거)는 링크 생성보다 먼저 확인 — Phase 4 전까지 안내만.
+        if (IssueCommandParser.isUnlink(cleaned)) {
+            replyThread(event, ":information_source: 링크 *해제* 는 아직 지원 예정이에요. Jira 이슈 화면에서 해제해주세요.");
+            return;
+        }
+        Optional<IssueCommandParser.LinkCommand> linkCmd = IssueCommandParser.parseLink(cleaned);
+        if (linkCmd.isPresent()) {
+            handleLinkCommand(event, linkCmd.get());
+            return;
+        }
+
         // 1.45차: 특정 부모 이슈 아래 하위작업 생성 (키/이름으로 지정, 스레드 밖에서도 동작).
         //        "ES2-123에 하위작업으로 'X' 추가" / "하위작업 ES2-123 X" / "<이름> 스토리 아래 하위작업 X".
         //        에픽 키워드 체크(1.5차)보다 먼저 실행 — "에픽 아래 하위작업"을 에픽 생성으로 오인하지 않도록.
@@ -516,6 +529,65 @@ public class SlackEventController {
                 replyInThread(event, replyTs, ":x: 하위작업 처리 중 오류가 발생했어요: " + e.getMessage());
             }
         });
+    }
+
+    // STUDY: 이슈 링크 명령 처리 — 확신 방향은 즉시 실행, 모호하면 확인 버튼 카드.
+    private void handleLinkCommand(SlackEventInner event, IssueCommandParser.LinkCommand cmd) {
+        String replyTs = event.thread_ts() != null ? event.thread_ts() : event.ts();
+        slackExecutor.execute(() -> {
+            try {
+                var type = resolveLinkType(cmd.relation());
+                if (type.isEmpty()) {
+                    String available = jiraApiClient.getIssueLinkTypes().stream()
+                            .map(com.jirabot.slack.client.dto.IssueLinkType::name)
+                            .reduce((x, y) -> x + ", " + y).orElse("(없음)");
+                    replyInThread(event, replyTs, String.format(
+                            ":x: '%s' 링크 타입을 찾을 수 없어요. 사용 가능: %s", cmd.relation(), available));
+                    return;
+                }
+                var lt = type.get();
+
+                if (cmd.ambiguous()) {
+                    // 방향 모호 → 확인 버튼 (outward 설명을 동사로 표기)
+                    String blocks = com.jirabot.slack.util.BlockKitBuilder.buildLinkConfirmButtons(
+                            cmd.inwardKey(), cmd.outwardKey(), lt.outward(), lt.name());
+                    slackNotifier.postBlockMessage(event.channel(), replyTs, "링크 방향 확인", blocks);
+                    return;
+                }
+
+                boolean ok = jiraApiClient.linkIssues(cmd.inwardKey(), cmd.outwardKey(), lt.name());
+                replyInThread(event, replyTs, ok
+                        ? String.format(":link: *%s* %s *%s* (%s)",
+                                cmd.outwardKey(), lt.outward(), cmd.inwardKey(), lt.name())
+                        : String.format(":x: *%s* ↔ *%s* 링크 생성에 실패했어요.",
+                                cmd.outwardKey(), cmd.inwardKey()));
+            } catch (Exception e) {
+                log.error("Link command failed: {}", e.toString());
+                replyInThread(event, replyTs, ":x: 링크 처리 중 오류가 발생했어요: " + e.getMessage());
+            }
+        });
+    }
+
+    // STUDY: 관계(BLOCKS/RELATES/DUPLICATE) → 사이트에 정의된 실제 링크 타입. name/inward/outward 어디든
+    //        후보 단어가 포함되면 매칭(로컬라이즈 대비, L4). POST 엔 API 가 준 정확한 name 을 쓴다.
+    private Optional<com.jirabot.slack.client.dto.IssueLinkType> resolveLinkType(
+            IssueCommandParser.LinkRelation rel) {
+        List<String> candidates = switch (rel) {
+            case BLOCKS -> List.of("blocks", "block", "차단");
+            case RELATES -> List.of("relates", "relate", "관련");
+            case DUPLICATE -> List.of("duplicate", "중복");
+        };
+        for (var t : jiraApiClient.getIssueLinkTypes()) {
+            String hay = ((t.name() == null ? "" : t.name()) + " "
+                    + (t.inward() == null ? "" : t.inward()) + " "
+                    + (t.outward() == null ? "" : t.outward())).toLowerCase();
+            for (String c : candidates) {
+                if (hay.contains(c.toLowerCase())) {
+                    return Optional.of(t);
+                }
+            }
+        }
+        return Optional.empty();
     }
 
     // STUDY: 이슈 타입명이 에픽인지 — 설정값(영문 정식명)과 한글 표시명 "에픽" 둘 다 비교(L4: 사이트가 한글 표시명 반환).

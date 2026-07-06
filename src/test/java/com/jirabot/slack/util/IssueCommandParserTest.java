@@ -2,6 +2,8 @@ package com.jirabot.slack.util;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.jirabot.slack.util.IssueCommandParser.LinkCommand;
+import com.jirabot.slack.util.IssueCommandParser.LinkRelation;
 import com.jirabot.slack.util.IssueCommandParser.SubtaskCommand;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -83,6 +85,111 @@ class IssueCommandParserTest {
     void nullOrBlank_returnsEmpty() {
         assertThat(IssueCommandParser.parseSubtask(null)).isEmpty();
         assertThat(IssueCommandParser.parseSubtask("   ")).isEmpty();
+    }
+
+    // ==================== 링크 파싱 ====================
+
+    @Test
+    void link_passiveBlocked_AinwardBoutward() {
+        // "A가 B에 막혀있다" = A is blocked by B → inward=A, outward=B
+        LinkCommand c = IssueCommandParser.parseLink("ES2-1352가 ES2-1532에 막혀있어 연결해줘").orElseThrow();
+        assertThat(c.relation()).isEqualTo(LinkRelation.BLOCKS);
+        assertThat(c.ambiguous()).isFalse();
+        assertThat(c.inwardKey()).isEqualTo("ES2-1352");
+        assertThat(c.outwardKey()).isEqualTo("ES2-1532");
+    }
+
+    @Test
+    void link_blockPassiveEnglishStyle_koreanBlockDoego() {
+        // 사용자 실제 예: "ES2-1352가 ES2-1532에 block 되고 있으니 연결해줘"
+        LinkCommand c = IssueCommandParser.parseLink("ES2-1352가 ES2-1532에 block 되고 있으니 연결해줘").orElseThrow();
+        assertThat(c.relation()).isEqualTo(LinkRelation.BLOCKS);
+        assertThat(c.ambiguous()).isFalse();
+        assertThat(c.inwardKey()).isEqualTo("ES2-1352");
+        assertThat(c.outwardKey()).isEqualTo("ES2-1532");
+    }
+
+    @Test
+    void link_activeBlocks_BinwardAoutward() {
+        // "A가 B를 막고 있다" = A blocks B → inward=B, outward=A
+        LinkCommand c = IssueCommandParser.parseLink("ES2-1532가 ES2-1352를 막고 있어").orElseThrow();
+        assertThat(c.relation()).isEqualTo(LinkRelation.BLOCKS);
+        assertThat(c.ambiguous()).isFalse();
+        assertThat(c.inwardKey()).isEqualTo("ES2-1352");
+        assertThat(c.outwardKey()).isEqualTo("ES2-1532");
+    }
+
+    @Test
+    void link_englishBlocks() {
+        // "A blocks B" → inward=B, outward=A
+        LinkCommand c = IssueCommandParser.parseLink("ES2-10 blocks ES2-20").orElseThrow();
+        assertThat(c.relation()).isEqualTo(LinkRelation.BLOCKS);
+        assertThat(c.inwardKey()).isEqualTo("ES2-20");
+        assertThat(c.outwardKey()).isEqualTo("ES2-10");
+    }
+
+    @Test
+    void link_englishBlockedBy() {
+        // "A is blocked by B" → inward=A, outward=B
+        LinkCommand c = IssueCommandParser.parseLink("ES2-10 is blocked by ES2-20").orElseThrow();
+        assertThat(c.inwardKey()).isEqualTo("ES2-10");
+        assertThat(c.outwardKey()).isEqualTo("ES2-20");
+    }
+
+    @Test
+    void link_depends_AinwardBoutward() {
+        // "A가 B에 의존" = B 선행 → A is blocked by B → inward=A, outward=B
+        LinkCommand c = IssueCommandParser.parseLink("ES2-10이 ES2-20에 의존하니 연결해줘").orElseThrow();
+        assertThat(c.relation()).isEqualTo(LinkRelation.BLOCKS);
+        assertThat(c.inwardKey()).isEqualTo("ES2-10");
+        assertThat(c.outwardKey()).isEqualTo("ES2-20");
+    }
+
+    @Test
+    void link_duplicate() {
+        // "A가 B와 중복" = A duplicates B → outward=A, inward=B
+        LinkCommand c = IssueCommandParser.parseLink("ES2-10이 ES2-20과 중복이야").orElseThrow();
+        assertThat(c.relation()).isEqualTo(LinkRelation.DUPLICATE);
+        assertThat(c.inwardKey()).isEqualTo("ES2-20");
+        assertThat(c.outwardKey()).isEqualTo("ES2-10");
+    }
+
+    @Test
+    void link_relates_explicitConnect() {
+        LinkCommand c = IssueCommandParser.parseLink("ES2-10과 ES2-20을 연결해줘").orElseThrow();
+        assertThat(c.relation()).isEqualTo(LinkRelation.RELATES);
+        assertThat(c.ambiguous()).isFalse();
+    }
+
+    @Test
+    void link_ambiguousBlockDirection_flaggedForConfirm() {
+        // block 언급이나 능/피동 단서 없음 → 방향 모호 → 확인 버튼
+        LinkCommand c = IssueCommandParser.parseLink("ES2-10 ES2-20 block 연결").orElseThrow();
+        assertThat(c.relation()).isEqualTo(LinkRelation.BLOCKS);
+        assertThat(c.ambiguous()).isTrue();
+    }
+
+    @Test
+    void link_oneKey_returnsEmpty() {
+        assertThat(IssueCommandParser.parseLink("ES2-10 막혀있어")).isEmpty();
+    }
+
+    @Test
+    void link_twoKeysNoRelationVerb_returnsEmpty() {
+        // 관계 동사 없음 → 링크 명령 아님(다른 흐름 보존)
+        assertThat(IssueCommandParser.parseLink("ES2-10과 ES2-20 확인해줘")).isEmpty();
+    }
+
+    @Test
+    void link_bareRelatedKeyword_notEnough() {
+        // "관련" 단독은 오탐 방지 위해 링크로 보지 않음
+        assertThat(IssueCommandParser.parseLink("ES2-10과 ES2-20 관련 버그 수정")).isEmpty();
+    }
+
+    @Test
+    void isUnlink_detectsRemovalWithTwoKeys() {
+        assertThat(IssueCommandParser.isUnlink("ES2-10 ES2-20 링크 해제해줘")).isTrue();
+        assertThat(IssueCommandParser.isUnlink("ES2-10이 ES2-20에 막혀있어 연결")).isFalse();
     }
 
     @Test
