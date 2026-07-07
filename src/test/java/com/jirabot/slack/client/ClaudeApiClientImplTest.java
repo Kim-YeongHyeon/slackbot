@@ -27,7 +27,7 @@ class ClaudeApiClientImplTest {
     @BeforeEach
     void setUp() {
         runner = mock(ProcessRunner.class);
-        ClaudeProperties props = new ClaudeProperties("claude", "claude-sonnet-4-6", "claude-haiku-4-5", 5, "plan", 1);
+        ClaudeProperties props = new ClaudeProperties("claude", "claude-sonnet-4-6", "claude-haiku-4-5", 5, "plan", 1, true);
         client = new ClaudeApiClientImpl(runner, props, new ObjectMapper());
     }
 

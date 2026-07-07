@@ -13,7 +13,11 @@ public record ClaudeProperties(
         String fastModel,
         int timeoutSeconds,
         String permissionMode,
-        int maxTurns
+        int maxTurns,
+        // STUDY: 분류 호출의 thinking 토큰 차단 토글(기본 true). 실측: 분류 JSON은 ~60토큰이면 되는데
+        //        thinking 이 호출당 350~450토큰을 선생성해 지연의 60~70%를 차지(Haiku 6.5s→2.4s, Sonnet 10s→4.4s).
+        //        되돌리기: .env 에 CLAUDE_DISABLE_THINKING=false (yml claude.disable-thinking) — 재시작만으로 복원.
+        Boolean disableThinking
 ) {
     public ClaudeProperties {
         if (cliPath == null || cliPath.isBlank()) {
@@ -29,7 +33,11 @@ public record ClaudeProperties(
             maxTurns = 1;
         }
         if (timeoutSeconds <= 0) {
-            timeoutSeconds = 60;
+            timeoutSeconds = 20;
+        }
+        if (disableThinking == null) {
+            disableThinking = true;
         }
     }
+
 }

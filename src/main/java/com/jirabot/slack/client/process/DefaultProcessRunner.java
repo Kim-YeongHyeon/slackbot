@@ -14,10 +14,18 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 // STUDY: @Component — 기본 구현. 테스트에서는 Mockito mock 으로 교체하여 실제 OS 호출 회피.
+//        이 러너는 claude CLI 전용(3개 분류기 impl 만 사용)이므로 thinking 차단 env 를 여기서 일괄 주입한다.
 @Component
 public class DefaultProcessRunner implements ProcessRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DefaultProcessRunner.class);
+
+    private final boolean disableThinking;
+
+    // STUDY: @Component 빈은 생성자가 1개여야 Spring 이 모호성 없이 주입한다(2개면 no-arg 를 찾다 실패).
+    public DefaultProcessRunner(com.jirabot.slack.config.ClaudeProperties claudeProps) {
+        this.disableThinking = claudeProps.disableThinking();
+    }
 
     @Override
     public Result run(List<String> command, String stdin, Duration timeout) {
@@ -26,6 +34,11 @@ public class DefaultProcessRunner implements ProcessRunner {
 
         // STUDY: redirectErrorStream(false) — stdout/stderr 분리. stderr 는 진단용.
         ProcessBuilder pb = new ProcessBuilder(command).redirectErrorStream(false);
+        // STUDY: MAX_THINKING_TOKENS=0 — 분류 호출의 thinking 토큰 차단(실측 지연 60~70% 절감).
+        //        CLAUDE_DISABLE_THINKING=false 로 언제든 복원(ClaudeProperties.disableThinking).
+        if (disableThinking) {
+            pb.environment().put("MAX_THINKING_TOKENS", "0");
+        }
         Process process;
         try {
             process = pb.start();

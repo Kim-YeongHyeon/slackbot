@@ -49,14 +49,19 @@ claude:
   model: claude-sonnet-4-6
   # STUDY: 단순 변환 작업(브랜치 슬러그)용 경량 모델 — 지연 수 초 단축, 품질 동등.
   fast-model: ${CLAUDE_FAST_MODEL:claude-haiku-4-5}
-  timeout-seconds: 60
+  # STUDY: thinking 차단(v0.0.58) 후 정상 호출이 Sonnet 4~5s/Haiku 2~4s 라 20s 면 outlier 까지 커버.
+  #        (검색/버그요약처럼 입력이 큰 호출도 출력이 작아 동일 적용)
+  timeout-seconds: 20
   permission-mode: plan
   max-turns: 1
+  # STUDY: 분류 호출의 thinking 토큰 차단(실측: 지연의 60~70%가 thinking — Haiku 6.5s→2.4s, Sonnet 10s→4.4s).
+  #        품질이 떨어지면 .env 에 CLAUDE_DISABLE_THINKING=false 한 줄로 즉시 복원(재시작 필요).
+  disable-thinking: ${CLAUDE_DISABLE_THINKING:true}
   # STUDY: Haiku 의도 분류기 설정. --system-prompt-file로 skill 전달. (--bare는 구독 인증을 깨므로 미사용)
-  #        타임아웃 40s — 24s+ outlier 실측 대응. 타임아웃 시 짧은 타임아웃(15s)으로 1회 재시도(IntentClassifierImpl).
+  #        thinking 차단 후 정상 2~4s — 15s 면 재시도 3회 예산이 최악 45s 로 제한된다.
   intent:
     model: claude-haiku-4-5
-    timeout-seconds: 40
+    timeout-seconds: 15
     prompt-file: prompts/haiku-classifier.md
 
 # Jira 설정 — spring-service-engineer의 JiraApiClient

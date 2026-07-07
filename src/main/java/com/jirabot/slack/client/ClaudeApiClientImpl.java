@@ -456,6 +456,7 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         // STUDY: --max-turns 1 → 모델이 단 한 번의 응답만 내놓도록 보장 (도구 반복 호출 루프 차단).
         // STUDY: --permission-mode plan → CLI 자체가 파일/쉘 도구 실행을 거부. 분류 전용 호출에 적합.
         // STUDY: --system-prompt-file → 디스크 skill 파일을 system 롤로 전달 (IntentClassifierImpl 과 동일 패턴).
+        // STUDY: LEAN_FLAGS — 도구 스키마/CLAUDE.md/동적 섹션 제거 + 세션 기록 중단 (ClaudeCliFlags 참고).
         List<String> cmd = new java.util.ArrayList<>(List.of(
                 props.cliPath(), "-p",
                 "--output-format", "json",
@@ -463,6 +464,7 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
                 "--max-turns", String.valueOf(props.maxTurns()),
                 "--model", model
         ));
+        cmd.addAll(com.jirabot.slack.client.process.ClaudeCliFlags.LEAN_FLAGS);
         if (systemPromptFile != null) {
             cmd.add("--system-prompt-file");
             cmd.add(systemPromptFile);

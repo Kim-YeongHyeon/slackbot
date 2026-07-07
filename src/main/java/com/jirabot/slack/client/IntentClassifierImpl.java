@@ -99,13 +99,17 @@ public class IntentClassifierImpl implements IntentClassifier {
     //        --system-prompt-file로 분류 프롬프트를 전달하고 CLAUDE.md는 자동 로드되지만
     //        분류 결과에 영향 없음 (system-prompt-file이 우선).
     private List<String> buildCommand() {
-        return List.of(
+        // STUDY: LEAN_FLAGS — 도구 스키마/CLAUDE.md/동적 섹션 제거 + 세션 기록 중단 (ClaudeCliFlags 참고).
+        //        시스템 프롬프트 ~22k→~3.2k 토큰. CLAUDE.md 지침이 분류 컨텍스트에 섞이던 간섭도 제거.
+        java.util.List<String> cmd = new java.util.ArrayList<>(List.of(
                 props.cliPath(), "-p",
                 "--system-prompt-file", props.promptFile(),
                 "--output-format", "json",
                 "--max-turns", "1",
                 "--model", props.model()
-        );
+        ));
+        cmd.addAll(com.jirabot.slack.client.process.ClaudeCliFlags.LEAN_FLAGS);
+        return cmd;
     }
 
     // 파싱 실패/에러 응답이면 null 반환(호출부가 재시도 판단). 성공 시에만 결과 반환.

@@ -35,13 +35,15 @@ public class ThreadActionClassifierImpl implements ThreadActionClassifier {
         }
         try {
             String stdin = buildStdin(parentIssue, threadMessages, userMessage);
-            List<String> command = List.of(
+            // STUDY: LEAN_FLAGS — 도구 스키마/CLAUDE.md/동적 섹션 제거 + 세션 기록 중단 (ClaudeCliFlags 참고).
+            List<String> command = new java.util.ArrayList<>(List.of(
                     props.cliPath(), "-p",
                     "--system-prompt-file", PROMPT_FILE,
                     "--output-format", "json",
                     "--max-turns", "1",
                     "--model", props.model()
-            );
+            ));
+            command.addAll(com.jirabot.slack.client.process.ClaudeCliFlags.LEAN_FLAGS);
             Duration timeout = Duration.ofSeconds(props.timeoutSeconds());
             ProcessRunner.Result result = processRunner.run(command, stdin, timeout);
 

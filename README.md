@@ -108,6 +108,20 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 분류 호출 대폭 고속화 — thinking 차단 + CLI 경량화 (v0.0.58)
+
+`claude -p` 분류가 느리던 병목을 실측으로 분해해 제거. **프롬프트(skill)가 아니라 런타임이 병목**이었다:
+- **thinking 토큰 차단** (`MAX_THINKING_TOKENS=0`, DefaultProcessRunner에서 주입) — 분류 JSON은 ~60토큰이면
+  되는데 thinking이 호출당 350~450토큰을 선생성해 지연의 60~70%를 차지했다.
+  실측: **Haiku 6.5s→2.4s, Sonnet 10s→4.4s**. 프로덕션 DB 기준 분류 평균 26s/p90 45s였음.
+  **되돌리기: `.env` 에 `CLAUDE_DISABLE_THINKING=false` 한 줄 + 재시작** (`claude.disable-thinking`).
+- **CLI 경량화 플래그** (`ClaudeCliFlags.LEAN_FLAGS`, 3개 분류기 공통): `--tools ""`(도구 스키마 제거),
+  `--exclude-dynamic-system-prompt-sections`(git 상태 등 동적 섹션 + **CLAUDE.md 자동 주입 차단** — 프로젝트
+  지침이 분류 컨텍스트에 섞이던 간섭 제거), `--no-session-persistence`(세션 jsonl 누적 중단 — 기존 418개/35MB),
+  `--disable-slash-commands`. 시스템 프롬프트 **~22k→~4k 토큰**, 프롬프트 캐시 적중 안정화.
+- **타임아웃 하향**: 의도 40→15s, Sonnet 60→20s — 정상 호출이 2~4s가 되어 재시도 3회 예산이 최악 45s로 제한.
+- 정확도 검증: `IntentClassifierEvalTest`(90케이스) 전/후 비교 실시 (L12).
+
 ### 이슈 링크 조회 / 해제 (v0.0.57)
 
 "ES2-123 링크 보여줘"(조회), "ES2-1 ES2-2 링크 해제"(해제)를 자연어로 처리. 링크 생성(v0.0.55)의 짝.

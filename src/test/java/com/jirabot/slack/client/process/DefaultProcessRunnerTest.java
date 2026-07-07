@@ -8,7 +8,13 @@ import org.junit.jupiter.api.Test;
 
 class DefaultProcessRunnerTest {
 
-    private final DefaultProcessRunner runner = new DefaultProcessRunner();
+    private static DefaultProcessRunner runner(boolean disableThinking) {
+        return new DefaultProcessRunner(new com.jirabot.slack.config.ClaudeProperties(
+                null, null, null, 0, null, 0, disableThinking));
+    }
+
+    // thinking 차단 on (프로덕션 기본과 동일).
+    private final DefaultProcessRunner runner = runner(true);
 
     @Test
     void echoCommand_returnsStdoutAndZeroExit() {
@@ -38,5 +44,24 @@ class DefaultProcessRunnerTest {
 
         assertThat(result.timedOut()).isTrue();
         assertThat(result.success()).isFalse();
+    }
+
+    @Test
+    void disableThinking_injectsMaxThinkingTokensEnv() {
+        // thinking 차단 on → 서브프로세스 환경에 MAX_THINKING_TOKENS=0 이 주입된다.
+        ProcessRunner.Result result = runner.run(
+                List.of("/bin/sh", "-c", "echo ${MAX_THINKING_TOKENS:-unset}"), null, Duration.ofSeconds(5));
+
+        assertThat(result.stdout().strip()).isEqualTo("0");
+    }
+
+    @Test
+    void thinkingEnabled_doesNotInjectEnv() {
+        // 복원 경로: disable-thinking=false → env 미주입(모델 기본 thinking 동작).
+        DefaultProcessRunner thinkingOn = runner(false);
+        ProcessRunner.Result result = thinkingOn.run(
+                List.of("/bin/sh", "-c", "echo ${MAX_THINKING_TOKENS:-unset}"), null, Duration.ofSeconds(5));
+
+        assertThat(result.stdout().strip()).isEqualTo("unset");
     }
 }
