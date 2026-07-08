@@ -167,7 +167,8 @@ public class PrImportServiceImpl implements PrImportService {
         try {
             String body = pr.body() == null ? "" : pr.body();
             String text = ("PR 제목: " + pr.title() + "\n\n" + body).strip();
-            IssueClassification c = claude.classify(text);
+            // STUDY: PR 전용 스킬(skill-pr-import.md) — 회고 관점 요약 + PR 템플릿 잡음 제거. (v0.0.60)
+            IssueClassification c = claude.classifyPr(text);
             if (c != null && c.title() != null && !c.title().isBlank()) {
                 return c;
             }

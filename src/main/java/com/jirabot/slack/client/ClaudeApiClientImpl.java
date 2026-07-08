@@ -82,6 +82,12 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
     //        (2) stdin 은 순수 사용자 입력만 — 프롬프트 인젝션 경계 명확, (3) 프롬프트 수정에 재빌드 불필요.
     //        파일이 없으면(부분 배포 등) 기존 인라인 상수 + stdin 합본 방식으로 폴백해 무중단을 보장한다.
     static final String CLASSIFIER_PROMPT_FILE = "prompts/sonnet-classifier.md";
+    // STUDY: 의도별 전용 스킬(v0.0.60) — Haiku 의도 분류 결과에 따라 버그/스토리 특화 프롬프트를 선택한다.
+    //        버그: 현상→재현→영향→단서 구조 + 로그/에러코드 원문 보존. 스토리: 목적→요구사항→완료 조건(AC).
+    //        PR import: 회고 등록 관점(요청문 아님) + 템플릿 잡음 제거 + SP 무시(기간 기반으로 대체됨).
+    static final String BUG_SKILL_PROMPT_FILE = "prompts/skill-bug.md";
+    static final String STORY_SKILL_PROMPT_FILE = "prompts/skill-story.md";
+    static final String PR_IMPORT_PROMPT_FILE = "prompts/skill-pr-import.md";
     static final String RESOLUTION_PROMPT_FILE = "prompts/sonnet-resolution.md";
     static final String BRANCH_SLUG_PROMPT_FILE = "prompts/haiku-branch-slug.md";
     static final String SEARCH_PROMPT_FILE = "prompts/sonnet-issue-search.md";
@@ -125,8 +131,9 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         if (rawText == null || rawText.isBlank()) {
             return IssueClassification.fallback(rawText);
         }
+        String promptFile = classifierPromptFileFor(intentHint);
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            Attempt a = attemptClassify(rawText, intentHint);
+            Attempt a = attemptClassify(rawText, intentHint, promptFile);
             if (a.outcome() == Outcome.OK) {
                 return a.result();
             }
@@ -138,12 +145,48 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         return fallbackForIntent(rawText, intentHint);
     }
 
-    private Attempt attemptClassify(String rawText, IntentResult intentHint) {
+    // STUDY: 완료된 PR의 회고 등록용 분류 — PR 전용 스킬(회고 관점, 템플릿 잡음 제거)을 쓴다.
+    //        SP 는 호출부(PrImportServiceImpl)가 기간 기반으로 덮어쓰므로 스킬은 type/title/summary 에 집중.
+    @Override
+    public IssueClassification classifyPr(String rawText) {
+        if (rawText == null || rawText.isBlank()) {
+            return IssueClassification.fallback(rawText);
+        }
+        String promptFile = promptFileExists(PR_IMPORT_PROMPT_FILE) ? PR_IMPORT_PROMPT_FILE
+                : promptFileExists(CLASSIFIER_PROMPT_FILE) ? CLASSIFIER_PROMPT_FILE : null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            Attempt a = attemptClassify(rawText, null, promptFile);
+            if (a.outcome() == Outcome.OK) {
+                return a.result();
+            }
+            if (attempt < MAX_ATTEMPTS) {
+                log.info("Claude classifyPr {} (attempt {}/{}) → 재시도", a.outcome(), attempt, MAX_ATTEMPTS);
+            }
+        }
+        log.warn("Claude classifyPr {}회 모두 실패 → fallback", MAX_ATTEMPTS);
+        return IssueClassification.fallback(rawText);
+    }
+
+    // STUDY: 의도별 스킬 파일 선택 — 2단 폴백: 전용 스킬 없으면 공용(sonnet-classifier.md),
+    //        그것도 없으면 null(인라인 SYSTEM_PROMPT 폴백). 부분 배포에도 무중단.
+    //        에픽/무힌트/스레드 하위작업(register_story 힌트)은 각각 공용/스토리 스킬로 자연 귀결된다.
+    String classifierPromptFileFor(IntentResult intentHint) {
+        String intent = intentHint != null ? intentHint.intent() : null;
+        String skill = "register_bug".equals(intent) ? BUG_SKILL_PROMPT_FILE
+                : "register_story".equals(intent) ? STORY_SKILL_PROMPT_FILE
+                : null;
+        if (skill != null && promptFileExists(skill)) {
+            return skill;
+        }
+        return promptFileExists(CLASSIFIER_PROMPT_FILE) ? CLASSIFIER_PROMPT_FILE : null;
+    }
+
+    private Attempt attemptClassify(String rawText, IntentResult intentHint, String promptFile) {
         try {
             // STUDY: stdin 으로 프롬프트 전달 — argv 는 shell 이스케이프/플랫폼별 길이 제한 이슈 회피.
             //        skill 파일이 있으면 시스템 프롬프트는 --system-prompt-file 로, stdin 은 사용자 입력만.
-            boolean useFile = promptFileExists(CLASSIFIER_PROMPT_FILE);
-            List<String> command = buildCommand(props.model(), useFile ? CLASSIFIER_PROMPT_FILE : null);
+            boolean useFile = promptFile != null;
+            List<String> command = buildCommand(props.model(), promptFile);
 
             String hintBlock = (intentHint != null && intentHint.intent() != null && !intentHint.intent().isBlank())
                     ? "INTENT HINT: " + intentHint.intent() + " (confidence: " + intentHint.confidence() + ")\n---\n"

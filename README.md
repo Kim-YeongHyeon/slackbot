@@ -108,6 +108,22 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 분류별 전용 스킬 분리 — skill-bug / skill-story / skill-pr-import (v0.0.60)
+
+목표 아키텍처(Haiku 의도분류 → **분류별 전용 Sonnet 스킬**) 정합화. LLM 경로 전수 감사 결과
+버그/스토리가 공용 스킬 1개를 쓰고, PR import 는 용도가 다른 스킬(Slack 신고문 분류)을 재사용하고 있었다.
+- **`prompts/skill-bug.md`**: 버그 신고 특화 — summary 를 현상→재현 경로(없으면 "재현 경로 불명", 발명 금지)→영향
+  범위→단서 구조로, 로그/에러코드/엔드포인트는 **원문 보존**. FEATURE-override few-shot 포함.
+- **`prompts/skill-story.md`**: 스토리 특화 — 목적/배경→요구사항→**완료 조건(AC) 불릿**. 사용자가 말한 범위
+  제한("로컬스토리지면 충분")을 AC 로 추출, 미언급 요구사항 발명 금지. BUG-override few-shot 포함.
+- **`prompts/skill-pr-import.md`**: PR 회고 등록 특화 — 요청문이 아닌 완료 작업 서술(무엇을/왜/어떻게),
+  PR 템플릿 잡음(체크리스트/헤더) 제거, conventional-commit prefix 제거. SP 는 기간 기반으로 대체되므로 형식만.
+- 선택: `ClaudeApiClientImpl.classifierPromptFileFor(intentHint)` — register_bug→bug 스킬, register_story→story
+  스킬, 에픽/무힌트→공용. **2단 폴백**(스킬 없음→공용→인라인) 으로 부분 배포 안전. `classifyPr` 신규.
+- 스킬 작성 기법: XML 태그 섹션, few-shot 4개(경계 케이스 포함), JSON-only 계약 (Anthropic best practices +
+  semantic parsing 문헌 조사 반영). 세 스킬 모두 라이브 스모크 검증 완료.
+- 검색(`sonnet-issue-search.md`)·웹훅 요약/카테고리는 이미 전용 스킬 — 감사 결과 목표 부합 확인.
+
 ### 내 작업 미완료-한정 질의 수정 (v0.0.59)
 
 "보고자가 나인데 완료 안된 task 뭐가 있는지 알려줘"에 **완료된 task까지 모두 나오던 버그** 수정.

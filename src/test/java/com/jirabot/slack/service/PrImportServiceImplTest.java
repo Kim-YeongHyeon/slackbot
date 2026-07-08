@@ -99,7 +99,7 @@ class PrImportServiceImplTest {
         // PR 작성자(alice) → GitHub name → Jira accountId 해결.
         when(gitHub.getUserDisplayName("alice")).thenReturn(Optional.of("Suyeong Park"));
         when(jira.findAccountId("Suyeong Park")).thenReturn("acc-suyeong");
-        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+        when(claude.classifyPr(anyString())).thenReturn(new IssueClassification(
                 IssueClassification.IssueType.BUG, 99, "decryptor 토큰 누락", "세션 만료 미처리"));
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("100", "ES2-300", "self"));
         when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
@@ -138,7 +138,7 @@ class PrImportServiceImplTest {
         // 명시 매핑 존재(alice) → GitHub 이름검색/findAccountId 는 건너뛴다.
         when(gitHubUserMappingRepository.findByGithubLoginIgnoreCase("alice")).thenReturn(Optional.of(
                 new com.jirabot.slack.entity.GitHubUserMappingEntity("alice", "acc-mapped", "최아록")));
-        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+        when(claude.classifyPr(anyString())).thenReturn(new IssueClassification(
                 IssueClassification.IssueType.OTHER, 1, "t", "s"));
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-302", "self"));
         when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
@@ -159,7 +159,7 @@ class PrImportServiceImplTest {
         when(jira.findAccountId(anyString())).thenReturn(null);                    // Jira 매칭 실패
         when(userMappingRepository.findBySlackUserId("U1")).thenReturn(Optional.of(
                 new com.jirabot.slack.entity.UserMappingEntity("U1", "Kim", "김영현", "acc-kim")));
-        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+        when(claude.classifyPr(anyString())).thenReturn(new IssueClassification(
                 IssueClassification.IssueType.OTHER, 1, "t", "s"));
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-301", "self"));
         when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
@@ -177,7 +177,7 @@ class PrImportServiceImplTest {
                 "https://github.com/CryptoLabInc/evi/pull/7", "alice", false, false,
                 Instant.parse("2026-06-12T08:00:00Z"), null);   // open, not draft
         when(gitHub.getPullRequest(anyString(), anyString(), eq(7))).thenReturn(Optional.of(open));
-        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+        when(claude.classifyPr(anyString())).thenReturn(new IssueClassification(
                 IssueClassification.IssueType.FEATURE, 1, "기능", "요약"));
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-310", "self"));
         when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);
@@ -201,7 +201,7 @@ class PrImportServiceImplTest {
                 "https://github.com/CryptoLabInc/evi/pull/7", "alice", false, true,
                 Instant.parse("2026-06-12T08:00:00Z"), null);   // open, draft
         when(gitHub.getPullRequest(anyString(), anyString(), eq(7))).thenReturn(Optional.of(draft));
-        when(claude.classify(anyString())).thenReturn(new IssueClassification(
+        when(claude.classifyPr(anyString())).thenReturn(new IssueClassification(
                 IssueClassification.IssueType.FEATURE, 1, "WIP", "요약"));
         when(jira.createIssue(any(), any(), any())).thenReturn(new JiraCreateResponse("1", "ES2-311", "self"));
         when(jira.transitionIssue(anyString(), anyString())).thenReturn(true);

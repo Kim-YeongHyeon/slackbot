@@ -13,6 +13,12 @@ public interface ClaudeApiClient {
 
     IssueClassification classify(String rawText, IntentResult intentHint);
 
+    /**
+     * 완료/진행 중인 PR(제목+본문)의 회고 등록용 분류 — prompts/skill-pr-import.md 전용 스킬.
+     * SP 는 호출부가 기간 기반으로 덮어쓰므로 type/title/summary 품질에 집중한다.
+     */
+    IssueClassification classifyPr(String rawText);
+
     // STUDY: Sonnet 기반 의미 검색. 사용자 질문과 이슈 목록을 Sonnet에게 전달하여 관련도 높은 이슈 키를 반환받는다.
     List<String> searchIssues(String userQuery, List<IssueSearchEntry> issues);
 
