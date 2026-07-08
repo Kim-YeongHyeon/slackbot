@@ -108,6 +108,16 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 내 작업 미완료-한정 질의 수정 (v0.0.59)
+
+"보고자가 나인데 완료 안된 task 뭐가 있는지 알려줘"에 **완료된 task까지 모두 나오던 버그** 수정.
+원인: 의도 분류(my_tasks)까지는 정확했지만 `handleWithIntent`의 `case "my_tasks" -> handleMyWork(event)`가
+**원문을 버려서** "완료 안된"이라는 조건이 소실 → `generateMyReport`가 상태 무관 전체를 출력했다.
+- `wantsIncompleteOnly(원문)` 결정적 감지(완료 안/않/못, 미완료, 안 끝난, 끝나지 않, 남은, 미해결, not done…
+  — 긍정 질의 "완료한 작업"은 미매칭) → `generateMyReport(user, excludeDone=true)`.
+- excludeDone 모드: 완료 이슈 제외, 진행 중/해야 할 일 섹션만 + "미완료 N건 · X SP" 요약.
+  전부 완료면 축하 메시지. 키워드 `내작업`은 기존대로 완료 섹션 포함(회귀 가드 테스트).
+
 ### 분류 호출 대폭 고속화 — thinking 차단 + CLI 경량화 (v0.0.58)
 
 `claude -p` 분류가 느리던 병목을 실측으로 분해해 제거. **프롬프트(skill)가 아니라 런타임이 병목**이었다:

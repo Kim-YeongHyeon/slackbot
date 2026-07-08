@@ -323,7 +323,7 @@ class SlackEventControllerTest {
 
     @Test
     void myWorkCommand_dispatchesToMyReport() throws Exception {
-        when(scrumReportService.generateMyReport(any()))
+        when(scrumReportService.generateMyReport(any(), org.mockito.ArgumentMatchers.anyBoolean()))
                 .thenReturn(CompletableFuture.completedFuture("내 작업"));
         String body = appMentionEvent("<@U0BOT> 내작업", freshTs());
 
@@ -332,8 +332,38 @@ class SlackEventControllerTest {
                         .content(body))
                 .andExpect(status().isOk());
 
-        verify(scrumReportService).generateMyReport("U1");
+        // 키워드 명령은 미완료-한정 아님 → excludeDone=false
+        verify(scrumReportService).generateMyReport("U1", false);
         verify(issueCreateService, never()).createFromSlackText(any());
+    }
+
+    @Test
+    void myTasksIntent_incompleteOnlyPhrase_excludesDone() throws Exception {
+        // "완료 안된" 조건이 의도 분류를 거쳐도 소실되지 않고 excludeDone=true 로 전달돼야 한다.
+        when(intentClassifier.classify(anyString())).thenReturn(
+                new IntentResult("my_tasks", 0.95, Map.of(), "보고자가 나인데 완료 안된 task 뭐가 있는지 알려줘"));
+        when(scrumReportService.generateMyReport(any(), org.mockito.ArgumentMatchers.anyBoolean()))
+                .thenReturn(CompletableFuture.completedFuture("미완료 작업"));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 보고자가 나인데 완료 안된 task 뭐가 있는지 알려줘", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(scrumReportService).generateMyReport("U1", true);
+    }
+
+    @Test
+    void wantsIncompleteOnly_patterns() {
+        assertThat(SlackEventController.wantsIncompleteOnly("완료 안된 task 알려줘")).isTrue();
+        assertThat(SlackEventController.wantsIncompleteOnly("미완료 작업 보여줘")).isTrue();
+        assertThat(SlackEventController.wantsIncompleteOnly("아직 안 끝난 일 뭐야")).isTrue();
+        assertThat(SlackEventController.wantsIncompleteOnly("남은 작업 알려줘")).isTrue();
+        assertThat(SlackEventController.wantsIncompleteOnly("완료되지 않은 이슈")).isTrue();
+        // 긍정/무관 질의는 미완료-한정 아님
+        assertThat(SlackEventController.wantsIncompleteOnly("내 작업 알려줘")).isFalse();
+        assertThat(SlackEventController.wantsIncompleteOnly("내가 완료한 작업 보여줘")).isFalse();
+        assertThat(SlackEventController.wantsIncompleteOnly(null)).isFalse();
     }
 
     // --- Bug query routing tests ---

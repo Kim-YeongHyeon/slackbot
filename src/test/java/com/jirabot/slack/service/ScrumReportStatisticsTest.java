@@ -344,4 +344,47 @@ class ScrumReportStatisticsTest {
         issue.setSprint(SPRINT_ID, SPRINT_NAME);
         return issue;
     }
+
+    // --- 내 작업 리포트: excludeDone (미완료-한정 질의) ---
+
+    private void stubMyIssues(IssueEntity... issues) {
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(
+                java.util.Optional.of(new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김영현")));
+        when(issueRepository.findMyIssues("U1", "김영현")).thenReturn(List.of(issues));
+    }
+
+    @Test
+    void myReport_excludeDone_omitsDoneIssues() throws ExecutionException, InterruptedException {
+        stubMyIssues(
+                createIssue("P-1", "진행중인 일", StatusCategory.IN_PROGRESS, 2.0, "김영현", Instant.now(), null),
+                createIssue("P-2", "끝난 일", StatusCategory.DONE, 3.0, "김영현", Instant.now(), Instant.now()));
+
+        String report = service.generateMyReport("U1", true).get();
+
+        assertThat(report).contains("진행중인 일").contains("미완료: 1건");
+        assertThat(report).doesNotContain("끝난 일").doesNotContain("완료됨");
+    }
+
+    @Test
+    void myReport_excludeDone_allDone_returnsCongrats() throws ExecutionException, InterruptedException {
+        stubMyIssues(
+                createIssue("P-2", "끝난 일", StatusCategory.DONE, 3.0, "김영현", Instant.now(), Instant.now()));
+
+        String report = service.generateMyReport("U1", true).get();
+
+        assertThat(report).contains("미완료 작업이 없습니다");
+        assertThat(report).doesNotContain("끝난 일");
+    }
+
+    @Test
+    void myReport_default_stillIncludesDoneSection() throws ExecutionException, InterruptedException {
+        // 회귀 가드: 키워드 `내작업`(excludeDone=false)은 기존처럼 완료 섹션 포함.
+        stubMyIssues(
+                createIssue("P-1", "진행중인 일", StatusCategory.IN_PROGRESS, 2.0, "김영현", Instant.now(), null),
+                createIssue("P-2", "끝난 일", StatusCategory.DONE, 3.0, "김영현", Instant.now(), Instant.now()));
+
+        String report = service.generateMyReport("U1").get();
+
+        assertThat(report).contains("진행중인 일").contains("끝난 일").contains("완료됨");
+    }
 }

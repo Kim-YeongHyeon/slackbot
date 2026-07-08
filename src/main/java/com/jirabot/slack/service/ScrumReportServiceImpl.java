@@ -78,6 +78,12 @@ public class ScrumReportServiceImpl implements ScrumReportService {
     @Async("slackTaskExecutor")
     @Override
     public CompletableFuture<String> generateMyReport(String slackUserId) {
+        return generateMyReport(slackUserId, false);
+    }
+
+    @Async("slackTaskExecutor")
+    @Override
+    public CompletableFuture<String> generateMyReport(String slackUserId, boolean excludeDone) {
         try {
             // STUDY: 내 이슈를 찾는 2가지 경로:
             //        1. assignee가 내 Jira 이름인 이슈 (Jira에서 배정된 것)
@@ -97,8 +103,33 @@ public class ScrumReportServiceImpl implements ScrumReportService {
                         + "\n매핑이 안 돼있다면: `scripts/register-user-mapping.sh` 실행");
             }
 
-            StringBuilder sb = new StringBuilder();
             String displayName = jiraName != null ? jiraName : "내";
+            StringBuilder sb = new StringBuilder();
+
+            // STUDY: "완료 안된 task 알려줘" 같은 미완료-한정 질의 — 완료 이슈를 목록에서 제외하고
+            //        완료됨 섹션/완료 SP 집계 대신 미완료 요약 한 줄을 붙인다.
+            if (excludeDone) {
+                List<IssueEntity> open = myIssues.stream()
+                        .filter(i -> !StatusCategory.DONE.equals(i.getStatusCategory()))
+                        .toList();
+                if (open.isEmpty()) {
+                    return CompletableFuture.completedFuture(String.format(
+                            ":tada: *%s 작업* — 미완료 작업이 없습니다. 모두 완료됐어요!", displayName));
+                }
+                sb.append(String.format(":bust_in_silhouette: *%s 미완료 작업*\n\n", displayName));
+                Map<String, List<IssueEntity>> byStatus = open.stream()
+                        .collect(Collectors.groupingBy(IssueEntity::getStatusCategory));
+                appendStatusSection(sb, byStatus.get(StatusCategory.IN_PROGRESS), "진행 중 :hammer:");
+                appendStatusSection(sb, byStatus.get(StatusCategory.TODO), "해야 할 일 :clipboard:");
+                double openSp = open.stream()
+                        .mapToDouble(i -> i.getStoryPoint() != null ? i.getStoryPoint() : 0).sum();
+                sb.append(String.format("\n:bar_chart: *미완료: %d건 · %.0f SP*", open.size(), openSp));
+
+                log.info("My report (open only) generated for user={} open={}/{}",
+                        slackUserId, open.size(), myIssues.size());
+                return CompletableFuture.completedFuture(sb.toString());
+            }
+
             sb.append(String.format(":bust_in_silhouette: *%s 작업*\n\n", displayName));
             appendIssuesByStatus(sb, myIssues);
 

@@ -930,7 +930,9 @@ public class SlackEventController {
                 case "statistics" ->
                         handleStatistics(event);
                 case "my_tasks" ->
-                        handleMyWork(event);
+                        // STUDY: "완료 안된 task 알려줘" 처럼 미완료-한정 질의는 원문에서 결정적으로 감지해
+                        //        완료 이슈를 제외한다 (의도 분류만으로는 이 조건이 소실되던 버그 수정, v0.0.59).
+                        handleMyWork(event, wantsIncompleteOnly(cleaned));
                 case "scrum_report" ->
                         handleScrum(event);
                 case "sync_request" ->
@@ -1021,8 +1023,22 @@ public class SlackEventController {
     }
 
     private void handleMyWork(SlackEventInner event) {
-        log.info("My work requested by user={}", event.user());
-        scrumReportService.generateMyReport(event.user())
+        handleMyWork(event, false);
+    }
+
+    // STUDY: 미완료-한정 질의("완료 안된/미완료/남은 …")를 결정적으로 감지. 부정 표현이 다양해
+    //        (완료 안/완료되지 않/완료 못한/미완료/안 끝난/남은/미해결) 넓게 잡되, 긍정 질의("완료된 것")는 제외.
+    private static final java.util.regex.Pattern INCOMPLETE_ONLY_PATTERN = java.util.regex.Pattern.compile(
+            "(?i)(완료\\s*(안|않|못|안된|안\\s*된|되지\\s*않)|미완료|안\\s*끝난|끝나지\\s*않|남은|남아\\s*있|미해결"
+                    + "|not\\s+done|incomplete|unfinished|remaining|open\\s+tasks?)");
+
+    static boolean wantsIncompleteOnly(String text) {
+        return text != null && INCOMPLETE_ONLY_PATTERN.matcher(text).find();
+    }
+
+    private void handleMyWork(SlackEventInner event, boolean excludeDone) {
+        log.info("My work requested by user={} excludeDone={}", event.user(), excludeDone);
+        scrumReportService.generateMyReport(event.user(), excludeDone)
                 .thenAccept(report -> {
                     if (event.channel() != null && event.ts() != null) {
                         slackNotifier.postThreadReply(event.channel(), event.ts(), report);
