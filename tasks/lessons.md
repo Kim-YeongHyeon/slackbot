@@ -258,3 +258,18 @@ HTTP 는 200 이라 에러 플래그로 안 잡히고, catch 가 빈 목록을 �
 - 신규 외부 연동 리뷰 체크리스트에 버퍼 설정 포함.
 
 **How to apply**: `grep -rn "WebClient.builder" src/` 로 로컬 생성 지점을 찾아 maxInMemorySize 유무를 확인한다.
+
+## L15. eval 테스트는 test 프로파일의 무해화 설정을 실값으로 오버라이드해야 한다
+
+**Pattern**: 스킬 eval 첫 실행이 14초 만에 "통과처럼 보이는" 결과를 냈다 — 실제로는 test 프로파일의
+`claude.cli-path: /bin/true`(유닛테스트용 무해화) 때문에 모든 CLI 호출이 빈 출력→fallback 이었고,
+fallback 이 intent 힌트로 type 을 채워 type 정확도 0.9가 "우연히" 나왔다. intent eval 은
+`IntentProperties.cliPath()` 가 하드코딩 "claude" 라 우연히 실 CLI 를 탔던 것.
+
+**Why**: eval 은 실제 모델 품질 측정이 목적 — 무해화된 의존성 위에서 돌면 측정이 아니라 폴백 로직 테스트다.
+소요 시간이 비정상적으로 짧으면(케이스당 <1s) 실 호출이 아닌 것부터 의심한다.
+
+**How to apply**:
+- 실 CLI eval 테스트에는 `@SpringBootTest(properties = {"claude.cli-path=claude", "claude.timeout-seconds=20"})` 오버라이드.
+- 새 `-D<x>.eval` 프로퍼티는 build.gradle test 블록에 `systemProperty` 포워딩을 반드시 추가 (없으면 워커 JVM 에 안 보여 스킵).
+- eval 결과 검토 시 소요 시간(케이스 수 × 모델 지연)이 합리적인지 먼저 확인.
