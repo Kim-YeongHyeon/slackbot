@@ -108,6 +108,21 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 스킬 eval 하네스 + 도메인 글로서리 + 파싱 검증 (v0.0.62)
+
+분류 스킬의 품질을 **측정 가능**하게 만들고 도메인 정확도를 올렸다:
+- **스킬 eval 하네스**: `SkillClassifierEvalTest`(opt-in, `-Dskill.eval=true`) + 골든셋 20케이스
+  (`src/test/resources/skill-eval/cases.json`, 실제 팀 도메인 어휘 사용). 검증 축 6개 — type 정확도(≥0.90),
+  SP 스케일 {1,2,3,5,8}(100%), 제목 위생: 명령어구·이슈키 없음(100%), 도메인 토큰 보존(≥0.80),
+  SP 기대범위(≥0.70), summary 구조 마커(≥0.70). 이후 스킬 수정 시 전/후 비교 필수(L12 확장).
+  주의: test 프로파일은 cli-path=/bin/true 라 eval 테스트가 실값으로 오버라이드. build.gradle 에 skill.eval 포워딩.
+- **도메인 글로서리**: 실제 이슈 1,744건에서 컴포넌트 태그([ES2M]/[EVI]/[SDK]/[Shaper]/evi-crypto/KMS…)와
+  용어(HEaaN, IVF, VCT, shard, ctxt, proto, BatchEncrypt…)를 추출해 skill-bug/skill-story 에 `<domain_context>`
+  추가 — 태그를 title 앞에 보존, 용어 번역/일반화 금지. 도메인 few-shot 각 1개 추가.
+- **파싱 검증 수정**(실 버그): JSON 으로는 유효하지만 필수 필드가 빠진 모델 응답이 그대로 통과해
+  "null" 제목 티켓이 생길 수 있었다(eval 에서 실측). type/title/SP∈{1,2,3,5,8} 검증 실패 시 재시도.
+- **eval 결과: 20/20 전 축 1.000** (type/SP/제목위생/도메인토큰/SP범위/구조마커).
+
 ### 자연어 담당자 변경 (v0.0.61)
 
 "@지라 ES2-1190 담당자를 최아록으로"가 **search로 오분류**돼 "검색 결과가 없습니다"로 응답하던 문제 수정.

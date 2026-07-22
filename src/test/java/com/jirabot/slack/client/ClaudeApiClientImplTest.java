@@ -446,6 +446,35 @@ class ClaudeApiClientImplTest {
     }
 
     @Test
+    void parseableButMissingFields_isRejectedAndRetried() {
+        // JSON 으로는 유효하지만 필수 필드가 빠진 응답 → 통과시키면 "null" 제목 티켓 발생(스킬 eval 실측).
+        String bad = "{\"foo\":\"bar\"}";
+        String good = "{\"type\":\"BUG\",\"storyPoint\":2,\"title\":\"T\",\"summary\":\"S\"}";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, envelope(bad, false), "", false))
+                .thenReturn(new ProcessRunner.Result(0, envelope(good, false), "", false));
+
+        IssueClassification result = client.classify("로그인 500 에러");
+
+        assertThat(result.title()).isEqualTo("T");
+        verify(runner, org.mockito.Mockito.times(2)).run(any(List.class), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void invalidStoryPointScale_isRejectedAndRetried() {
+        // SP=13 처럼 팀 스케일 밖 값도 거부 → 재시도
+        String bad = "{\"type\":\"BUG\",\"storyPoint\":13,\"title\":\"T\",\"summary\":\"S\"}";
+        String good = "{\"type\":\"BUG\",\"storyPoint\":8,\"title\":\"T\",\"summary\":\"S\"}";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, envelope(bad, false), "", false))
+                .thenReturn(new ProcessRunner.Result(0, envelope(good, false), "", false));
+
+        IssueClassification result = client.classify("큰 작업");
+
+        assertThat(result.storyPoint()).isEqualTo(8);
+    }
+
+    @Test
     void classifyPr_allAttemptsFail_fallsBackToTitleFromText() {
         when(runner.run(any(), anyString(), any(Duration.class)))
                 .thenReturn(new ProcessRunner.Result(1, "", "err", false));

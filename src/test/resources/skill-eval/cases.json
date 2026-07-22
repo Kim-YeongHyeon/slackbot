@@ -1,0 +1,184 @@
+{
+  "cases": [
+    {
+      "id": "bug-001",
+      "skill": "register_bug",
+      "input": "[ES2M] shard 병합 후에 num_vectors 값이 실제보다 크게 나옵니다. 조회 API 응답 기준이에요",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [2, 3, 5],
+      "titleContains": ["ES2M"],
+      "summaryMarkers": ["현상"]
+    },
+    {
+      "id": "bug-002",
+      "skill": "register_bug",
+      "input": "KMS 키 로테이션 돌리면 가끔 gRPC unavailable 떠요. 재시도하면 되는데 신경 쓰이네요",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [2, 3, 5],
+      "titleContains": ["KMS"],
+      "summaryMarkers": ["현상"]
+    },
+    {
+      "id": "bug-003",
+      "skill": "register_bug",
+      "input": "evi-crypto 빌드가 어제부터 CI에서 깨져요. undefined symbol HEaaN 어쩌고 나옴. 티켓 만들어줘",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [1, 2, 3],
+      "titleContains": ["evi-crypto"],
+      "summaryMarkers": ["단서"]
+    },
+    {
+      "id": "bug-004",
+      "skill": "register_bug",
+      "input": "Shaper가 가끔 죽는대요",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [3, 5, 8],
+      "titleContains": ["Shaper"],
+      "summaryMarkers": ["불명"]
+    },
+    {
+      "id": "bug-005-override",
+      "skill": "register_bug",
+      "input": "검색할 때 필터 조건 저장해두고 다시 쓸 수 있으면 좋겠어요",
+      "expectedTypes": ["FEATURE"],
+      "spAllowed": null,
+      "titleContains": [],
+      "summaryMarkers": []
+    },
+    {
+      "id": "bug-006",
+      "skill": "register_bug",
+      "input": "[SDK] BatchEncrypt 하고 나서 메모리가 계속 늘어나요. 10만 건 넣으면 OOM 납니다",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [3, 5, 8],
+      "titleContains": ["BatchEncrypt"],
+      "summaryMarkers": ["현상"]
+    },
+    {
+      "id": "bug-007",
+      "skill": "register_bug",
+      "input": "IVF 인덱스로 검색하면 Flat이랑 결과 개수가 달라요. IVF가 3개 적게 나옴",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [3, 5, 8],
+      "titleContains": ["IVF"],
+      "summaryMarkers": ["현상"]
+    },
+    {
+      "id": "bug-008",
+      "skill": "register_bug",
+      "input": "compute 노드가 CPU를 다 안 쓰는 것 같아요. 부하 걸어도 50%에서 멈춰있음",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [3, 5, 8],
+      "titleContains": ["CPU"],
+      "summaryMarkers": ["현상"]
+    },
+    {
+      "id": "bug-009-keystrip",
+      "skill": "register_bug",
+      "input": "[ES2-1234] proto 다운로드가 URI 방식에서 404 나요. 예전 방식은 잘 됨",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [1, 2, 3],
+      "titleContains": ["proto"],
+      "summaryMarkers": ["현상"]
+    },
+    {
+      "id": "bug-010-glossary",
+      "skill": "register_bug",
+      "input": "ostream으로 ctxt 내보낼 때 마지막 청크가 잘려요",
+      "expectedTypes": ["BUG"],
+      "spAllowed": [2, 3, 5],
+      "titleContains": ["ctxt"],
+      "summaryMarkers": ["현상"]
+    },
+    {
+      "id": "story-001",
+      "skill": "register_story",
+      "input": "[evi] ClusterDB 생성자에 Blob 받는 버전 추가해줘",
+      "expectedTypes": ["FEATURE"],
+      "spAllowed": [1, 2, 3],
+      "titleContains": ["ClusterDB"],
+      "summaryMarkers": ["완료 조건"]
+    },
+    {
+      "id": "story-002-scope",
+      "skill": "register_story",
+      "input": "검색 결과를 CSV로 내보내는 기능 있으면 좋겠어. 대시보드에서만 되면 충분해",
+      "expectedTypes": ["FEATURE"],
+      "spAllowed": [2, 3, 5],
+      "titleContains": ["CSV"],
+      "summaryMarkers": ["완료 조건", "대시보드"]
+    },
+    {
+      "id": "story-003-big",
+      "skill": "register_story",
+      "input": "멀티 테넌트 지원하자. 테넌트별 키 분리, 사용량 집계, 청구 연동까지 필요해",
+      "expectedTypes": ["FEATURE"],
+      "spAllowed": [5, 8],
+      "titleContains": ["테넌트"],
+      "summaryMarkers": ["완료 조건"]
+    },
+    {
+      "id": "story-004-other",
+      "skill": "register_story",
+      "input": "빌드 가이드 문서에 docker compose 절차 추가해주세요",
+      "expectedTypes": ["OTHER", "FEATURE"],
+      "spAllowed": [1, 2],
+      "titleContains": ["docker"],
+      "summaryMarkers": []
+    },
+    {
+      "id": "story-005-override",
+      "skill": "register_story",
+      "input": "release workflow 돌리면 KMS 스텝에서 실패해요. 어제부터 그래요",
+      "expectedTypes": ["BUG"],
+      "spAllowed": null,
+      "titleContains": ["KMS"],
+      "summaryMarkers": []
+    },
+    {
+      "id": "story-006-glossary",
+      "skill": "register_story",
+      "input": "es2c에 URI로 ctxt 다운로드하는 proto 추가하자",
+      "expectedTypes": ["FEATURE"],
+      "spAllowed": [2, 3, 5],
+      "titleContains": ["ctxt"],
+      "summaryMarkers": ["완료 조건"]
+    },
+    {
+      "id": "story-007",
+      "skill": "register_story",
+      "input": "IVF 인덱스 학습 파라미터를 설정 파일로 뺄 수 있게 리팩토링하고 싶어",
+      "expectedTypes": ["FEATURE"],
+      "spAllowed": [2, 3, 5],
+      "titleContains": ["IVF"],
+      "summaryMarkers": ["완료 조건"]
+    },
+    {
+      "id": "story-008-scope",
+      "skill": "register_story",
+      "input": "SaaS BE에 사용량 조회 API 추가해줘. 일별 집계면 충분하고 실시간은 필요 없어",
+      "expectedTypes": ["FEATURE"],
+      "spAllowed": [2, 3, 5],
+      "titleContains": ["API"],
+      "summaryMarkers": ["완료 조건", "일별"]
+    },
+    {
+      "id": "story-009-ambiguous",
+      "skill": "register_story",
+      "input": "[SDK] 빌드 CI 추가해줘",
+      "expectedTypes": ["FEATURE", "OTHER"],
+      "spAllowed": [1, 2, 3],
+      "titleContains": ["CI"],
+      "summaryMarkers": []
+    },
+    {
+      "id": "story-010",
+      "skill": "register_story",
+      "input": "license key 만료 알림 기능 만들어줘. 만료 30일 전에 메일 발송",
+      "expectedTypes": ["FEATURE"],
+      "spAllowed": [2, 3, 5],
+      "titleContains": ["license"],
+      "summaryMarkers": ["완료 조건", "30일"]
+    }
+  ]
+}

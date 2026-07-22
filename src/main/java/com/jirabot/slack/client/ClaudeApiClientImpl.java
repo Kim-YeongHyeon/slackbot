@@ -535,7 +535,15 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         }
         String stripped = stripToJsonObject(inner);
         try {
-            return objectMapper.readValue(stripped, IssueClassification.class);
+            IssueClassification parsed = objectMapper.readValue(stripped, IssueClassification.class);
+            // STUDY: JSON 으로는 유효하지만 필수 필드가 빠진 응답(예: 다른 키만 있는 오브젝트)이 그대로
+            //        통과하면 "null" 제목 티켓이 생긴다(스킬 eval 에서 실측). 검증 실패 → null → 재시도.
+            if (parsed.type() == null || parsed.title() == null || parsed.title().isBlank()
+                    || !java.util.Set.of(1, 2, 3, 5, 8).contains(parsed.storyPoint())) {
+                log.warn("Claude classification missing/invalid fields, head={}", truncate(stripped));
+                return null;
+            }
+            return parsed;
         } catch (Exception e) {
             log.warn("Claude inner JSON parse failed: {} head={}", e.toString(), truncate(stripped));
             return null;
