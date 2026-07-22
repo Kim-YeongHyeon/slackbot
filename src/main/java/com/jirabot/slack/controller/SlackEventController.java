@@ -1282,11 +1282,19 @@ public class SlackEventController {
                     accountId = mapping.get().getJiraAccountId();
                     displayName = mapping.get().getJiraDisplayName();
                 } else {
-                    // STUDY: 이름 해석 — 등록된 매핑(정확 일치) 우선, 없으면 Jira user search 폴백.
-                    var mapping = userMappingRepository.findByJiraDisplayName(assigneeText);
-                    if (mapping.isPresent() && mapping.get().getJiraAccountId() != null) {
-                        accountId = mapping.get().getJiraAccountId();
-                        displayName = mapping.get().getJiraDisplayName();
+                    // STUDY: 이름 해석 체인 (v0.0.63) — 한국어 이름은 slack_display_name 에 있는 경우가 많아
+                    //        (예: slack=최아록 / jira=choiahrok) Jira 표시명만 보면 못 찾는다.
+                    //        1) jira_display_name 정확 → 2) slack_display_name 정확 → 3) 두 컬럼 부분일치(유일할 때만)
+                    //        → 4) Jira user search 폴백. 부분일치가 여럿이면 후보를 나열하고 중단.
+                    var resolved = resolveAssigneeByName(assigneeText);
+                    if (resolved instanceof NameResolution.Found f) {
+                        accountId = f.accountId();
+                        displayName = f.displayName();
+                    } else if (resolved instanceof NameResolution.Ambiguous a) {
+                        reply(event, String.format(
+                                ":thinking_face: *%s* 에 해당하는 사람이 여러 명이에요: %s\n정확한 이름으로 다시 지정해주세요.",
+                                assigneeText, a.candidates()));
+                        return;
                     } else {
                         accountId = jiraApiClient.findAccountId(assigneeText);
                         displayName = assigneeText;
@@ -1323,6 +1331,50 @@ public class SlackEventController {
     private String issueLink(String key) {
         String base = jiraProps.baseUrl() == null ? "" : jiraProps.baseUrl().replaceAll("/+$", "");
         return base.isEmpty() ? key : base + "/browse/" + key;
+    }
+
+    // STUDY: sealed interface + record — 이름 해석의 3가지 결과(찾음/모호/없음)를 타입으로 표현.
+    //        표시명은 한국어(slackDisplayName) 우선 — 사용자가 부른 이름과 응답 표기를 맞춘다.
+    sealed interface NameResolution {
+        record Found(String accountId, String displayName) implements NameResolution {}
+        record Ambiguous(String candidates) implements NameResolution {}
+        record NotFound() implements NameResolution {}
+    }
+
+    private NameResolution resolveAssigneeByName(String name) {
+        // 1) Jira 표시명 정확 일치
+        var byJira = userMappingRepository.findByJiraDisplayName(name);
+        if (byJira.isPresent() && byJira.get().getJiraAccountId() != null) {
+            return found(byJira.get());
+        }
+        // 2) Slack 표시명 정확 일치 (한국어 이름은 대개 여기 있음)
+        var bySlack = userMappingRepository.findBySlackDisplayName(name);
+        if (bySlack.isPresent() && bySlack.get().getJiraAccountId() != null) {
+            return found(bySlack.get());
+        }
+        // 3) 두 컬럼 부분일치 — 유일할 때만 채택, 여럿이면 후보 나열
+        var partial = userMappingRepository.searchByAnyDisplayName(name).stream()
+                .filter(u -> u.getJiraAccountId() != null)
+                .toList();
+        if (partial.size() == 1) {
+            return found(partial.get(0));
+        }
+        if (partial.size() > 1) {
+            String candidates = partial.stream()
+                    .map(u -> preferredDisplayName(u))
+                    .reduce((x, y) -> x + ", " + y).orElse("");
+            return new NameResolution.Ambiguous(candidates);
+        }
+        return new NameResolution.NotFound();
+    }
+
+    private NameResolution.Found found(com.jirabot.slack.entity.UserMappingEntity u) {
+        return new NameResolution.Found(u.getJiraAccountId(), preferredDisplayName(u));
+    }
+
+    private String preferredDisplayName(com.jirabot.slack.entity.UserMappingEntity u) {
+        return u.getSlackDisplayName() != null && !u.getSlackDisplayName().isBlank()
+                ? u.getSlackDisplayName() : u.getJiraDisplayName();
     }
 
     // STUDY: Jira 전체 버그를 Notion '버그 현황' DB 로 백필. 건수가 많아 비동기로 실행하고 결과만 회신.

@@ -1134,6 +1134,63 @@ class SlackEventControllerTest {
         assertThat(blocks.getValue()).contains("최아록");
     }
 
+    // --- 담당자 이름 해석 체인 (v0.0.63) ---
+
+    @Test
+    void assignByKoreanName_resolvesViaSlackDisplayName() throws Exception {
+        // 동기 케이스: 매핑이 slack=최아록/jira=choiahrok 인데 "최아록"으로 지정 — jira 표시명 조회는 실패해도
+        // slack 표시명 조회로 해석돼야 한다.
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U8", "최아록", "choiahrok", "acc-choi");
+        when(userMappingRepository.findByJiraDisplayName("최아록")).thenReturn(java.util.Optional.empty());
+        when(userMappingRepository.findBySlackDisplayName("최아록")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.assignIssue("ES2-1190", "acc-choi")).thenReturn(true);
+        when(issueRepository.findByIssueKey("ES2-1190")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1190 담당자를 최아록으로", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).assignIssue("ES2-1190", "acc-choi");
+        // Jira user search 폴백까지 가지 않아야 한다
+        verify(jiraApiClient, never()).findAccountId(any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postMessage(any(), msg.capture());
+        assertThat(msg.getValue()).contains("최아록"); // 응답 표기는 사용자가 부른 한국어 이름
+    }
+
+    @Test
+    void assignByPartialName_uniqueMatch_resolves() throws Exception {
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U8", "최아록", "choiahrok", "acc-choi");
+        when(userMappingRepository.searchByAnyDisplayName("아록")).thenReturn(List.of(mapping));
+        when(jiraApiClient.assignIssue("ES2-1", "acc-choi")).thenReturn(true);
+        when(issueRepository.findByIssueKey("ES2-1")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 할당 ES2-1 아록", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).assignIssue("ES2-1", "acc-choi");
+    }
+
+    @Test
+    void assignByPartialName_multipleMatches_asksToDisambiguate() throws Exception {
+        when(userMappingRepository.searchByAnyDisplayName("박")).thenReturn(List.of(
+                new com.jirabot.slack.entity.UserMappingEntity("U1", "박송협", "Song Hyeop Park", "acc-1"),
+                new com.jirabot.slack.entity.UserMappingEntity("U2", "박수영", "Suyeong Park", "acc-2")));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 할당 ES2-1 박", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).assignIssue(any(), any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postMessage(any(), msg.capture());
+        assertThat(msg.getValue()).contains("여러 명").contains("박송협").contains("박수영");
+    }
+
     // --- 할당알림 토글 ---
 
     @Test

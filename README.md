@@ -108,6 +108,17 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 담당자 이름 자동 해석 확장 (v0.0.63)
+
+"담당자를 최아록으로" 지정 시 "Jira에서 최아록 사용자를 찾을 수 없습니다"가 나오던 문제 수정.
+원인: 매핑은 이미 있었지만(slack_display_name=최아록 / jira_display_name=choiahrok) 해석이
+**jira_display_name 정확 일치 + Jira user search**만 시도 — 한국어 이름은 둘 다 실패.
+- 해석 체인 확장(`resolveAssigneeByName`, sealed interface 결과형):
+  ① jira 표시명 정확 → ② **slack 표시명 정확**(한국어 이름은 대개 여기) → ③ **두 컬럼 부분일치**
+  ("아록", "Song Hyeop" — 유일할 때만 채택, 여럿이면 후보 나열 후 중단) → ④ Jira user search 폴백.
+- 응답 표기는 한국어(slackDisplayName) 우선 — 사용자가 부른 이름과 일치.
+- `할당 KEY 이름` 키워드/스레드 `담당자`/NL 어순 모두 같은 체인 사용(executeAssign 공유).
+
 ### 스킬 eval 하네스 + 도메인 글로서리 + 파싱 검증 (v0.0.62)
 
 분류 스킬의 품질을 **측정 가능**하게 만들고 도메인 정확도를 올렸다:
