@@ -73,6 +73,7 @@ public class SlackEventController {
               `@지라 검색 <키워드>` — 이슈 제목/설명으로 검색 (예: `@지라 검색 preset`)
               `@지라 ES2-123` — 이슈 키로 상세 카드 조회 (상태 전환 버튼 포함)
               `@지라 할당 ES2-123 홍길동` — 이슈 담당자 지정 (@멘션도 가능)
+              `@지라 ES2-123 담당자를 홍길동으로` — 자연어 담당자 변경 · `ES2-123 담당자 누구야` — 담당자 조회(카드)
               `@지라 하위작업 ES2-123 <내용>` — 특정 이슈 아래 하위작업 생성 (스레드 밖에서도 키/이름으로 지정 가능)
               `@지라 ES2-1이 ES2-2에 막혀있어` — 이슈 링크 생성 (blocks/relates/duplicate, 방향 모호 시 확인 버튼)
               `@지라 ES2-123 SP 3으로 변경` — SP/제목/마감일/우선순위 수정 (제목은 따옴표 필요)
@@ -332,6 +333,14 @@ public class SlackEventController {
         String cardKey = extractCardIssueKey(cleaned);
         if (cardKey != null) {
             handleIssueCard(event, cardKey);
+            return;
+        }
+
+        // 1.42차: 담당자 변경 NL 어순 — "ES2-1190 담당자를 최아록으로". 키워드형 `할당 KEY 이름`(1차)의
+        //        자연어 짝. 기존엔 Haiku→search 로 오분류돼 "검색 결과가 없습니다"가 나오던 케이스 (v0.0.61).
+        Optional<IssueCommandParser.AssignCommand> assignCmd = IssueCommandParser.parseAssign(cleaned);
+        if (assignCmd.isPresent()) {
+            executeAssign(event, assignCmd.get().key(), assignCmd.get().assignee());
             return;
         }
 
@@ -1184,8 +1193,11 @@ public class SlackEventController {
     //        나머지에 다른 내용이 있으면(서술문) null — 이슈 생성/검색 흐름을 가로채지 않는다.
     private static final java.util.regex.Pattern ISSUE_KEY_PATTERN =
             java.util.regex.Pattern.compile("[A-Z][A-Z0-9]*-\\d+");
+    // STUDY: "ES2-123 담당자 누구야" 같은 담당자 조회도 카드로 응답(카드에 담당자 필드 있음).
+    //        변경형("담당자를 X로")은 잔여에 이름이 남아 filler 불일치 → 1.42차 parseAssign 으로 넘어간다.
     private static final java.util.regex.Pattern CARD_FILLER_PATTERN = java.util.regex.Pattern.compile(
-            "(?i)^(이슈|조회|카드|보여줘|알려줘|상세|정보|상태|확인|show|info|detail|status|[\\s!?.~,]+)*$");
+            "(?i)^(이슈|조회|카드|보여줘|알려줘|상세|정보|상태|확인|담당자|누구(야|임|인지|인가요|에요|예요)?"
+                    + "|show|info|detail|status|assignee|who|[\\s!?.~,]+)*$");
 
     static String extractCardIssueKey(String cleaned) {
         if (cleaned == null || cleaned.isBlank()) {

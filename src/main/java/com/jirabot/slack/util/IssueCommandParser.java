@@ -355,6 +355,45 @@ public final class IssueCommandParser {
         return null;
     }
 
+    // ==================== 담당자 변경 (NL 어순) ====================
+
+    /** 담당자 변경 명령: "<KEY> 담당자를 <이름|@멘션>(으로) [바꿔/변경/지정…]". */
+    public record AssignCommand(String key, String assignee) {}
+
+    private static final Pattern ASSIGNEE_KW = Pattern.compile("(?i)(담당자|assignee)");
+    // 이름 토큰: 한/영 이름 또는 Slack 멘션(<@U123>). 이름은 lazy — 붙은 조사 "으로/로"를 이름에서
+    // 분리한다("최아록으로"→최아록). 단어 경계 lookahead 로 종료 지점 고정.
+    private static final Pattern ASSIGN_NAME_AFTER_KW = Pattern.compile(
+            "(?i)(?:담당자|assignee)\\s*(?:를|을|는|:)?\\s*(<@[A-Z0-9]+>|[\\p{L}\\p{N}._\\-]+?)(?:으로|로)?(?=\\s|$)",
+            Pattern.UNICODE_CHARACTER_CLASS);
+    // 조회 어휘 — "담당자 누구야/알려줘"를 변경 명령으로 오인하지 않게 이름 후보에서 제외.
+    private static final Pattern ASSIGN_QUERY_WORDS = Pattern.compile(
+            "(?i)^(누구|누구야|누군지|알려|알려줘|보여|보여줘|확인|뭐야|누가|who)$");
+
+    /**
+     * "ES2-1190 담당자를 최아록으로 (바꿔줘)" 형태의 담당자 변경 파싱.
+     * 이슈 키 정확히 1개 + 담당자 키워드 + 이름 토큰일 때만. 조회성("담당자 누구야")은 잡지 않는다.
+     */
+    public static Optional<AssignCommand> parseAssign(String text) {
+        if (text == null || text.isBlank()) {
+            return Optional.empty();
+        }
+        String t = text.strip();
+        String key = oneKey(t);
+        if (key == null || !ASSIGNEE_KW.matcher(t).find()) {
+            return Optional.empty();
+        }
+        Matcher m = ASSIGN_NAME_AFTER_KW.matcher(t);
+        if (!m.find()) {
+            return Optional.empty();
+        }
+        String name = m.group(1).strip();
+        if (name.isEmpty() || name.equalsIgnoreCase(key) || ASSIGN_QUERY_WORDS.matcher(name).matches()) {
+            return Optional.empty();
+        }
+        return Optional.of(new AssignCommand(key, name));
+    }
+
     private static final Pattern SPRINT_MOVE = Pattern.compile(
             "(?i)스프린트\\s*(?:로|에|으로)?\\s*(?:옮겨|이동|넣어|추가|올려|보내)");
 

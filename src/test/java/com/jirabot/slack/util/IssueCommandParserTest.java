@@ -305,6 +305,47 @@ class IssueCommandParserTest {
         assertThat(IssueCommandParser.parseSprintMove("ES2-123 스프린트 상황 알려줘")).isEmpty();
     }
 
+    // ==================== 담당자 변경 (NL 어순) ====================
+
+    @Test
+    void assign_nlOrder_particleStripped() {
+        // 동기 케이스: "ES2-1190 담당자를 최아록으로" — 조사 "으로"가 이름에서 분리돼야 한다.
+        var c = IssueCommandParser.parseAssign("ES2-1190 담당자를 최아록으로").orElseThrow();
+        assertThat(c.key()).isEqualTo("ES2-1190");
+        assertThat(c.assignee()).isEqualTo("최아록");
+    }
+
+    @Test
+    void assign_withChangeVerb() {
+        var c = IssueCommandParser.parseAssign("ES2-5 담당자를 홍길동으로 바꿔줘").orElseThrow();
+        assertThat(c.assignee()).isEqualTo("홍길동");
+    }
+
+    @Test
+    void assign_slackMention() {
+        var c = IssueCommandParser.parseAssign("ES2-5 담당자 <@U03ABC>로 변경").orElseThrow();
+        assertThat(c.assignee()).isEqualTo("<@U03ABC>");
+    }
+
+    @Test
+    void assign_bareName() {
+        var c = IssueCommandParser.parseAssign("ES2-5 담당자 홍길동").orElseThrow();
+        assertThat(c.assignee()).isEqualTo("홍길동");
+    }
+
+    @Test
+    void assign_queryPhrasing_notClaimed() {
+        // 조회성 질문은 변경 명령이 아님 (카드 경로가 처리)
+        assertThat(IssueCommandParser.parseAssign("ES2-1190 담당자 누구야")).isEmpty();
+        assertThat(IssueCommandParser.parseAssign("ES2-1190 담당자 알려줘")).isEmpty();
+    }
+
+    @Test
+    void assign_noKeyOrTwoKeys_notClaimed() {
+        assertThat(IssueCommandParser.parseAssign("담당자를 최아록으로")).isEmpty(); // 스레드 단축형은 스레드 경로
+        assertThat(IssueCommandParser.parseAssign("ES2-1 ES2-2 담당자를 홍길동으로")).isEmpty();
+    }
+
     @Test
     void keyPresentButNoContent_returnsCommandWithBlankContent() {
         // "ES2-123 하위작업" — 부모는 명확하나 내용 없음 → content 비어있는 command(호출부가 사용법 안내)

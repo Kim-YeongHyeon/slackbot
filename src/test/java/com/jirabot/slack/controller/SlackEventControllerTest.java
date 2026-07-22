@@ -1095,6 +1095,45 @@ class SlackEventControllerTest {
         assertThat(msg.getValue()).contains("링크가 없");
     }
 
+    // --- NL 담당자 변경 ---
+
+    @Test
+    void nlAssign_routesToExecuteAssign_notSearch() throws Exception {
+        // 동기 케이스: "ES2-1190 담당자를 최아록으로" 가 search 로 오분류되던 버그 (v0.0.61)
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U9", "최아록S", "최아록", "acc-choi");
+        when(userMappingRepository.findByJiraDisplayName("최아록")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.assignIssue("ES2-1190", "acc-choi")).thenReturn(true);
+        when(issueRepository.findByIssueKey("ES2-1190")).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1190 담당자를 최아록으로", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).assignIssue("ES2-1190", "acc-choi");
+        verify(intentClassifier, never()).classify(any());
+        verify(issueSearchService, never()).searchSemantic(any(), any());
+    }
+
+    @Test
+    void assigneeQuery_showsIssueCard() throws Exception {
+        // "담당자 누구야"는 변경이 아니라 조회 → 카드 응답(카드에 담당자 필드 있음)
+        var issue = new com.jirabot.slack.entity.IssueEntity(
+                "ES2-7", "요약", "버그", "진행 중", "진행 중",
+                "최아록", 2.0, null, null, java.time.Instant.now(), java.time.Instant.now());
+        when(issueRepository.findByIssueKey("ES2-7")).thenReturn(java.util.Optional.of(issue));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-7 담당자 누구야", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).assignIssue(any(), any());
+        ArgumentCaptor<String> blocks = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postBlockMessage(any(), any(), any(), blocks.capture());
+        assertThat(blocks.getValue()).contains("최아록");
+    }
+
     // --- 할당알림 토글 ---
 
     @Test
