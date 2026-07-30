@@ -1,0 +1,86 @@
+{
+  "cases": [
+    {
+      "id": "act-assign-01",
+      "input": "ES2-1190 담당자를 최아록으로",
+      "action": "assign",
+      "issueKey": "ES2-1190",
+      "assignee": "최아록"
+    },
+    {
+      "id": "act-assign-02",
+      "input": "ES2-5 담당자 <@U03ABC>로 변경해줘",
+      "action": "assign",
+      "issueKey": "ES2-5",
+      "assignee": "<@U03ABC>"
+    },
+    {
+      "id": "act-link-passive",
+      "input": "ES2-1352가 ES2-1532에 block 되고 있으니 연결해줘",
+      "action": "link",
+      "inwardKey": "ES2-1352",
+      "outwardKey": "ES2-1532",
+      "linkType": "blocks"
+    },
+    {
+      "id": "act-link-active",
+      "input": "ES2-10이 ES2-20을 막고 있어. 링크 걸어줘",
+      "action": "link",
+      "inwardKey": "ES2-20",
+      "outwardKey": "ES2-10",
+      "linkType": "blocks"
+    },
+    {
+      "id": "act-link-relates",
+      "input": "ES2-1과 ES2-2 연결해줘",
+      "action": "link",
+      "linkType": "relates"
+    },
+    {
+      "id": "act-unlink",
+      "input": "ES2-1 ES2-2 링크 해제해줘",
+      "action": "unlink",
+      "issueKey": "ES2-1",
+      "otherKey": "ES2-2"
+    },
+    {
+      "id": "act-sp",
+      "input": "ES2-100 SP 3으로 바꿔줘",
+      "action": "update_sp",
+      "issueKey": "ES2-100",
+      "value": "3"
+    },
+    {
+      "id": "act-title",
+      "input": "ES2-9 제목을 '검색 성능 개선'으로 변경",
+      "action": "update_summary",
+      "issueKey": "ES2-9",
+      "value": "검색 성능 개선"
+    },
+    {
+      "id": "act-due",
+      "input": "ES2-7 마감일 금요일로 해줘",
+      "action": "update_due",
+      "issueKey": "ES2-7",
+      "value": "금요일"
+    },
+    {
+      "id": "act-sprint",
+      "input": "ES2-123 이번 스프린트에 넣어줘",
+      "action": "sprint_move",
+      "issueKey": "ES2-123"
+    },
+    {
+      "id": "act-subtask-key",
+      "input": "ES2-42에 하위작업으로 '문서 정리' 추가",
+      "action": "subtask",
+      "issueKey": "ES2-42",
+      "content": "문서 정리"
+    },
+    {
+      "id": "act-none-query",
+      "input": "ES2-3 어떤 상태인지 알려줘",
+      "action": "none"
+    }
+  ]
+}

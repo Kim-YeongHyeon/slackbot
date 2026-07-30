@@ -108,6 +108,22 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### NL 이슈 조작을 스킬 기반으로 일원화 — issue_action (v0.0.65)
+
+목표 아키텍처(Haiku 분류 → 분류별 Sonnet 스킬이 **원문 그대로** 수신) 완성. NL 조작 명령(담당자/SP/제목/
+마감일/우선순위 변경, 링크 생성·해제·조회, 하위작업, 스프린트 이동)이 정규식 파싱이어서 표현 변형마다
+핫픽스가 반복되던 문제(v0.0.61/64)의 구조적 해결:
+- **Haiku 신규 인텐트 `issue_action`** (decision procedure 4단계 — 이슈 키 + 조작 동사; 조회는 search).
+- **신규 `prompts/skill-issue-action.md`** (Sonnet): 원문 → 구조화 액션 JSON(action/키/슬롯/링크 방향/
+  confidence). 링크 방향표(능/피동) 를 스킬 규칙으로 이전, 판별 불가 시 `directionConfident:false`.
+- **`handleIssueAction` 디스패치**: 추출된 spec 을 **기존 실행부 그대로** 위임 — executeAssign(이름 해석
+  체인), handleUpdateCommand(SP {1,2,3,5,8} 검증·날짜·우선순위), 링크 확인 버튼, 부모 에픽/서브태스크 거부.
+  저신뢰/none → 안내 + intent_failures 기록. 검증·실행은 전부 Java (extract-then-execute).
+- **NL 정규식 제거**: IssueCommandParser 를 명령형 prefix(`하위작업 ES2-1 …` — 0초 경로)와 커맨드 record
+  들만 남기고 슬림화(~400줄 삭제). 키워드 명령(할당/검색/…)·이슈 카드·에픽 키워드는 즉시 경로 유지.
+- **eval**: intent 99케이스(신규 issue_action 9 포함) **99/99**, 신규 SkillActionEvalTest 12케이스
+  (링크 방향 능/피동, 실사고 문장 포함) **action/slot 정확도 1.000**. 이후 표현 개선은 스킬 파일 수정만으로.
+
 ### 봇 멘션 이후만 파싱 + 에픽 하위 오인 + 개행 제목 수정 (v0.0.64)
 
 한 메시지("@박민석 님, … ?\n@지라 'X' 이슈를 관련 에픽 아래에 만들어줄래?")에서 겹친 실사고 3건 수정:

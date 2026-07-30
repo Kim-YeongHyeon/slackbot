@@ -5,7 +5,7 @@ plugins {
 }
 
 group = 'com.jirabot'
-version = '0.0.64-SNAPSHOT'
+version = '0.0.65-SNAPSHOT'
 description = 'Jira Slack Bot Server'
 
 java {
@@ -54,4 +54,5 @@ tasks.named('test') {
 	//        JUnit @EnabledIfSystemProperty 가 보는 곳은 test 워커 JVM 이므로 명시적으로 forward 한다.
 	systemProperty 'intent.eval', System.getProperty('intent.eval', 'false')
 	systemProperty 'skill.eval', System.getProperty('skill.eval', 'false')
+	systemProperty 'action.eval', System.getProperty('action.eval', 'false')
 }

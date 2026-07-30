@@ -88,6 +88,7 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
     static final String BUG_SKILL_PROMPT_FILE = "prompts/skill-bug.md";
     static final String STORY_SKILL_PROMPT_FILE = "prompts/skill-story.md";
     static final String PR_IMPORT_PROMPT_FILE = "prompts/skill-pr-import.md";
+    static final String ISSUE_ACTION_PROMPT_FILE = "prompts/skill-issue-action.md";
     static final String RESOLUTION_PROMPT_FILE = "prompts/sonnet-resolution.md";
     static final String BRANCH_SLUG_PROMPT_FILE = "prompts/haiku-branch-slug.md";
     static final String SEARCH_PROMPT_FILE = "prompts/sonnet-issue-search.md";
@@ -165,6 +166,39 @@ public class ClaudeApiClientImpl implements ClaudeApiClient {
         }
         log.warn("Claude classifyPr {}회 모두 실패 → fallback", MAX_ATTEMPTS);
         return IssueClassification.fallback(rawText);
+    }
+
+    // STUDY: NL 이슈 조작 명령 → 구조화 액션 추출 (extract-then-execute 의 extract 단).
+    //        조작(mutation)은 안내 폴백이 있으므로 재시도 1회(총 2회) — 생성(3회)보다 짧게.
+    //        JSON 필수 필드(action) 검증은 IssueActionSpec compact ctor 가 none 으로 강등해 흡수.
+    @Override
+    public com.jirabot.slack.client.dto.IssueActionSpec extractIssueAction(String rawText) {
+        if (rawText == null || rawText.isBlank() || !promptFileExists(ISSUE_ACTION_PROMPT_FILE)) {
+            return com.jirabot.slack.client.dto.IssueActionSpec.none();
+        }
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            try {
+                ProcessRunner.Result result = processRunner.run(
+                        buildCommand(props.model(), ISSUE_ACTION_PROMPT_FILE),
+                        "USER INPUT:\n" + rawText,
+                        Duration.ofSeconds(props.timeoutSeconds()));
+                if (result.timedOut() || result.exitCode() != 0
+                        || result.stdout() == null || result.stdout().isBlank()) {
+                    log.warn("issue-action extract failed (timeout={}, exit={}, attempt {}/2)",
+                            result.timedOut(), result.exitCode(), attempt);
+                    continue;
+                }
+                JsonNode env = objectMapper.readTree(result.stdout());
+                if (env.path("is_error").asBoolean(false)) continue;
+                String inner = env.path("result").asText("");
+                if (inner.isBlank()) continue;
+                return objectMapper.readValue(stripToJsonObject(inner),
+                        com.jirabot.slack.client.dto.IssueActionSpec.class);
+            } catch (Exception e) {
+                log.warn("issue-action extract error (attempt {}/2): {}", attempt, e.toString());
+            }
+        }
+        return com.jirabot.slack.client.dto.IssueActionSpec.none();
     }
 
     // STUDY: 의도별 스킬 파일 선택 — 2단 폴백: 전용 스킬 없으면 공용(sonnet-classifier.md),

@@ -475,6 +475,35 @@ class ClaudeApiClientImplTest {
     }
 
     @Test
+    void extractIssueAction_parsesSpecAndUsesActionSkillFile() {
+        String inner = "{\"action\":\"assign\",\"issueKey\":\"es2-1190\",\"assignee\":\"최아록\",\"confidence\":0.97}";
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, envelope(inner, false), "", false));
+
+        var spec = client.extractIssueAction("ES2-1190 담당자를 최아록으로");
+
+        assertThat(spec.action()).isEqualTo("assign");
+        assertThat(spec.issueKey()).isEqualTo("ES2-1190"); // 정규화: 대문자
+        assertThat(spec.assignee()).isEqualTo("최아록");
+        org.mockito.ArgumentCaptor<List<String>> cmd = org.mockito.ArgumentCaptor.forClass(List.class);
+        verify(runner).run(cmd.capture(), anyString(), any(Duration.class));
+        int i = cmd.getValue().indexOf("--system-prompt-file");
+        assertThat(cmd.getValue().get(i + 1)).isEqualTo(ClaudeApiClientImpl.ISSUE_ACTION_PROMPT_FILE);
+    }
+
+    @Test
+    void extractIssueAction_failureTwice_returnsNone() {
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(1, "", "err", false));
+
+        var spec = client.extractIssueAction("ES2-1 담당자를 홍길동으로");
+
+        assertThat(spec.action()).isEqualTo("none");
+        assertThat(spec.isActionable()).isFalse();
+        verify(runner, org.mockito.Mockito.times(2)).run(any(List.class), anyString(), any(Duration.class));
+    }
+
+    @Test
     void classifyPr_allAttemptsFail_fallsBackToTitleFromText() {
         when(runner.run(any(), anyString(), any(Duration.class)))
                 .thenReturn(new ProcessRunner.Result(1, "", "err", false));

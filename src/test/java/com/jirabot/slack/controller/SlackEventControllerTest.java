@@ -48,6 +48,7 @@ class SlackEventControllerTest {
     private BugQueryService bugQueryService;
     private JiraSyncService jiraSyncService;
     private JiraApiClient jiraApiClient;
+    private com.jirabot.slack.client.ClaudeApiClient claudeApiClient;
     private JiraProperties jiraProps;
     private IssueRepository issueRepository;
     private IntentClassifier intentClassifier;
@@ -69,6 +70,7 @@ class SlackEventControllerTest {
         bugQueryService = mock(BugQueryService.class);
         jiraSyncService = mock(JiraSyncService.class);
         jiraApiClient = mock(JiraApiClient.class);
+        claudeApiClient = mock(com.jirabot.slack.client.ClaudeApiClient.class);
         jiraProps = new JiraProperties("https://test.atlassian.net", "test@test.com", "token", "SLAC", null, null);
         issueRepository = mock(IssueRepository.class);
         intentClassifier = mock(IntentClassifier.class);
@@ -83,7 +85,7 @@ class SlackEventControllerTest {
         SlackEventDeduplicator deduplicator = new SlackEventDeduplicator();
         controller = new SlackEventController(
                 issueCreateService, issueSearchService, scrumReportService, bugQueryService,
-                jiraSyncService, jiraApiClient, jiraProps, issueRepository, intentClassifier,
+                jiraSyncService, jiraApiClient, claudeApiClient, jiraProps, issueRepository, intentClassifier,
                 threadActionClassifier, intentFailureRepository,
                 userMappingRepository, slackNotifier,
                 directExecutor, deduplicator, reminderSubscriptionService, bugNotionService,
@@ -95,6 +97,22 @@ class SlackEventControllerTest {
     //        과거 고정값(예: "1.0" = 1970년)을 쓰면 모든 라우팅이 stale로 차단된다.
     private static String freshTs() {
         return java.time.Instant.now().getEpochSecond() + ".000000";
+    }
+
+    // STUDY: v0.0.65 — NL 조작은 Haiku(issue_action)→skill-issue-action 경로. 라우팅 테스트는
+    //        두 분류기를 스텁하고 "추출된 spec → 올바른 실행부 호출"을 검증한다(추출 정확도는 eval 담당).
+    private static com.jirabot.slack.client.dto.IssueActionSpec spec(
+            String action, String issueKey, String otherKey, String assignee, String value,
+            String linkType, String inwardKey, String outwardKey, boolean directionConfident,
+            String parentName, String content) {
+        return new com.jirabot.slack.client.dto.IssueActionSpec(action, issueKey, otherKey, assignee,
+                value, linkType, inwardKey, outwardKey, directionConfident, parentName, content, 0.95, "");
+    }
+
+    private void stubIssueAction(com.jirabot.slack.client.dto.IssueActionSpec s) {
+        when(intentClassifier.classify(anyString())).thenReturn(
+                new IntentResult("issue_action", 0.95, Map.of(), "x"));
+        when(claudeApiClient.extractIssueAction(anyString())).thenReturn(s);
     }
 
     // STUDY: app_mention 이벤트 JSON 빌더 — text/ts만 바뀌므로 한 곳에 모은다.
@@ -808,6 +826,7 @@ class SlackEventControllerTest {
 
     @Test
     void subtaskByKey_createsUnderResolvedParent() throws Exception {
+        stubIssueAction(spec("subtask", "SLAC-100", null, null, null, null, null, null, true, null, "테스트 작성"));
         var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
         when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
         when(jiraApiClient.getIssue("SLAC-100")).thenReturn(
@@ -829,6 +848,7 @@ class SlackEventControllerTest {
 
     @Test
     void subtaskByName_resolvesNameThenCreates() throws Exception {
+        stubIssueAction(spec("subtask", null, null, null, null, null, null, null, true, "결제 모듈", "환불 처리"));
         var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
         when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
         when(jiraApiClient.findIssueKeyByName("결제 모듈")).thenReturn(java.util.Optional.of("SLAC-50"));
@@ -851,6 +871,7 @@ class SlackEventControllerTest {
 
     @Test
     void subtaskUnderEpic_rejectedWithGuidance() throws Exception {
+        stubIssueAction(spec("subtask", "SLAC-200", null, null, null, null, null, null, true, null, "무언가"));
         var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
         when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
         when(jiraApiClient.getIssue("SLAC-200")).thenReturn(
@@ -869,6 +890,7 @@ class SlackEventControllerTest {
 
     @Test
     void subtaskUnderSubtask_rejected() throws Exception {
+        stubIssueAction(spec("subtask", "SLAC-300", null, null, null, null, null, null, true, null, "무언가"));
         var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
         when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
         when(jiraApiClient.getIssue("SLAC-300")).thenReturn(
@@ -887,6 +909,7 @@ class SlackEventControllerTest {
 
     @Test
     void subtaskByName_notFound_repliesNotFound() throws Exception {
+        stubIssueAction(spec("subtask", null, null, null, null, null, null, null, true, "없는 이슈", "무언가"));
         var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
         when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
         when(jiraApiClient.findIssueKeyByName("없는 이슈")).thenReturn(java.util.Optional.empty());
@@ -904,6 +927,7 @@ class SlackEventControllerTest {
 
     @Test
     void subtaskByKey_unregisteredUser_blocked() throws Exception {
+        stubIssueAction(spec("subtask", "SLAC-100", null, null, null, null, null, null, true, null, "무언가"));
         when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.empty());
         when(jiraApiClient.getIssue("SLAC-100")).thenReturn(
                 java.util.Optional.of(sprintIssue("SLAC-100", "스토리", false)));
@@ -926,6 +950,7 @@ class SlackEventControllerTest {
 
     @Test
     void linkCommand_confidentDirection_createsLinkWithCorrectSlots() throws Exception {
+        stubIssueAction(spec("link", "ES2-1352", "ES2-1532", null, null, "blocks", "ES2-1352", "ES2-1532", true, null, null));
         stubBlocksLinkType();
         when(jiraApiClient.linkIssues(anyString(), anyString(), anyString())).thenReturn(true);
 
@@ -940,6 +965,7 @@ class SlackEventControllerTest {
 
     @Test
     void linkCommand_ambiguousDirection_postsConfirmButtons() throws Exception {
+        stubIssueAction(spec("link", "ES2-10", "ES2-20", null, null, "blocks", "ES2-10", "ES2-20", false, null, null));
         stubBlocksLinkType();
 
         mockMvc.perform(post("/api/slack/event")
@@ -955,6 +981,7 @@ class SlackEventControllerTest {
 
     @Test
     void linkCommand_unknownType_repliesAvailableList() throws Exception {
+        stubIssueAction(spec("link", "ES2-10", "ES2-20", null, null, "duplicate", "ES2-20", "ES2-10", true, null, null));
         // Duplicate 타입이 없는 사이트 → 사용 가능 목록 안내
         when(jiraApiClient.getIssueLinkTypes()).thenReturn(List.of(
                 new com.jirabot.slack.client.dto.IssueLinkType("10000", "Blocks", "is blocked by", "blocks")));
@@ -974,6 +1001,7 @@ class SlackEventControllerTest {
 
     @Test
     void updateStoryPoint_validScale_updatesField() throws Exception {
+        stubIssueAction(spec("update_sp", "ES2-100", null, null, "3", null, null, null, true, null, null));
         when(jiraApiClient.updateIssueFields(eq("ES2-100"), any())).thenReturn(true);
         when(issueRepository.findByIssueKey("ES2-100")).thenReturn(java.util.Optional.empty());
 
@@ -990,6 +1018,7 @@ class SlackEventControllerTest {
 
     @Test
     void updateStoryPoint_offScale_rejectedWithoutApiCall() throws Exception {
+        stubIssueAction(spec("update_sp", "ES2-100", null, null, "4", null, null, null, true, null, null));
         mockMvc.perform(post("/api/slack/event")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(appMentionEvent("<@U0BOT> ES2-100 SP 4로 변경", freshTs())))
@@ -1003,6 +1032,7 @@ class SlackEventControllerTest {
 
     @Test
     void updateSummary_quoted_updatesField() throws Exception {
+        stubIssueAction(spec("update_summary", "ES2-9", null, null, "새 로그인 플로우", null, null, null, true, null, null));
         when(jiraApiClient.updateIssueFields(eq("ES2-9"), any())).thenReturn(true);
         when(issueRepository.findByIssueKey("ES2-9")).thenReturn(java.util.Optional.empty());
 
@@ -1018,6 +1048,7 @@ class SlackEventControllerTest {
 
     @Test
     void updatePriority_resolvesNameFromSite() throws Exception {
+        stubIssueAction(spec("update_priority", "ES2-1", null, null, "High", null, null, null, true, null, null));
         when(jiraApiClient.getPriorities()).thenReturn(List.of(
                 new com.jirabot.slack.client.dto.PriorityInfo("2", "High"),
                 new com.jirabot.slack.client.dto.PriorityInfo("3", "Medium")));
@@ -1035,6 +1066,7 @@ class SlackEventControllerTest {
 
     @Test
     void updateDueDate_absolute_setsIso() throws Exception {
+        stubIssueAction(spec("update_due", "ES2-1", null, null, "2026-07-10", null, null, null, true, null, null));
         when(jiraApiClient.updateIssueFields(eq("ES2-1"), any())).thenReturn(true);
 
         mockMvc.perform(post("/api/slack/event")
@@ -1049,6 +1081,7 @@ class SlackEventControllerTest {
 
     @Test
     void sprintMove_movesToActiveSprint() throws Exception {
+        stubIssueAction(spec("sprint_move", "ES2-123", null, null, null, null, null, null, true, null, null));
         when(jiraApiClient.moveToActiveSprint("ES2-123")).thenReturn(true);
 
         mockMvc.perform(post("/api/slack/event")
@@ -1063,6 +1096,7 @@ class SlackEventControllerTest {
 
     @Test
     void linkList_rendersLinks() throws Exception {
+        stubIssueAction(spec("list_links", "ES2-1", null, null, null, null, null, null, true, null, null));
         when(jiraApiClient.getIssueLinks("ES2-1")).thenReturn(List.of(
                 new com.jirabot.slack.client.dto.IssueLinkInfo("5001", "blocks", "ES2-2", "결제"),
                 new com.jirabot.slack.client.dto.IssueLinkInfo("5002", "is blocked by", "ES2-3", "인증")));
@@ -1079,6 +1113,7 @@ class SlackEventControllerTest {
 
     @Test
     void linkList_noLinks_repliesEmpty() throws Exception {
+        stubIssueAction(spec("list_links", "ES2-1", null, null, null, null, null, null, true, null, null));
         when(jiraApiClient.getIssueLinks("ES2-1")).thenReturn(List.of());
 
         mockMvc.perform(post("/api/slack/event")
@@ -1093,6 +1128,7 @@ class SlackEventControllerTest {
 
     @Test
     void unlink_findsLinkIdAndDeletes() throws Exception {
+        stubIssueAction(spec("unlink", "ES2-1", "ES2-2", null, null, null, null, null, true, null, null));
         when(jiraApiClient.getIssueLinks("ES2-1")).thenReturn(List.of(
                 new com.jirabot.slack.client.dto.IssueLinkInfo("5001", "blocks", "ES2-2", "결제")));
         when(jiraApiClient.deleteIssueLink("5001")).thenReturn(true);
@@ -1107,6 +1143,7 @@ class SlackEventControllerTest {
 
     @Test
     void unlink_noLinkBetweenPair_repliesNotFound() throws Exception {
+        stubIssueAction(spec("unlink", "ES2-1", "ES2-2", null, null, null, null, null, true, null, null));
         when(jiraApiClient.getIssueLinks("ES2-1")).thenReturn(List.of(
                 new com.jirabot.slack.client.dto.IssueLinkInfo("5001", "blocks", "ES2-9", "다른것")));
 
@@ -1125,6 +1162,7 @@ class SlackEventControllerTest {
 
     @Test
     void nlAssign_routesToExecuteAssign_notSearch() throws Exception {
+        stubIssueAction(spec("assign", "ES2-1190", null, "최아록", null, null, null, null, true, null, null));
         // 동기 케이스: "ES2-1190 담당자를 최아록으로" 가 search 로 오분류되던 버그 (v0.0.61)
         var mapping = new com.jirabot.slack.entity.UserMappingEntity("U9", "최아록S", "최아록", "acc-choi");
         when(userMappingRepository.findByJiraDisplayName("최아록")).thenReturn(java.util.Optional.of(mapping));
@@ -1137,7 +1175,6 @@ class SlackEventControllerTest {
                 .andExpect(status().isOk());
 
         verify(jiraApiClient).assignIssue("ES2-1190", "acc-choi");
-        verify(intentClassifier, never()).classify(any());
         verify(issueSearchService, never()).searchSemantic(any(), any());
     }
 
@@ -1164,6 +1201,7 @@ class SlackEventControllerTest {
 
     @Test
     void assignByKoreanName_resolvesViaSlackDisplayName() throws Exception {
+        stubIssueAction(spec("assign", "ES2-1190", null, "최아록", null, null, null, null, true, null, null));
         // 동기 케이스: 매핑이 slack=최아록/jira=choiahrok 인데 "최아록"으로 지정 — jira 표시명 조회는 실패해도
         // slack 표시명 조회로 해석돼야 한다.
         var mapping = new com.jirabot.slack.entity.UserMappingEntity("U8", "최아록", "choiahrok", "acc-choi");
@@ -1215,6 +1253,47 @@ class SlackEventControllerTest {
         ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
         verify(slackNotifier).postMessage(any(), msg.capture());
         assertThat(msg.getValue()).contains("여러 명").contains("박송협").contains("박수영");
+    }
+
+    // --- issue_action 경로 (v0.0.65) ---
+
+    @Test
+    void issueAction_lowConfidence_repliesGuidanceAndRecordsFailure() throws Exception {
+        stubIssueAction(com.jirabot.slack.client.dto.IssueActionSpec.none());
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ES2-1 뭔가 좀 해줘", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient, never()).assignIssue(any(), any());
+        verify(intentFailureRepository).save(any());
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(any(), any(), msg.capture());
+        assertThat(msg.getValue()).contains("파악하지 못했어요");
+    }
+
+    @Test
+    void subtaskPrefix_instantPath_noLlmCalls() throws Exception {
+        // "간단한 건 빠르게": 명령형 prefix 는 Haiku/Sonnet 없이 즉시 실행
+        var mapping = new com.jirabot.slack.entity.UserMappingEntity("U1", "김S", "김", "acc-1");
+        when(userMappingRepository.findBySlackUserId("U1")).thenReturn(java.util.Optional.of(mapping));
+        when(jiraApiClient.getIssue("ES2-77")).thenReturn(
+                java.util.Optional.of(sprintIssue("ES2-77", "스토리", false)));
+        when(issueCreateService.classifyOnly(anyString(), any())).thenReturn(
+                new com.jirabot.slack.client.dto.IssueClassification(
+                        com.jirabot.slack.client.dto.IssueClassification.IssueType.FEATURE, 1, "빠른 하위작업", "s"));
+        when(jiraApiClient.createSubTask(eq("ES2-77"), anyString(), org.mockito.ArgumentMatchers.anyInt(), any()))
+                .thenReturn("ES2-78");
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 하위작업 ES2-77 빠른 하위작업", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(jiraApiClient).createSubTask(eq("ES2-77"), anyString(), org.mockito.ArgumentMatchers.anyInt(), any());
+        verify(intentClassifier, never()).classify(any());
+        verify(claudeApiClient, never()).extractIssueAction(any());
     }
 
     // --- 할당알림 토글 ---

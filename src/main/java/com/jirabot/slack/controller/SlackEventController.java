@@ -132,6 +132,7 @@ public class SlackEventController {
     private final BugQueryService bugQueryService;
     private final JiraSyncService jiraSyncService;
     private final JiraApiClient jiraApiClient;
+    private final com.jirabot.slack.client.ClaudeApiClient claudeApiClient;
     private final JiraProperties jiraProps;
     private final IssueRepository issueRepository;
     private final IntentClassifier intentClassifier;
@@ -152,6 +153,7 @@ public class SlackEventController {
                                 BugQueryService bugQueryService,
                                 JiraSyncService jiraSyncService,
                                 JiraApiClient jiraApiClient,
+                                com.jirabot.slack.client.ClaudeApiClient claudeApiClient,
                                 JiraProperties jiraProps,
                                 IssueRepository issueRepository,
                                 IntentClassifier intentClassifier,
@@ -171,6 +173,7 @@ public class SlackEventController {
         this.bugQueryService = bugQueryService;
         this.jiraSyncService = jiraSyncService;
         this.jiraApiClient = jiraApiClient;
+        this.claudeApiClient = claudeApiClient;
         this.jiraProps = jiraProps;
         this.issueRepository = issueRepository;
         this.intentClassifier = intentClassifier;
@@ -351,47 +354,11 @@ public class SlackEventController {
             return;
         }
 
-        // 1.42차: 담당자 변경 NL 어순 — "ES2-1190 담당자를 최아록으로". 키워드형 `할당 KEY 이름`(1차)의
-        //        자연어 짝. 기존엔 Haiku→search 로 오분류돼 "검색 결과가 없습니다"가 나오던 케이스 (v0.0.61).
-        Optional<IssueCommandParser.AssignCommand> assignCmd = IssueCommandParser.parseAssign(cleaned);
-        if (assignCmd.isPresent()) {
-            executeAssign(event, assignCmd.get().key(), assignCmd.get().assignee());
-            return;
-        }
-
-        // 1.43차: 단일 이슈 필드 수정(SP/제목/마감일/우선순위) 및 스프린트 이동. 키 1개 + 해당 키워드일 때.
-        Optional<IssueCommandParser.UpdateCommand> updateCmd = IssueCommandParser.parseUpdate(cleaned);
-        if (updateCmd.isPresent()) {
-            handleUpdateCommand(event, updateCmd.get());
-            return;
-        }
-        Optional<String> sprintMoveKey = IssueCommandParser.parseSprintMove(cleaned);
-        if (sprintMoveKey.isPresent()) {
-            handleSprintMove(event, sprintMoveKey.get());
-            return;
-        }
-
-        // 1.44차: 이슈 링크. 해제(2키+해제+링크) → 조회(1키+링크+조회) → 생성(2키+관계동사) 순.
-        Optional<String[]> unlinkKeys = IssueCommandParser.parseUnlink(cleaned);
-        if (unlinkKeys.isPresent()) {
-            handleUnlink(event, unlinkKeys.get()[0], unlinkKeys.get()[1]);
-            return;
-        }
-        Optional<String> linkListKey = IssueCommandParser.parseLinkList(cleaned);
-        if (linkListKey.isPresent()) {
-            handleLinkList(event, linkListKey.get());
-            return;
-        }
-        Optional<IssueCommandParser.LinkCommand> linkCmd = IssueCommandParser.parseLink(cleaned);
-        if (linkCmd.isPresent()) {
-            handleLinkCommand(event, linkCmd.get());
-            return;
-        }
-
-        // 1.45차: 특정 부모 이슈 아래 하위작업 생성 (키/이름으로 지정, 스레드 밖에서도 동작).
-        //        "ES2-123에 하위작업으로 'X' 추가" / "하위작업 ES2-123 X" / "<이름> 스토리 아래 하위작업 X".
-        //        에픽 키워드 체크(1.5차)보다 먼저 실행 — "에픽 아래 하위작업"을 에픽 생성으로 오인하지 않도록.
-        Optional<IssueCommandParser.SubtaskCommand> subtaskCmd = IssueCommandParser.parseSubtask(cleaned);
+        // STUDY: 1.45차 — 명령형 `하위작업 <KEY> <내용>` prefix 만 즉시 실행("간단한 건 빠르게").
+        //        NL 형("ES2-1에 하위작업으로 'X' 추가", "담당자를 X로", "SP 3으로", 링크 등)은 v0.0.65부터
+        //        정규식이 아니라 Haiku(issue_action) → Sonnet skill-issue-action 이 원문을 받아 추출한다 —
+        //        표현 변형마다 정규식 핫픽스가 반복되던 문제(v0.0.61/64)의 구조적 해결.
+        Optional<IssueCommandParser.SubtaskCommand> subtaskCmd = IssueCommandParser.parseSubtaskPrefix(cleaned);
         if (subtaskCmd.isPresent()) {
             handleSubtaskCommand(event, subtaskCmd.get());
             return;
@@ -574,6 +541,110 @@ public class SlackEventController {
                 replyInThread(event, replyTs, ":x: 하위작업 처리 중 오류가 발생했어요: " + e.getMessage());
             }
         });
+    }
+
+    // STUDY: NL 이슈 조작 디스패치 (v0.0.65) — Sonnet 이 추출한 IssueActionSpec 을 검증 후
+    //        "기존 실행부"로 위임한다. 파싱만 스킬로 바뀌었고 실행/검증(SP 스케일, 이름 해석 체인,
+    //        링크 방향 확인 버튼, 부모 에픽/서브태스크 거부)은 전부 재사용.
+    private void handleIssueAction(SlackEventInner event, String cleaned) {
+        var spec = claudeApiClient.extractIssueAction(cleaned);
+        log.info("Issue action extracted: action={} key={} conf={}",
+                spec.action(), spec.issueKey(), spec.confidence());
+
+        if (!spec.isActionable()) {
+            intentFailureRepository.save(new IntentFailureEntity(
+                    cleaned, "UNPARSED_ISSUE_ACTION",
+                    String.format("action=%s, confidence=%.2f", spec.action(), spec.confidence()),
+                    event.user(), event.channel()));
+            replyThread(event, ":thinking_face: 무엇을 바꿀지 파악하지 못했어요. 예: "
+                    + "`ES2-123 담당자를 홍길동으로` · `ES2-123 SP 3으로` · `ES2-1이 ES2-2에 막혀있어 연결` · "
+                    + "`하위작업 ES2-123 <내용>`");
+            return;
+        }
+
+        switch (spec.action()) {
+            case "assign" -> {
+                if (spec.issueKey() == null || spec.assignee() == null) {
+                    replyThread(event, ":warning: 사용법: `@지라 ES2-123 담당자를 홍길동으로`");
+                    return;
+                }
+                executeAssign(event, spec.issueKey(), spec.assignee());
+            }
+            case "update_sp" -> {
+                Integer sp = spec.value() == null ? null : parseIntOrNull(spec.value());
+                dispatchUpdate(event, spec.issueKey(), IssueCommandParser.UpdateField.STORY_POINT, sp);
+            }
+            case "update_summary" ->
+                    dispatchUpdate(event, spec.issueKey(), IssueCommandParser.UpdateField.SUMMARY, spec.value());
+            case "update_due" ->
+                    dispatchUpdate(event, spec.issueKey(), IssueCommandParser.UpdateField.DUE_DATE, spec.value());
+            case "update_priority" ->
+                    dispatchUpdate(event, spec.issueKey(), IssueCommandParser.UpdateField.PRIORITY, spec.value());
+            case "sprint_move" -> {
+                if (spec.issueKey() == null) {
+                    replyThread(event, ":warning: 사용법: `@지라 ES2-123 스프린트로 옮겨줘`");
+                    return;
+                }
+                handleSprintMove(event, spec.issueKey());
+            }
+            case "link" -> {
+                String inward = spec.inwardKey() != null ? spec.inwardKey() : spec.issueKey();
+                String outward = spec.outwardKey() != null ? spec.outwardKey() : spec.otherKey();
+                if (inward == null || outward == null) {
+                    replyThread(event, ":warning: 링크할 두 이슈 키를 함께 적어주세요. 예: `ES2-1이 ES2-2에 막혀있어 연결`");
+                    return;
+                }
+                // 방향 미확신이면 기존 확인 버튼 카드 경로(ambiguous=true).
+                handleLinkCommand(event, new IssueCommandParser.LinkCommand(
+                        inward, outward, toLinkRelation(spec.linkType()),
+                        !Boolean.TRUE.equals(spec.directionConfident())));
+            }
+            case "unlink" -> {
+                if (spec.issueKey() == null || spec.otherKey() == null) {
+                    replyThread(event, ":warning: 사용법: `@지라 ES2-1 ES2-2 링크 해제`");
+                    return;
+                }
+                handleUnlink(event, spec.issueKey(), spec.otherKey());
+            }
+            case "list_links" -> {
+                if (spec.issueKey() == null) {
+                    replyThread(event, ":warning: 사용법: `@지라 ES2-123 링크 보여줘`");
+                    return;
+                }
+                handleLinkList(event, spec.issueKey());
+            }
+            case "subtask" ->
+                    handleSubtaskCommand(event, new IssueCommandParser.SubtaskCommand(
+                            spec.issueKey(), spec.parentName(),
+                            spec.content() == null ? "" : spec.content()));
+            default -> replyThread(event, ":thinking_face: 지원하지 않는 작업이에요.");
+        }
+    }
+
+    private void dispatchUpdate(SlackEventInner event, String key,
+                                IssueCommandParser.UpdateField field, Object value) {
+        if (key == null) {
+            replyThread(event, ":warning: 대상 이슈 키를 함께 적어주세요. 예: `ES2-123 SP 3으로`");
+            return;
+        }
+        handleUpdateCommand(event, new IssueCommandParser.UpdateCommand(key, field, value));
+    }
+
+    private static Integer parseIntOrNull(String s) {
+        try {
+            return Integer.valueOf(s.strip());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static IssueCommandParser.LinkRelation toLinkRelation(String linkType) {
+        if (linkType == null) return IssueCommandParser.LinkRelation.RELATES;
+        return switch (linkType.toLowerCase()) {
+            case "blocks" -> IssueCommandParser.LinkRelation.BLOCKS;
+            case "duplicate" -> IssueCommandParser.LinkRelation.DUPLICATE;
+            default -> IssueCommandParser.LinkRelation.RELATES;
+        };
     }
 
     // STUDY: 이슈 링크 명령 처리 — 확신 방향은 즉시 실행, 모호하면 확인 버튼 카드.
@@ -944,6 +1015,10 @@ public class SlackEventController {
             }
 
             switch (intent.intent()) {
+                case "issue_action" ->
+                        // STUDY: NL 이슈 조작 — Sonnet skill-issue-action 이 원문에서 액션을 추출하고
+                        //        Java 가 검증·실행 (extract-then-execute, v0.0.65).
+                        handleIssueAction(event, cleaned);
                 case "register_bug", "register_story" ->
                         issueCreateService.createFromSlackText(
                                 IssueCreateCommand.from(event, cleaned), intent);

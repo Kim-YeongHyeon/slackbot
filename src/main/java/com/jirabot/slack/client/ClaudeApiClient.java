@@ -19,6 +19,13 @@ public interface ClaudeApiClient {
      */
     IssueClassification classifyPr(String rawText);
 
+    /**
+     * NL 이슈 조작 명령(담당자/필드 변경, 링크, 하위작업, 스프린트 이동)에서 구조화 액션 추출 —
+     * prompts/skill-issue-action.md 전용 스킬. 실패/저신뢰 시 IssueActionSpec.none()
+     * (호출부가 안내 응답으로 폴백). 실행/검증은 Java 가 담당(extract-then-execute).
+     */
+    com.jirabot.slack.client.dto.IssueActionSpec extractIssueAction(String rawText);
+
     // STUDY: Sonnet 기반 의미 검색. 사용자 질문과 이슈 목록을 Sonnet에게 전달하여 관련도 높은 이슈 키를 반환받는다.
     List<String> searchIssues(String userQuery, List<IssueSearchEntry> issues);
 
