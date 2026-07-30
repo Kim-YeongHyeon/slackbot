@@ -48,23 +48,29 @@ Korean, concise.
 
 <examples>
 Input: "프로필 페이지에 다크 모드 토글 추가해 주세요. 설정은 로컬스토리지에 저장되면 충분"
--> {"type":"FEATURE","storyPoint":3,"title":"프로필 페이지 다크 모드 토글 추가","summary":"프로필 페이지에서 다크 모드를 켜고 끌 수 있게 한다.\n완료 조건:\n- 프로필 페이지에 다크 모드 토글 노출\n- 토글 상태가 즉시 테마에 반영\n- 설정은 로컬스토리지에 저장 (서버 저장 불필요)"}
+-> {"type":"FEATURE","storyPoint":3,"title":"프로필 페이지 다크 모드 토글 추가","summary":"프로필 페이지에서 다크 모드를 켜고 끌 수 있게 한다.\n완료 조건:\n- 프로필 페이지에 다크 모드 토글 노출\n- 토글 상태가 즉시 테마에 반영\n- 설정은 로컬스토리지에 저장 (서버 저장 불필요)","parentEpicName":null}
 
 Input: "슬랙봇으로 주간 이슈 리포트 자동 발송. 이슈 수, 해결률, 담당자별 집계 포함"
--> {"type":"FEATURE","storyPoint":8,"title":"주간 이슈 리포트 슬랙 자동 발송","summary":"팀이 매주 이슈 현황을 자동으로 받아볼 수 있게 한다.\n완료 조건:\n- 주 1회 스케줄로 슬랙 채널에 리포트 발송\n- 리포트에 이슈 수 포함\n- 리포트에 해결률 포함\n- 리포트에 담당자별 집계 포함\n집계 쿼리·포매팅·스케줄링·실패 처리까지 범위가 넓다."}
+-> {"type":"FEATURE","storyPoint":8,"title":"주간 이슈 리포트 슬랙 자동 발송","summary":"팀이 매주 이슈 현황을 자동으로 받아볼 수 있게 한다.\n완료 조건:\n- 주 1회 스케줄로 슬랙 채널에 리포트 발송\n- 리포트에 이슈 수 포함\n- 리포트에 해결률 포함\n- 리포트에 담당자별 집계 포함\n집계 쿼리·포매팅·스케줄링·실패 처리까지 범위가 넓다.","parentEpicName":null}
 
 Input: "README에 로컬 실행 명령어 추가 부탁"
--> {"type":"OTHER","storyPoint":1,"title":"README 로컬 실행 명령어 추가","summary":"README에 로컬 실행에 필요한 명령어를 정리해 추가한다.\n완료 조건:\n- README에서 로컬 실행 절차를 따라 하면 서버가 뜬다\n코드 변경 없음."}
+-> {"type":"OTHER","storyPoint":1,"title":"README 로컬 실행 명령어 추가","summary":"README에 로컬 실행에 필요한 명령어를 정리해 추가한다.\n완료 조건:\n- README에서 로컬 실행 절차를 따라 하면 서버가 뜬다\n코드 변경 없음.","parentEpicName":null}
 
 Input: "설정 저장 버튼을 눌러도 저장이 안 되는데 이거 개선해줘"
--> {"type":"BUG","storyPoint":2,"title":"설정 저장 버튼 동작 안 함","summary":"현상: 설정 화면에서 저장 버튼을 눌러도 변경 사항이 저장되지 않는다. '개선' 요청으로 표현됐지만 동작해야 할 기능이 동작하지 않는 결함이므로 BUG로 분류. 재현 경로: 설정 화면 → 값 변경 → 저장 버튼 클릭."}
+-> {"type":"BUG","storyPoint":2,"title":"설정 저장 버튼 동작 안 함","summary":"현상: 설정 화면에서 저장 버튼을 눌러도 변경 사항이 저장되지 않는다. '개선' 요청으로 표현됐지만 동작해야 할 기능이 동작하지 않는 결함이므로 BUG로 분류. 재현 경로: 설정 화면 → 값 변경 → 저장 버튼 클릭.","parentEpicName":null}
 
 Input: "[SDK] BatchInsert 할 때 shard 지정할 수 있게 setShard 옵션 열어줘. es2c는 나중에 해도 됨"
--> {"type":"FEATURE","storyPoint":3,"title":"[SDK] BatchInsert에 setShard 옵션 추가","summary":"SDK BatchInsert 경로에서 대상 shard 를 지정할 수 있게 한다.\n완료 조건:\n- SDK BatchInsert 에 setShard 옵션 노출\n- 지정한 shard 로 insert 되는 것 확인\n- es2c 적용은 범위 외 (후속 작업)"}
+-> {"type":"FEATURE","storyPoint":3,"title":"[SDK] BatchInsert에 setShard 옵션 추가","summary":"SDK BatchInsert 경로에서 대상 shard 를 지정할 수 있게 한다.\n완료 조건:\n- SDK BatchInsert 에 setShard 옵션 노출\n- 지정한 shard 로 insert 되는 것 확인\n- es2c 적용은 범위 외 (후속 작업)","parentEpicName":null}
+
+Input: "'GraphRAG 서버 데이터 플로우 설계' 이슈를 enword DBMS 에픽 아래에 만들어줄래?"
+-> {"type":"FEATURE","storyPoint":3,"title":"GraphRAG 서버 데이터 플로우 설계","summary":"GraphRAG 서버의 데이터 플로우를 설계한다.\n완료 조건:\n- 데이터 플로우 설계 문서 작성","parentEpicName":"enword DBMS"}
 </examples>
 
 <output_contract>
 You MUST respond with ONLY a valid JSON object matching this exact schema:
-{"type":"BUG|FEATURE|OTHER","storyPoint":1|2|3|5|8,"title":"...","summary":"..."}
+{"type":"BUG|FEATURE|OTHER","storyPoint":1|2|3|5|8,"title":"...","summary":"...","parentEpicName":"...or null"}
+- parentEpicName: if the user asks to create this issue UNDER a specific epic
+  ("X 에픽 아래에", "under the X epic"), extract the epic NAME (not a key) exactly as written.
+  Otherwise null. Do not invent an epic.
 No markdown fences. No prose. No comments. The entire response must be JSON.parse-able.
 </output_contract>

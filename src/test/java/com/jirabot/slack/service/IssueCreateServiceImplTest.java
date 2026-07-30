@@ -79,11 +79,12 @@ class IssueCreateServiceImplTest {
     void epicMention_linksIssueUnderResolvedEpic() throws Exception {
         when(userMappingRepository.findBySlackUserId("U123"))
                 .thenReturn(Optional.of(new UserMappingEntity("U123", "Kim", "김영현")));
+        // v0.0.66: 에픽명 추출은 Sonnet 스킬(parentEpicName) 담당 — 분류 결과에 실려 온다.
         var classification = new IssueClassification(
-                IssueClassification.IssueType.FEATURE, 3, "PostgreSQL multi-connection", "요약");
+                IssueClassification.IssueType.FEATURE, 3, "PostgreSQL multi-connection", "요약", "enword DBMS");
         when(claude.classify(anyString(), any())).thenReturn(classification);
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
-        when(jira.findEpicKeyByName(anyString())).thenReturn(Optional.of("ES2-2141"));
+        when(jira.findEpicKeyByName("enword DBMS")).thenReturn(Optional.of("ES2-2141"));
         when(jira.createIssue(any(), anyString(), any(), any()))
                 .thenReturn(new JiraCreateResponse("1", "ES2-300", "u"));
 
@@ -102,7 +103,7 @@ class IssueCreateServiceImplTest {
         when(userMappingRepository.findBySlackUserId("U123"))
                 .thenReturn(Optional.of(new UserMappingEntity("U123", "Kim", "김영현")));
         var classification = new IssueClassification(
-                IssueClassification.IssueType.FEATURE, 3, "t", "s");
+                IssueClassification.IssueType.FEATURE, 3, "t", "s", "없는에픽");
         when(claude.classify(anyString(), any())).thenReturn(classification);
         when(duplicateDetection.findSimilar(anyString())).thenReturn(List.of());
         when(jira.findEpicKeyByName(anyString())).thenReturn(Optional.empty());

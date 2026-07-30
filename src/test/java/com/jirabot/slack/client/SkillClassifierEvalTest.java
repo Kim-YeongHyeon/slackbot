@@ -123,6 +123,12 @@ class SkillClassifierEvalTest {
             if (r == null || r.summary() == null) return false;
             return c.summaryMarkers().stream().allMatch(m -> r.summary().contains(m));
         }
+        boolean epicOk() {
+            // 기대값 명시 시 일치, 미명시 시 null 이어야(에픽 발명 금지 검증).
+            String got = r == null ? null : r.parentEpicName();
+            if (c.parentEpic() == null) return got == null || got.isBlank();
+            return c.parentEpic().equalsIgnoreCase(got == null ? "" : got.strip());
+        }
         boolean hardOk() {
             return typeOk() && spScaleOk() && titleHygieneOk();
         }
@@ -152,6 +158,10 @@ class SkillClassifierEvalTest {
         if (markers < MARKER_THRESHOLD) {
             breaches.add(String.format("summaryMarkers %.3f < %.2f", markers, MARKER_THRESHOLD));
         }
+        double epic = ratio(outcomes, Outcome::epicOk);
+        if (epic < 0.90) {
+            breaches.add(String.format("parentEpic %.3f < 0.90", epic));
+        }
         return breaches;
     }
 
@@ -167,6 +177,7 @@ class SkillClassifierEvalTest {
         sb.append(String.format("titleContains      : %.3f (>= %.2f)%n", ratio(outcomes, Outcome::titleContainsOk), TITLE_CONTAINS_THRESHOLD));
         sb.append(String.format("spAllowed          : %.3f (>= %.2f)%n", ratio(outcomes, Outcome::spAllowedOk), SP_ALLOWED_THRESHOLD));
         sb.append(String.format("summaryMarkers     : %.3f (>= %.2f)%n", ratio(outcomes, Outcome::markersOk), MARKER_THRESHOLD));
+        sb.append(String.format("parentEpic         : %.3f (>= 0.90)%n", ratio(outcomes, Outcome::epicOk)));
         sb.append("\n--- Failures ---\n");
         boolean any = false;
         for (Outcome o : outcomes) {
@@ -179,6 +190,8 @@ class SkillClassifierEvalTest {
             if (!o.titleContainsOk()) fails.add("titleContains=" + o.c().titleContains()
                     + " got='" + (o.r() == null ? null : o.r().title()) + "'");
             if (!o.markersOk()) fails.add("markers=" + o.c().summaryMarkers());
+            if (!o.epicOk()) fails.add("parentEpic expected=" + o.c().parentEpic()
+                    + " got=" + (o.r() == null ? null : o.r().parentEpicName()));
             if (!fails.isEmpty()) {
                 any = true;
                 sb.append(String.format("[%s] '%s'%n    %s%n", o.c().id(),
@@ -214,5 +227,6 @@ class SkillClassifierEvalTest {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record Case(String id, String skill, String input, List<String> expectedTypes,
-                List<Integer> spAllowed, List<String> titleContains, List<String> summaryMarkers) {}
+                List<Integer> spAllowed, List<String> titleContains, List<String> summaryMarkers,
+                String parentEpic) {}
 }

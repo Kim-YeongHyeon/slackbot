@@ -108,6 +108,15 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 에픽 parent 추출을 스킬 계약으로 (v0.0.66)
+
+"…를 X 에픽 아래에 만들어줘"의 에픽명 추출을 정규식(EPIC_BEFORE/AFTER)에서 **Sonnet 스킬 계약**으로 이전:
+- `skill-bug.md`/`skill-story.md` JSON 에 **`parentEpicName`**(미언급 시 null, "에픽 발명 금지") 추가.
+- `IssueClassification`에 nullable parentEpicName 필드(4-arg 위임 생성자로 하위호환).
+- `resolveParentEpic`: 스킬이 추출한 이름 → `findEpicKeyByName`(정확→양방향 부분일치). 정규식 삭제.
+- skill eval 22케이스(에픽 추출 2 + 발명 금지 20): **parentEpic 축 1.000**, 전 임계 통과.
+- 라이브 스모크: 실사고 문장("GraphRAG … enword DBMS 에픽 아래에") → parentEpicName="enword DBMS" 확인.
+
 ### NL 이슈 조작을 스킬 기반으로 일원화 — issue_action (v0.0.65)
 
 목표 아키텍처(Haiku 분류 → 분류별 Sonnet 스킬이 **원문 그대로** 수신) 완성. NL 조작 명령(담당자/SP/제목/

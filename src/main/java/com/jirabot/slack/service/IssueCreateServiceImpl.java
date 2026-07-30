@@ -111,7 +111,7 @@ public class IssueCreateServiceImpl implements IssueCreateService {
             stage = System.nanoTime();
             String jiraAccountId = resolveJiraAccountId(mappingEntity);
             // STUDY: "X epic 아래" 같은 상위 에픽 지정이 있으면 에픽 키를 찾아 parent 로 연결. 에픽 자신은 제외.
-            String parentKey = resolveParentEpic(command.rawText(), classification);
+            String parentKey = resolveParentEpic(classification);
             JiraCreateResponse created =
                     jira.createIssue(classification, reporterName, jiraAccountId, parentKey);
             timings.jiraMs = elapsedMs(stage);
@@ -297,33 +297,27 @@ public class IssueCreateServiceImpl implements IssueCreateService {
         return trimmed + "/browse/" + key;
     }
 
-    private static final int RX = java.util.regex.Pattern.CASE_INSENSITIVE
-            | java.util.regex.Pattern.UNICODE_CHARACTER_CLASS;
-    // 한국어 어순: "<에픽명> epic/에픽 (아래|밑|하위|에)". 에픽명이 앞.
-    private static final java.util.regex.Pattern EPIC_BEFORE = java.util.regex.Pattern.compile(
-            "([\\p{L}\\p{N}][\\p{L}\\p{N} .+_/\\-]*?)\\s*(?:epic|에픽)\\s*(?:아래|밑|하위|에)?", RX);
-    // 영어 어순: "(under) epic <에픽명>". 에픽명이 뒤 — 조사/구두점/끝을 경계로.
-    private static final java.util.regex.Pattern EPIC_AFTER = java.util.regex.Pattern.compile(
-            "(?:under\\s+)?(?:epic|에픽)\\s+([\\p{L}\\p{N}][\\p{L}\\p{N} .+_/\\-]*?)"
-            + "(?=\\s*(?:로|으로|아래|밑|하위|을|를|에|,|$))", RX);
-
-    // 에픽 자신 생성이면 parent 없음. rawText 의 에픽 지정 어구(앞/뒤 어순 모두)에서 에픽명을 뽑아 키를 찾는다.
-    private String resolveParentEpic(String rawText, IssueClassification classification) {
-        if (rawText == null || classification.type() == IssueClassification.IssueType.EPIC) {
+    // STUDY: 상위 에픽 해석 (v0.0.66) — 에픽명 "추출"은 Sonnet 스킬(skill-bug/story 의 parentEpicName,
+    //        원문 전체를 보므로 어순/조사 변형에 강함)이, 이름→키 "해석"은 Java(findEpicKeyByName,
+    //        정확→양방향 부분일치)가 담당. 기존 EPIC_BEFORE/AFTER 정규식 추출을 대체.
+    //        에픽 자신 생성이면 parent 없음. 못 찾으면 parent 없이 생성(비치명적).
+    private String resolveParentEpic(IssueClassification classification) {
+        if (classification.type() == IssueClassification.IssueType.EPIC) {
             return null;
         }
-        for (java.util.regex.Pattern p : List.of(EPIC_BEFORE, EPIC_AFTER)) {
-            java.util.regex.Matcher m = p.matcher(rawText);
-            if (!m.find()) continue;
-            String epicName = m.group(1).strip();
-            if (epicName.isEmpty()) continue;
-            try {
-                var key = jira.findEpicKeyByName(epicName);
-                if (key.isPresent()) return key.get();
-            } catch (Exception e) {
-                log.warn("에픽 조회 실패 '{}': {}", epicName, e.toString());
-            }
+        String epicName = classification.parentEpicName();
+        if (epicName == null || epicName.isBlank()) {
+            return null;
         }
-        return null;
+        try {
+            var key = jira.findEpicKeyByName(epicName.strip());
+            if (key.isEmpty()) {
+                log.info("Parent epic not found by name '{}' — creating without parent", epicName);
+            }
+            return key.orElse(null);
+        } catch (Exception e) {
+            log.warn("에픽 조회 실패 '{}': {}", epicName, e.toString());
+            return null;
+        }
     }
 }

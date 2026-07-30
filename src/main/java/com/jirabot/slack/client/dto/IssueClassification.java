@@ -1,17 +1,27 @@
 package com.jirabot.slack.client.dto;
 
+@com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
 public record IssueClassification(
         IssueType type,
         int storyPoint,
         String title,
-        String summary
+        String summary,
+        // STUDY: "…를 X 에픽 아래에 만들어줘"의 에픽명 — Sonnet 스킬이 원문에서 추출(v0.0.66).
+        //        키 해석은 Java(findEpicKeyByName). 언급 없으면 null. 정규식 추출(EPIC_BEFORE/AFTER) 대체.
+        String parentEpicName
 ) {
     public enum IssueType { BUG, FEATURE, OTHER, EPIC }
 
+    // 기존 4-인자 호출부(테스트/폴백)를 깨지 않는 위임 생성자. Jackson 은 canonical 로 바인딩.
+    public IssueClassification(IssueType type, int storyPoint, String title, String summary) {
+        this(type, storyPoint, title, summary, null);
+    }
+
     // STUDY: 에픽은 컨테이너성 이슈라 Story Point 를 부여하지 않는다(0). Sonnet 이 만든 title/summary 는
     //        그대로 재사용하고 type 만 EPIC 으로 강제하여, 키워드 트리거 경로에서 분류 결과를 덮어쓴다.
+    //        에픽 자신은 부모를 갖지 않으므로 parentEpicName 은 버린다.
     public IssueClassification asEpic() {
-        return new IssueClassification(IssueType.EPIC, 0, title, summary);
+        return new IssueClassification(IssueType.EPIC, 0, title, summary, null);
     }
 
     public static IssueClassification fallback(String rawText) {
