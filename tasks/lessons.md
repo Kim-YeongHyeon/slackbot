@@ -273,3 +273,18 @@ fallback 이 intent 힌트로 type 을 채워 type 정확도 0.9가 "우연히" 
 - 실 CLI eval 테스트에는 `@SpringBootTest(properties = {"claude.cli-path=claude", "claude.timeout-seconds=20"})` 오버라이드.
 - 새 `-D<x>.eval` 프로퍼티는 build.gradle test 블록에 `systemProperty` 포워딩을 반드시 추가 (없으면 워커 JVM 에 안 보여 스킵).
 - eval 결과 검토 시 소요 시간(케이스 수 × 모델 지연)이 합리적인지 먼저 확인.
+
+## L16. 서비스 유닛테스트 통과 ≠ 라우팅 통과 — 상위 라우팅 스테이지가 기능을 가로챌 수 있다
+
+**Pattern**: v0.0.53 "X epic 아래에 task 생성"(resolveParentEpic)은 서비스 레벨 테스트로 검증하고 배포했지만,
+실제 Slack 흐름에선 라우팅 1.5차 `containsEpicKeyword`("에픽" 포함 → 에픽 생성)가 **먼저** 가로채
+register_epic 으로 강제됐다 — 하위 서비스 로직은 한 번도 실행되지 못했다. v0.0.64에서야 발견.
+
+**Why**: routeCommand 는 우선순위 스테이지 체인이라, 새 기능이 어느 스테이지에서 처리되는지는
+서비스 테스트가 아니라 **컨트롤러(MockMvc) 레벨의 전체-메시지 라우팅 테스트**만이 보장한다.
+
+**How to apply**:
+- 새 NL 기능의 DoD: (1) 대표 실사용 문장으로 MockMvc 라우팅 테스트(가로채는 스테이지가 없는지),
+  (2) 배포 후 실 Slack 1회 왕복 확인 (L10의 webhook E2E 원칙을 NL 라우팅에도 적용).
+- 키워드 트리거(에픽/하위작업 등)를 추가·수정할 때 기존 NL 기능 문장들이 여전히 의도한 스테이지로
+  가는지 회귀 테스트를 함께 확인.
