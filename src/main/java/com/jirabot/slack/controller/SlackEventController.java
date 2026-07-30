@@ -216,7 +216,22 @@ public class SlackEventController {
             java.util.regex.Pattern.compile("^\\s*<@[A-Z0-9]+>\\s*");
 
     static String stripMention(String text) {
+        return stripMention(text, null);
+    }
+
+    // STUDY: 봇 멘션이 문장 중간(예: 다른 사람에게 한 말 다음 줄)에 있으면 Slack 은 메시지 "전체"를
+    //        보낸다 — 봇 멘션 "이후" 텍스트만 명령이다. 멘션 앞 내용(@박민석 님, …)이 분류에 섞여
+    //        엉뚱한 제목/개행이 들어가던 실사고 수정 (v0.0.64). botUserId 는 envelope.authorizations 로 식별,
+    //        없으면(테스트/구형 페이로드) 기존 선두-멘션 제거로 폴백.
+    static String stripMention(String text, String botUserId) {
         if (text == null) return "";
+        if (botUserId != null && !botUserId.isBlank()) {
+            String marker = "<@" + botUserId + ">";
+            int i = text.indexOf(marker);
+            if (i >= 0) {
+                return text.substring(i + marker.length()).strip();
+            }
+        }
         return MENTION_PATTERN.matcher(text).replaceFirst("").strip();
     }
 
@@ -885,9 +900,18 @@ public class SlackEventController {
     private static final java.util.regex.Pattern EPIC_KEYWORD_EN =
             java.util.regex.Pattern.compile("(?i)\\bepic\\b");
 
+    // STUDY: "에픽 아래/밑/하위(에)" · "under epic" 은 에픽 "자체" 생성이 아니라 "에픽 하위에 이슈 생성"
+    //        요청 — 에픽 생성 트리거에서 제외해 일반 생성(+resolveParentEpic 연결) 경로로 보낸다 (v0.0.64).
+    //        "관련 에픽 아래에 만들어줄래"가 에픽 생성으로 오인되던 실사고 수정.
+    private static final java.util.regex.Pattern UNDER_EPIC_PATTERN = java.util.regex.Pattern.compile(
+            "(?i)(?:에픽|epic)\\s*(?:아래|밑|하위)|under\\s+(?:the\\s+)?epic");
+
     static boolean containsEpicKeyword(String cleaned) {
         if (cleaned == null || cleaned.isBlank()) {
             return false;
+        }
+        if (UNDER_EPIC_PATTERN.matcher(cleaned).find()) {
+            return false; // 에픽 하위 생성 요청 — 에픽 생성 아님
         }
         return EPIC_KEYWORD_KO.matcher(cleaned).find() || EPIC_KEYWORD_EN.matcher(cleaned).find();
     }
@@ -1484,7 +1508,7 @@ public class SlackEventController {
                 replyThread(event, ":hourglass: 일정 시간이 지난 요청이라 처리하지 않았습니다. 다시 보내주세요.");
                 return ResponseEntity.ok(Map.of("ok", true));
             }
-            String cleaned = stripMention(event.text());
+            String cleaned = stripMention(event.text(), envelope.botUserId());
             if (event.isFromHuman() && !cleaned.isBlank()) {
                 routeCommand(event, cleaned.strip());
             } else {

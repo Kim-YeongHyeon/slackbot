@@ -36,6 +36,9 @@ public record IssueClassification(
     static String cleanTitle(String raw) {
         if (raw == null) return "";
         String t = raw.strip();
+        // STUDY: Jira summary 는 개행을 하드 거부(400 "개행 문자를 포함…"). 멀티라인 원문이 폴백 제목이
+        //        될 때를 대비해 개행을 공백으로 접는다 (v0.0.64 실사고 수정).
+        t = t.replaceAll("[\\r\\n]+", " ");
         // 앞쪽 이슈 키: "[ES2-123]" 또는 "ES2-123" (+뒤따르는 공백/콜론)
         t = t.replaceFirst("^\\[?[A-Za-z][A-Za-z0-9]*-\\d+\\]?[\\s:]*", "");
         // 뒤쪽 요청/명령 어구: "(이슈/티켓/버그/스토리 …) 만들어/생성/등록/추가/작성/올려 (해)(줘/주세요/…)"

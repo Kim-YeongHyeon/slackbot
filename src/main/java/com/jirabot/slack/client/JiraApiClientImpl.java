@@ -100,7 +100,7 @@ public class JiraApiClientImpl implements JiraApiClient {
 
         Map<String, Object> fields = new java.util.HashMap<>();
         fields.put("project", Map.of("key", props.projectKey()));
-        fields.put("summary", c.title());
+        fields.put("summary", singleLine(c.title()));
         fields.put("issuetype", Map.of("name", issueTypeName));
         fields.put("description", buildAdfDescription(c, reporterName));
         // STUDY: 에픽은 컨테이너성 이슈라 Story Point 를 부여하지 않는다. 일부 Jira 설정은
@@ -464,6 +464,12 @@ public class JiraApiClientImpl implements JiraApiClient {
                 firstNonBlankDate(f.path("resolutiondate"), f.path("statuscategorychangedate")));
     }
 
+    // STUDY: Jira summary 필드는 개행을 하드 거부(400 "개행 문자를 포함…"). 어떤 경로로 왔든
+    //        Jira 로 나가는 최종 지점에서 한 줄로 접는다 (v0.0.64 실사고의 마지막 방어선).
+    private static String singleLine(String s) {
+        return s == null ? null : s.replaceAll("[\\r\\n]+", " ").strip();
+    }
+
     private static String firstNonBlankDate(JsonNode... nodes) {
         for (JsonNode n : nodes) {
             if (n != null && !n.isMissingNode() && !n.isNull()) {
@@ -597,7 +603,7 @@ public class JiraApiClientImpl implements JiraApiClient {
             Map<String, Object> fields = new java.util.HashMap<>(Map.of(
                     "project", Map.of("key", props.projectKey()),
                     "parent", Map.of("key", parentKey),
-                    "summary", summary,
+                    "summary", singleLine(summary),
                     "issuetype", Map.of("name", props.issueTypes().subtask()),
                     props.storyPointField(), (double) storyPoint
             ));

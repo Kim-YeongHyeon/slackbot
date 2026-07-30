@@ -233,6 +233,20 @@ class JiraApiClientImplTest {
     }
 
     @Test
+    void createIssue_multilineTitle_isCollapsedToSingleLineSummary() throws Exception {
+        // 마지막 방어선: 어떤 경로로 개행 제목이 와도 Jira summary 는 한 줄 (400 "개행 문자" 방지, v0.0.64)
+        server.enqueue(new MockResponse().setResponseCode(201)
+                .setHeader("Content-Type", MediaType.APPLICATION_JSON_VALUE)
+                .setBody("{\"id\":\"1\",\"key\":\"PROJ-2\",\"self\":\"s\"}"));
+
+        client.createIssue(new IssueClassification(
+                IssueClassification.IssueType.BUG, 2, "첫 줄\n둘째 줄", "요약"), "U1", null);
+
+        String body = server.takeRequest().getBody().readUtf8();
+        assertThat(body).contains("\"summary\":\"첫 줄 둘째 줄\"");
+    }
+
+    @Test
     void createIssue_400_throwsNonTransient() {
         server.enqueue(new MockResponse().setResponseCode(400).setBody("bad"));
 

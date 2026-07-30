@@ -48,6 +48,14 @@ class IssueClassificationTest {
     }
 
     @Test
+    void cleanTitle_collapsesNewlines() {
+        // 실사고: 멀티라인 원문이 폴백 제목이 되면 Jira 400("개행 문자") — 개행을 공백으로 (v0.0.64).
+        assertThat(IssueClassification.cleanTitle("첫 줄 질문\n\n\"GraphRAG 설계\" 이슈 만들어줄래"))
+                .isEqualTo("첫 줄 질문 \"GraphRAG 설계\"");
+        assertThat(IssueClassification.cleanTitle("한 줄\r\n두 줄")).isEqualTo("한 줄 두 줄");
+    }
+
+    @Test
     void fallback_blankInput_hasDefaultTitle() {
         assertThat(IssueClassification.fallback("  ").title()).isEqualTo("Untitled issue from Slack");
         assertThat(IssueClassification.fallback(null).title()).isEqualTo("Untitled issue from Slack");

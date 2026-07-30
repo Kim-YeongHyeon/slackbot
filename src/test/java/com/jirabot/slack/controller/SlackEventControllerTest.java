@@ -664,6 +664,32 @@ class SlackEventControllerTest {
                 SlackEventController.stripMention(null)).isEmpty();
     }
 
+    @Test
+    void midTextBotMention_takesOnlyTextAfterBotMention() {
+        // 실사고: 1행은 다른 사람에게 한 말, 2행에 봇 멘션 — 봇 멘션 "이후"만 명령이다 (v0.0.64).
+        String text = "<@U_PARK> 님, 오늘 중으로 통합 설계 가능할까요?\n\n"
+                + "<@U0BOT> \"GraphRAG 서버 데이터 플로우 설계\" 이슈를 만들어줄래?";
+        assertThat(SlackEventController.stripMention(text, "U0BOT"))
+                .isEqualTo("\"GraphRAG 서버 데이터 플로우 설계\" 이슈를 만들어줄래?");
+        // 선두 봇 멘션은 기존과 동일
+        assertThat(SlackEventController.stripMention("<@U0BOT> 할당 ES2-1 <@U5>", "U0BOT"))
+                .isEqualTo("할당 ES2-1 <@U5>");
+        // botUserId 미상 → 기존 선두-멘션 제거 폴백
+        assertThat(SlackEventController.stripMention("<@U0BOT> 로그인 에러", null))
+                .isEqualTo("로그인 에러");
+    }
+
+    @Test
+    void underEpicPhrase_isNotEpicCreation() {
+        // "에픽 아래에 만들어줘"는 에픽 하위 이슈 생성 — 에픽 생성 트리거 아님 (v0.0.64).
+        assertThat(SlackEventController.containsEpicKeyword("이슈를 관련 에픽 아래에 만들어줄래?")).isFalse();
+        assertThat(SlackEventController.containsEpicKeyword("enword DBMS epic 아래에 task로 생성해줘")).isFalse();
+        assertThat(SlackEventController.containsEpicKeyword("create under the epic EFR")).isFalse();
+        // 에픽 자체 생성은 여전히 트리거
+        assertThat(SlackEventController.containsEpicKeyword("에픽 GCP marketplace 배포 확장")).isTrue();
+        assertThat(SlackEventController.containsEpicKeyword("epic: audit pipeline")).isTrue();
+    }
+
     // --- 이슈 키 조회 카드 ---
 
     @Test
