@@ -515,6 +515,18 @@
       "input": "ES2-3 제목을 '검색 성능 개선'으로 바꿔줘",
       "expected": "issue_action",
       "note": "제목 변경"
+    },
+    {
+      "id": "story-typo-01",
+      "input": "hybrid serach Index가 save load 되는 기능 추가 구현 피료해 이슈 만들어줘",
+      "expected": "register_story",
+      "note": "실사고: 오타(serach/피료해) 때문에 skip 오분류됐던 문장 (v0.0.67)"
+    },
+    {
+      "id": "bug-typo-01",
+      "input": "로그인하면 오류 낟는 버그 등녹해줘",
+      "expected": "register_bug",
+      "note": "오타 강건성: 낟는=나는, 등녹=등록"
     }
   ]
 }
