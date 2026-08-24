@@ -108,6 +108,15 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 자격증명 포함 URL에서 대시보드 fetch 실패 수정 (v0.0.68)
+
+`https://id:pw@host/dashboard/` 형태로 열면 페이지는 로드되지만 모든 데이터가 비던 문제 수정.
+원인: 문서 URL에 자격증명이 포함되면 브라우저가 상대경로 `fetch()`를
+"Request cannot be constructed from a URL that includes credentials"로 거부(보안 규칙).
+- `apiFetch(path, opts)` 래퍼: `new URL(path, location.origin)` — origin 은 자격증명을 포함하지 않아
+  안전. Basic Auth 는 페이지 로드 시 realm 에 캐시돼 이후 요청에 자동 포함.
+- app.js 의 fetch 호출 15곳 전부 래퍼로 교체, 캐시버스트 `?v=0.0.68`.
+
 ### 오타 문장 skip 오분류 수정 (v0.0.67)
 
 "hybrid **serach** Index가 save load 되는 기능 추가 구현 **피료해** 이슈 만들어줘"가 `skip`("구체적인 내용을

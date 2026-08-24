@@ -35,6 +35,11 @@ window.addEventListener('unhandledrejection', (e) =>
     firstFrame(e.reason)));
 
 const API = '/api/dashboard';
+// STUDY: 주소창에 자격증명이 포함된 채(https://id:pw@host/...) 열리면 상대경로 fetch 가
+// "Request cannot be constructed from a URL that includes credentials" 로 거부된다 (v0.0.68 실사고).
+// location.origin 은 자격증명을 포함하지 않으므로 이를 기준으로 절대 URL 을 만들어 우회한다.
+// Basic Auth 는 페이지 로드 때 브라우저가 realm 에 캐시하므로 이후 요청에 자동으로 실린다.
+const apiFetch = (path, opts) => fetch(new URL(path, location.origin), opts);
 const charts = {};   // canvasId → Chart 인스턴스 (탭 재방문 시 destroy 후 재생성)
 const loaded = {};   // 탭별 1회 로드 플래그 (새로고침 버튼/탭 재클릭 시 갱신)
 
@@ -60,7 +65,7 @@ const fmtDay = (d) => d ? d.slice(5).replace('-', '/') : '';
 const esc = (s) => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 async function get(path) {
-  const res = await fetch(API + path);
+  const res = await apiFetch(API + path);
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
   return res.json();
 }
@@ -314,7 +319,7 @@ function renderIssues() {
 }
 
 async function loadUsers() {
-  const res = await fetch('/api/user-mappings');
+  const res = await apiFetch('/api/user-mappings');
   const d = await res.json();
   rows('table-users', d.map(u =>
     `<tr><td>${esc(u.slackDisplayName ?? '')} <span class="muted">${esc(u.slackUserId)}</span></td>` +
@@ -326,7 +331,7 @@ async function loadUsers() {
     || '<tr><td colspan="6" class="muted">등록된 사용자 없음</td></tr>');
 
   document.querySelectorAll('#table-users .toggle').forEach(b => b.onclick = async () => {
-    await fetch('/api/user-mappings/' + b.dataset.user, {
+    await apiFetch('/api/user-mappings/' + b.dataset.user, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [b.dataset.field]: b.dataset.val === 'true' })
     });
@@ -334,13 +339,13 @@ async function loadUsers() {
   });
   document.querySelectorAll('#table-users [data-del]').forEach(b => b.onclick = async () => {
     if (!confirm(b.dataset.del + ' 매핑을 삭제할까요?')) return;
-    await fetch('/api/user-mappings/' + b.dataset.del, { method: 'DELETE' });
+    await apiFetch('/api/user-mappings/' + b.dataset.del, { method: 'DELETE' });
     loadUsers();
   });
 }
 
 async function loadFeatures() {
-  const res = await fetch('/api/feature-requests');
+  const res = await apiFetch('/api/feature-requests');
   const d = await res.json();
   rows('table-features', d.map(f =>
     `<tr${f.done ? ' style="opacity:.55"' : ''}>` +
@@ -354,7 +359,7 @@ async function loadFeatures() {
     || '<tr><td colspan="7" class="muted">아직 요청이 없습니다 — 첫 기능을 제안해보세요!</td></tr>');
 
   document.querySelectorAll('#table-features [data-fr]').forEach(b => b.onclick = async () => {
-    await fetch('/api/feature-requests/' + b.dataset.fr, {
+    await apiFetch('/api/feature-requests/' + b.dataset.fr, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ done: b.dataset.done === 'true' })
     });
@@ -369,7 +374,7 @@ async function addFeature() {
   const btn = document.getElementById('btn-fr-add');
   btn.disabled = true;
   try {
-    const res = await fetch('/api/feature-requests', {
+    const res = await apiFetch('/api/feature-requests', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title,
@@ -432,7 +437,7 @@ function renderKnowledge() {
 
 /* ---------- GitHub ↔ Jira 매핑 ---------- */
 async function loadGhMappings() {
-  const res = await fetch('/api/github-mappings');
+  const res = await apiFetch('/api/github-mappings');
   const d = await res.json();
   rows('table-gh', d.map(m =>
     `<tr><td>${esc(m.githubLogin)}</td><td>${esc(m.jiraDisplayName)}</td>` +
@@ -441,7 +446,7 @@ async function loadGhMappings() {
     || '<tr><td colspan="4" class="muted">매핑 없음</td></tr>');
   document.querySelectorAll('#table-gh [data-ghdel]').forEach(b => b.onclick = async () => {
     if (!confirm(b.dataset.ghdel + ' 매핑을 삭제할까요?')) return;
-    await fetch('/api/github-mappings/' + b.dataset.ghdel, { method: 'DELETE' });
+    await apiFetch('/api/github-mappings/' + b.dataset.ghdel, { method: 'DELETE' });
     loadGhMappings();
   });
 }
@@ -449,7 +454,7 @@ async function loadGhMappings() {
 async function loadBot() {
   let health = '🔴 DOWN';
   try {
-    const h = await (await fetch('/actuator/health')).json();
+    const h = await (await apiFetch('/actuator/health')).json();
     if (h.status === 'UP') health = '🟢 UP';
   } catch (e) { /* keep DOWN */ }
   const s = await get('/summary');
@@ -509,7 +514,7 @@ document.getElementById('btn-gh-add').onclick = async () => {
   if (!githubLogin || !jiraDisplayName) {
     msg.className = 'msg err'; msg.textContent = 'GitHub 로그인과 Jira 이름을 모두 입력하세요.'; return;
   }
-  const res = await fetch('/api/github-mappings', {
+  const res = await apiFetch('/api/github-mappings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ githubLogin, jiraDisplayName })
   });
@@ -540,7 +545,7 @@ document.getElementById('btn-import-pr').onclick = async () => {
   btn.disabled = true; btn.textContent = '분석 중…';
   msg.className = 'msg'; msg.textContent = 'PR 분석 중… (GitHub 조회 + 내용 분석 + Jira 전환, 잠시만요)';
   try {
-    const res = await fetch(API + '/actions/import-pr', {
+    const res = await apiFetch(API + '/actions/import-pr', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url })
     });
@@ -564,7 +569,7 @@ document.getElementById('btn-backfill').onclick = async () => {
   const msg = document.getElementById('trend-msg');
   btn.disabled = true; btn.textContent = '백필 중… (Jira 전체 조회)';
   try {
-    const res = await fetch(API + '/actions/backfill-history', { method: 'POST' });
+    const res = await apiFetch(API + '/actions/backfill-history', { method: 'POST' });
     const d = await res.json();
     msg.className = 'msg ok'; msg.textContent = d.result;
     loadTrends();
@@ -579,7 +584,7 @@ document.getElementById('btn-sync').onclick = async () => {
   const btn = document.getElementById('btn-sync');
   btn.disabled = true; btn.textContent = '동기화 중…';
   try {
-    const res = await fetch(API + '/actions/sync', { method: 'POST' });
+    const res = await apiFetch(API + '/actions/sync', { method: 'POST' });
     const d = await res.json();
     alert(d.result);
     showTab(document.querySelector('.tab.active').dataset.tab);
@@ -598,7 +603,7 @@ document.getElementById('btn-user-add').onclick = async () => {
   if (!slackUserId || !jiraDisplayName) {
     msg.className = 'msg err'; msg.textContent = 'Slack ID와 Jira 이름을 모두 입력하세요.'; return;
   }
-  const res = await fetch('/api/user-mappings', {
+  const res = await apiFetch('/api/user-mappings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slackUserId, jiraDisplayName })
   });
