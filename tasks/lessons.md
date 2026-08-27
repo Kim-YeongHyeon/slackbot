@@ -288,3 +288,21 @@ register_epic 으로 강제됐다 — 하위 서비스 로직은 한 번도 실�
   (2) 배포 후 실 Slack 1회 왕복 확인 (L10의 webhook E2E 원칙을 NL 라우팅에도 적용).
 - 키워드 트리거(에픽/하위작업 등)를 추가·수정할 때 기존 NL 기능 문장들이 여전히 의도한 스테이지로
   가는지 회귀 테스트를 함께 확인.
+
+## L17. unattended-upgrades 가 JDK 를 교체하면 실행 중인 JVM 은 서브프로세스를 못 만든다
+
+**Pattern**: 8/24 기동한 봇(JDK 17.0.19)이 8/27 06:02 unattended-upgrades 의 openjdk 17.0.20 교체 후
+모든 `claude` CLI 호출에서 즉사: "Failed to exec spawn helper … Incorrect Java version: 17.0.19 vs
+jspawnhelper 17.0.20". 재시도 3회도 같은 이유로 전멸 → intent=unknown → "이해하지 못했어요".
+사용자 입장에선 "티켓 생성이 안 된다"로만 보임.
+
+**Why**: JVM 은 fork/exec 을 디스크의 jspawnhelper 바이너리에 위임하는데, in-place JDK 업그레이드로
+버전이 어긋나면 스폰 자체가 거부된다. HTTP 서빙 등 스폰이 필요 없는 기능은 멀쩡해서 health UP 인데
+LLM 기능만 죽는 반쪽 장애가 된다.
+
+**How to apply**:
+- 증상 시그니처: 로그에 "Failed to exec spawn helper" / "Incorrect Java version" → **봇 재시작이 해법**
+  (새 JVM 이 새 JDK 로 뜨면 정합).
+- "분류가 전부 unknown/즉사(수 ms)" 패턴이면 모델/프롬프트가 아니라 스폰 실패부터 의심 (L15 의 소요시간
+  휴리스틱과 동일 계열).
+- 근본 대응 후보: unattended-upgrades 후 자동 재시작 훅, 또는 openjdk 를 apt-mark hold 하고 수동 업그레이드.
