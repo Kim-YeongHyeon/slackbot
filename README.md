@@ -108,6 +108,16 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### JDK 워치독 — 자동 업데이트 후 봇 자동 재시작 (v0.0.69)
+
+unattended-upgrades 가 openjdk 를 in-place 교체하면 실행 중인 JVM 이 서브프로세스(claude CLI)를 못
+만들어("Failed to exec spawn helper … Incorrect Java version") 모든 LLM 기능이 죽는 반쪽 장애가
+실발생(8/27, lessons L17). health 는 UP 이라 감지가 늦었다.
+- `scripts/jdk-watchdog.sh`: 실행 중 java 프로세스의 `/proc/PID/exe` 가 "(deleted)" 면(=JDK 교체 시그니처)
+  최신 jar 로 자동 재시작(기존 배포 패턴 동일: setsid + .env source + health 대기). 정상 시 no-op.
+- crontab `*/10 * * * *` 등록, 로그 `/tmp/jdk-watchdog.log`.
+- 대안 B(apt-mark hold)는 보안 패치가 밀려 기각 — A(자동 재시작)로 보안 패치 유지 + 무인 복구.
+
 ### 자격증명 포함 URL에서 대시보드 fetch 실패 수정 (v0.0.68)
 
 `https://id:pw@host/dashboard/` 형태로 열면 페이지는 로드되지만 모든 데이터가 비던 문제 수정.
