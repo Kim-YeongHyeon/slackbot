@@ -16,6 +16,8 @@ import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standal
 
 import com.jirabot.slack.entity.ArtifactEntity;
 import com.jirabot.slack.repository.ArtifactRepository;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +38,30 @@ class ArtifactControllerTest {
 
     private static ArtifactEntity saved(String title, String html) {
         return new ArtifactEntity(title, "김영현", html);
+    }
+
+    @Test
+    void list_returnsSummariesWithoutHtml() throws Exception {
+        // 목록은 projection 만 — 수 MB html 이 응답에 섞이면 탭 로드가 통째로 느려진다.
+        // Mockito mock 대신 실제 구현체: mock 프록시는 내부 필드 때문에 Jackson 직렬화가 깨져
+        // 응답 형태를 검증할 수 없다 (Spring Data 프록시는 인터페이스 getter 만 노출).
+        when(repository.findAllSummaries()).thenReturn(List.of(new ArtifactRepository.ArtifactSummary() {
+            public Long getId() { return 1L; }
+            public String getTitle() { return "주간 리포트"; }
+            public String getAuthor() { return "김영현"; }
+            public Instant getCreatedAt() { return Instant.parse("2026-06-12T00:00:00Z"); }
+            public int getSizeBytes() { return 2048; }
+        }));
+
+        mockMvc.perform(get("/api/artifacts"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].title").value("주간 리포트"))
+                .andExpect(jsonPath("$[0].sizeBytes").value(2048))
+                .andExpect(jsonPath("$[0].html").doesNotExist())
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                        .doesNotContain("html"));
+        // findAll() 을 쓰면 html 이 딸려온다 — projection 전용 메서드만 호출해야 한다.
+        verify(repository, never()).findAll();
     }
 
     @Test
