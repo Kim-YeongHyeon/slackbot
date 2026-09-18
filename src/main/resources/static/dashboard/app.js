@@ -515,6 +515,7 @@ async function loadArtifacts() {
         <div class="art-sub muted">${fmtDate(a.createdAt)}${a.author ? ' · ' + esc(a.author) : ''} · ${(a.sizeBytes/1024).toFixed(0)}KB${a.assetCount ? ' · 파일 ' + a.assetCount + '개' : ''}</div>
         <div class="art-actions">
           <button class="btn art-copy" data-copy="${a.id}">🔗 링크 복사</button>
+          <button class="btn art-edit" data-edit="${a.id}" data-title="${esc(a.title)}">✏️</button>
           <button class="btn art-del" data-del="${a.id}">🗑</button>
         </div>
       </div>
@@ -533,7 +534,30 @@ async function loadArtifacts() {
     await apiFetch('/api/artifacts/' + b.dataset.del, { method: 'DELETE' });
     loadArtifacts().catch(reportErr);
   });
+  grid.querySelectorAll('.art-edit').forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    startArtifactEdit(b.dataset.edit, b.dataset.title);
+  });
 }
+
+// 제자리 수정 모드 (v0.0.74) — 같은 링크(id)를 유지한 채 내용 교체. PUT = 전체 교체라
+// 자산이 있는 아티팩트는 수정 시에도 폴더를 다시 선택해야 한다 (안 하면 자산 삭제).
+let editingArtifactId = null;
+function startArtifactEdit(id, title) {
+  editingArtifactId = id;
+  document.getElementById('btn-art-upload').textContent = `수정하기 (#${id})`;
+  document.getElementById('art-edit-cancel').style.display = '';
+  document.getElementById('art-msg').textContent =
+    `✏️ "${title}" 수정 중 — 새 HTML(과 폴더)을 선택해 [수정하기]를 누르세요. 링크는 그대로 유지됩니다.`;
+  document.querySelector('.art-upload').scrollIntoView({ behavior: 'smooth' });
+}
+function cancelArtifactEdit() {
+  editingArtifactId = null;
+  document.getElementById('btn-art-upload').textContent = '올리기';
+  document.getElementById('art-edit-cancel').style.display = 'none';
+  document.getElementById('art-msg').textContent = '';
+}
+document.getElementById('art-edit-cancel').onclick = cancelArtifactEdit;
 
 async function uploadArtifact() {
   const msg = document.getElementById('art-msg');
@@ -573,22 +597,27 @@ async function uploadArtifact() {
   msg.textContent = dirFiles.length ? `업로드 중… (파일 ${dirFiles.length}개)` : '업로드 중…';
   try {
     const title = document.getElementById('art-title').value;
+    // 수정 모드면 같은 id 에 PUT (링크 유지), 아니면 POST 신규
+    const url = editingArtifactId ? '/api/artifacts/' + editingArtifactId : '/api/artifacts';
+    const method = editingArtifactId ? 'PUT' : 'POST';
     let res;
     if (dirFiles.length) {
       // 경로는 part filename 이 아니라 assetPaths 텍스트 필드로 — 인덱스 정렬 (서버와 계약)
       const fd = new FormData();
       fd.append('title', title); fd.append('filename', filename); fd.append('html', html);
       dirFiles.forEach(d => { fd.append('assets', d.file, d.file.name); fd.append('assetPaths', d.relPath); });
-      res = await apiFetch('/api/artifacts', { method: 'POST', body: fd }); // Content-Type 은 브라우저가 boundary 포함 설정
+      res = await apiFetch(url, { method, body: fd }); // Content-Type 은 브라우저가 boundary 포함 설정
     } else {
-      res = await apiFetch('/api/artifacts', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      res = await apiFetch(url, {
+        method, headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, html, filename })
       });
     }
     const body = await res.json();
     if (!res.ok) { msg.textContent = '❌ ' + (body.error || 'HTTP ' + res.status); return; }
-    msg.textContent = '✅ 올렸습니다: ' + body.title + (body.assetCount ? ` (파일 ${body.assetCount}개)` : '');
+    const done = editingArtifactId ? '✅ 수정했습니다 (링크 유지): ' : '✅ 올렸습니다: ';
+    if (editingArtifactId) cancelArtifactEdit(); // art-msg 를 지우므로 성공 메시지보다 먼저
+    msg.textContent = done + body.title + (body.assetCount ? ` (파일 ${body.assetCount}개)` : '');
     document.getElementById('art-title').value = ''; fileInput.value = ''; dirInput.value = ''; pasteArea.value = '';
     loadArtifacts().catch(reportErr);
   } catch (e) { msg.textContent = '❌ 업로드 실패: ' + e.message; }

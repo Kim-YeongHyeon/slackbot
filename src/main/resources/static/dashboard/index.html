@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>sol dashboard</title>
-  <link rel="stylesheet" href="style.css?v=0.0.73">
+  <link rel="stylesheet" href="style.css?v=0.0.74">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -201,8 +201,8 @@
   <section id="panel-artifacts" class="panel">
     <div class="art-upload">
       <h2>아티팩트 올리기</h2>
-      <p class="muted">HTML을 올리면 공개 링크가 생깁니다 — 링크만 공유하면 누구나(로그인 없이) 볼 수 있어요.
-        Claude 아티팩트는 우측 상단 메뉴에서 HTML로 복사/다운로드해 올리세요.</p>
+      <p class="muted">HTML을 올리면 공유 링크가 생깁니다 — 열람에도 sol 로그인이 필요해요 (v0.0.73).
+        Claude 아티팩트는 우측 상단 메뉴에서 HTML로 복사/다운로드해 올리세요. 카드의 ✏️로 같은 링크를 유지한 채 내용을 교체할 수 있어요.</p>
       <div class="art-form">
         <input id="art-title" type="text" placeholder="제목 (비우면 HTML <title>에서 자동)" maxlength="200">
         <input id="art-file" type="file" accept=".html,.htm,text/html">
@@ -210,6 +210,7 @@
         <input id="art-dir" type="file" webkitdirectory multiple>
         <button id="art-paste-toggle" class="btn">HTML 붙여넣기</button>
         <button id="btn-art-upload" class="btn primary">올리기</button>
+        <button id="art-edit-cancel" class="btn" style="display:none">수정 취소</button>
       </div>
       <textarea id="art-paste" placeholder="여기에 HTML 전체를 붙여넣으세요" style="display:none; width:100%; height:140px; margin-top:8px;"></textarea>
       <p id="art-msg" class="muted"></p>
@@ -219,6 +220,6 @@
 </main>
 
 <footer class="muted">사내망 전용 · 데이터는 로컬 DB 기준 (Jira 와의 차이는 [지금 동기화] 후 새로고침)</footer>
-<script src="app.js?v=0.0.73"></script>
+<script src="app.js?v=0.0.74"></script>
 </body>
 </html>

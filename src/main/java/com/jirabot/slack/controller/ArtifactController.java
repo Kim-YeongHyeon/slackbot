@@ -22,17 +22,19 @@ import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-// STUDY: 공개 HTML 아티팩트 갤러리 (v0.0.71, 자산 디렉토리 v0.0.72). 관리 API(/api/artifacts —
-//        목록/업로드/삭제)는 Go 프록시의 Basic Auth 뒤, 뷰어(/artifacts/view/{id}/)는 무인증
-//        공개(링크 공유용). FeatureRequestController 와 같은 단순 CRUD 패턴 — 서비스 레이어 없음.
+// STUDY: HTML 아티팩트 갤러리 (v0.0.71~). 목록/업로드/수정/삭제(/api/artifacts)와
+//        뷰어(/artifacts/view/{id}/)는 v0.0.73 부터 전부 로그인(httpBasic) 필수 — SecurityConfig 참고.
+//        FeatureRequestController 와 같은 단순 CRUD 패턴 — 서비스 레이어 없음.
 @RestController
 public class ArtifactController {
 
@@ -43,9 +45,21 @@ public class ArtifactController {
     static final long MAX_TOTAL_ASSET_BYTES = 25L * 1024 * 1024; // 아티팩트당 자산 합계 25MB
     static final int MAX_ASSET_COUNT = 200;
     static final int MAX_ASSET_PATH = 500;
+    static final String DEFAULT_TITLE = "제목 없는 아티팩트";
 
     private static final Pattern HTML_TITLE = Pattern.compile(
             "<title[^>]*>([^<]{1,200})</title>", Pattern.CASE_INSENSITIVE);
+
+    // 검증 실패를 400 {error} 로 변환하는 컨트롤러 내부 예외 — POST/PUT 이 검증 로직을 공유하기 위함.
+    // @Transactional 메서드에서 던지면 롤백도 함께 일어난다.
+    static class BadRequest extends RuntimeException {
+        BadRequest(String message) { super(message); }
+    }
+
+    @ExceptionHandler(BadRequest.class)
+    ResponseEntity<Object> onBadRequest(BadRequest e) {
+        return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+    }
 
     private final ArtifactRepository repository;
     private final ArtifactAssetRepository assetRepository;
@@ -63,12 +77,8 @@ public class ArtifactController {
     // 붙여넣기 모드/기존 클라이언트용 JSON 업로드 (자산 없음). consumes 명시로 멀티파트 핸들러와 분기.
     @PostMapping(value = "/api/artifacts", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Object> create(@RequestBody Map<String, String> body) {
-        String html = body.get("html");
-        ResponseEntity<Object> invalid = validateHtml(html);
-        if (invalid != null) {
-            return invalid;
-        }
-        String title = resolveTitle(body.get("title"), html, body.get("filename"));
+        String html = requireValidHtml(body.get("html"));
+        String title = resolveTitle(body.get("title"), html, body.get("filename"), DEFAULT_TITLE);
         String author = trimTo(body.get("author"), 100);
 
         ArtifactEntity saved = repository.save(new ArtifactEntity(title, author, html));
@@ -91,62 +101,61 @@ public class ArtifactController {
             @RequestParam(value = "html", required = false) String html,
             @RequestParam(value = "assets", required = false) List<MultipartFile> assets,
             @RequestParam(value = "assetPaths", required = false) List<String> assetPaths) throws IOException {
-        ResponseEntity<Object> invalid = validateHtml(html);
-        if (invalid != null) {
-            return invalid;
-        }
+        String validHtml = requireValidHtml(html);
         List<MultipartFile> files = assets == null ? List.of() : assets;
-        List<String> paths = assetPaths == null ? List.of() : assetPaths;
-        if (files.size() != paths.size()) {
-            return ResponseEntity.badRequest().body(Map.of("error",
-                    String.format("assets(%d)와 assetPaths(%d) 개수가 다릅니다.", files.size(), paths.size())));
-        }
-        if (files.size() > MAX_ASSET_COUNT) {
-            return ResponseEntity.badRequest().body(Map.of("error",
-                    String.format("자산 파일이 너무 많습니다 (%d개 > %d개 제한).", files.size(), MAX_ASSET_COUNT)));
-        }
-        long totalBytes = 0;
-        Set<String> seen = new HashSet<>();
-        List<String> normalized = new ArrayList<>(paths.size());
-        for (int i = 0; i < files.size(); i++) {
-            long size = files.get(i).getSize();
-            if (size > MAX_ASSET_BYTES) {
-                return ResponseEntity.badRequest().body(Map.of("error", String.format(
-                        "자산 파일이 너무 큽니다: %s (%.1fMB > 5MB 제한).", paths.get(i), size / 1024.0 / 1024.0)));
-            }
-            totalBytes += size;
-            if (totalBytes > MAX_TOTAL_ASSET_BYTES) {
-                return ResponseEntity.badRequest().body(Map.of("error", "자산 합계가 25MB 제한을 초과했습니다."));
-            }
-            String path = normalizeAssetPath(paths.get(i));
-            if (path == null) {
-                return ResponseEntity.badRequest().body(Map.of("error", "잘못된 자산 경로입니다: " + paths.get(i)));
-            }
-            if (!seen.add(path)) {
-                return ResponseEntity.badRequest().body(Map.of("error", "자산 경로가 중복됩니다: " + path));
-            }
-            normalized.add(path);
-        }
+        List<String> normalized = validateAssets(files, assetPaths == null ? List.of() : assetPaths);
 
-        String resolvedTitle = resolveTitle(title, html, filename);
+        String resolvedTitle = resolveTitle(title, validHtml, filename, DEFAULT_TITLE);
         ArtifactEntity saved = repository.save(
-                new ArtifactEntity(resolvedTitle, trimTo(author, 100), html));
+                new ArtifactEntity(resolvedTitle, trimTo(author, 100), validHtml));
+        assetRepository.saveAll(toAssetEntities(saved.getId(), files, normalized));
 
-        List<ArtifactAssetEntity> assetEntities = new ArrayList<>(files.size());
-        for (int i = 0; i < files.size(); i++) {
-            // STUDY: MediaTypeFactory — spring-web 내장 mime.types 로 확장자→MIME 매핑 (OS 무의존).
-            //        클라이언트가 보낸 part content-type 은 신뢰하지 않는다.
-            String contentType = MediaTypeFactory.getMediaType(normalized.get(i))
-                    .orElse(MediaType.APPLICATION_OCTET_STREAM).toString();
-            assetEntities.add(new ArtifactAssetEntity(
-                    saved.getId(), normalized.get(i), contentType, files.get(i).getBytes()));
-        }
-        assetRepository.saveAll(assetEntities);
-        log.info("Artifact created id={} title='{}' htmlSize={}B assets={} assetBytes={}B",
-                saved.getId(), resolvedTitle, html.getBytes(StandardCharsets.UTF_8).length,
-                files.size(), totalBytes);
+        log.info("Artifact created id={} title='{}' htmlSize={}B assets={}",
+                saved.getId(), resolvedTitle, validHtml.getBytes(StandardCharsets.UTF_8).length, files.size());
         return ResponseEntity.ok(Map.of("id", saved.getId(), "title", resolvedTitle,
                 "assetCount", files.size()));
+    }
+
+    // 제자리 수정 (v0.0.74) — 같은 id/공유 링크를 유지한 채 내용 전체 교체 (PUT = full replace,
+    // 자산도 보낸 것으로 통째 교체 — JSON 수정처럼 자산을 안 보내면 기존 자산은 삭제된다).
+    @PutMapping(value = "/api/artifacts/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
+    @Transactional
+    public ResponseEntity<Object> update(@PathVariable long id, @RequestBody Map<String, String> body) {
+        return repository.findById(id)
+                .<ResponseEntity<Object>>map(artifact -> {
+                    String html = requireValidHtml(body.get("html"));
+                    applyUpdate(artifact, body.get("title"), body.get("filename"), body.get("author"), html);
+                    assetRepository.deleteByArtifactId(id);
+                    log.info("Artifact updated id={} title='{}' assets=0", id, artifact.getTitle());
+                    return ResponseEntity.ok(Map.of("id", id, "title", artifact.getTitle(), "assetCount", 0));
+                })
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    @PutMapping(value = "/api/artifacts/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
+    public ResponseEntity<Object> updateMultipart(
+            @PathVariable long id,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "filename", required = false) String filename,
+            @RequestParam(value = "author", required = false) String author,
+            @RequestParam(value = "html", required = false) String html,
+            @RequestParam(value = "assets", required = false) List<MultipartFile> assets,
+            @RequestParam(value = "assetPaths", required = false) List<String> assetPaths) throws IOException {
+        ArtifactEntity artifact = repository.findById(id).orElse(null);
+        if (artifact == null) {
+            return ResponseEntity.notFound().build();
+        }
+        String validHtml = requireValidHtml(html);
+        List<MultipartFile> files = assets == null ? List.of() : assets;
+        List<String> normalized = validateAssets(files, assetPaths == null ? List.of() : assetPaths);
+
+        applyUpdate(artifact, title, filename, author, validHtml);
+        assetRepository.deleteByArtifactId(id); // 벌크 삭제 — saveAll 보다 먼저 실행됨 (repo STUDY 참고)
+        assetRepository.saveAll(toAssetEntities(id, files, normalized));
+
+        log.info("Artifact updated id={} title='{}' assets={}", id, artifact.getTitle(), files.size());
+        return ResponseEntity.ok(Map.of("id", id, "title", artifact.getTitle(), "assetCount", files.size()));
     }
 
     @DeleteMapping("/api/artifacts/{id}")
@@ -168,13 +177,15 @@ public class ArtifactController {
                 .build();
     }
 
-    // STUDY: 공개 뷰어 — 업로드된 HTML/자산을 raw 서빙. 같은 origin 이므로 저장형 XSS 가 대시보드
+    // STUDY: 뷰어 — 업로드된 HTML/자산을 raw 서빙. 같은 origin 이므로 저장형 XSS 가 대시보드
     //        API 를 공격할 수 있어 CSP `sandbox allow-scripts` 로 서빙한다: 문서가 고유(opaque)
     //        origin 이 되어 same-origin API 접근·폼 제출이 차단되고, 스크립트(차트 등)는 동작한다.
     //        자산도 동일 헤더 — 직접 열리는 HTML/SVG 자산 역시 opaque origin 이어야 한다. 방어 축소 금지.
     // STUDY: {*path} — PathPattern 의 capture-the-rest. "/artifacts/view/2/" 는 path="/",
     //        "/artifacts/view/2/a/b.png" 는 path="/a/b.png" (선행 슬래시 포함) 로 바인딩된다.
     //        produces 는 걸지 않는다 — iframe/img 서브리소스의 Accept 헤더로 406 나는 것 방지.
+    //        자산에 Cache-Control 을 걸지 않는다(Security 기본 no-cache) — 제자리 수정(v0.0.74) 후
+    //        구버전 자산이 보이는 것을 방지.
     @GetMapping("/artifacts/view/{id}/{*path}")
     public ResponseEntity<Object> view(@PathVariable long id, @PathVariable String path) {
         if (path.isEmpty() || "/".equals(path)) {
@@ -194,7 +205,6 @@ public class ArtifactController {
                 .<ResponseEntity<Object>>map(asset -> ResponseEntity.ok()
                         .header("Content-Security-Policy", "sandbox allow-scripts")
                         .header("X-Content-Type-Options", "nosniff")
-                        .header("Cache-Control", "public, max-age=3600")
                         .contentType(MediaType.parseMediaType(asset.getContentType()))
                         .body(asset.getData()))
                 .orElseGet(() -> ResponseEntity.status(404)
@@ -202,17 +212,76 @@ public class ArtifactController {
                         .body("asset not found"));
     }
 
-    // html 공통 검증 — 문제 없으면 null, 있으면 400 응답 반환
-    private static ResponseEntity<Object> validateHtml(String html) {
+    // ===== 공용 검증/조립 =====
+
+    // 수정 공통: 제목은 명시 → <title> → 파일명 → "기존 제목 유지", 작성자는 미지정 시 유지.
+    private static void applyUpdate(ArtifactEntity artifact, String title, String filename,
+                                    String author, String html) {
+        String newTitle = resolveTitle(title, html, filename, artifact.getTitle());
+        String newAuthor = (author == null || author.isBlank())
+                ? artifact.getAuthor() : trimTo(author, 100);
+        artifact.update(newTitle, newAuthor, html);
+    }
+
+    private static String requireValidHtml(String html) {
         if (html == null || html.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "html 내용이 비어 있습니다."));
+            throw new BadRequest("html 내용이 비어 있습니다.");
         }
         int bytes = html.getBytes(StandardCharsets.UTF_8).length;
         if (bytes > MAX_HTML_BYTES) {
-            return ResponseEntity.badRequest().body(Map.of("error",
-                    String.format("HTML이 너무 큽니다 (%.1fMB > 5MB 제한).", bytes / 1024.0 / 1024.0)));
+            throw new BadRequest(String.format("HTML이 너무 큽니다 (%.1fMB > 5MB 제한).",
+                    bytes / 1024.0 / 1024.0));
         }
-        return null;
+        return html;
+    }
+
+    // 개수/크기/경로 검증 후 정규화된 경로 목록 반환. 실패 시 BadRequest.
+    private static List<String> validateAssets(List<MultipartFile> files, List<String> paths) {
+        if (files.size() != paths.size()) {
+            throw new BadRequest(String.format(
+                    "assets(%d)와 assetPaths(%d) 개수가 다릅니다.", files.size(), paths.size()));
+        }
+        if (files.size() > MAX_ASSET_COUNT) {
+            throw new BadRequest(String.format(
+                    "자산 파일이 너무 많습니다 (%d개 > %d개 제한).", files.size(), MAX_ASSET_COUNT));
+        }
+        long totalBytes = 0;
+        Set<String> seen = new HashSet<>();
+        List<String> normalized = new ArrayList<>(paths.size());
+        for (int i = 0; i < files.size(); i++) {
+            long size = files.get(i).getSize();
+            if (size > MAX_ASSET_BYTES) {
+                throw new BadRequest(String.format("자산 파일이 너무 큽니다: %s (%.1fMB > 5MB 제한).",
+                        paths.get(i), size / 1024.0 / 1024.0));
+            }
+            totalBytes += size;
+            if (totalBytes > MAX_TOTAL_ASSET_BYTES) {
+                throw new BadRequest("자산 합계가 25MB 제한을 초과했습니다.");
+            }
+            String path = normalizeAssetPath(paths.get(i));
+            if (path == null) {
+                throw new BadRequest("잘못된 자산 경로입니다: " + paths.get(i));
+            }
+            if (!seen.add(path)) {
+                throw new BadRequest("자산 경로가 중복됩니다: " + path);
+            }
+            normalized.add(path);
+        }
+        return normalized;
+    }
+
+    private static List<ArtifactAssetEntity> toAssetEntities(
+            long artifactId, List<MultipartFile> files, List<String> normalizedPaths) throws IOException {
+        List<ArtifactAssetEntity> entities = new ArrayList<>(files.size());
+        for (int i = 0; i < files.size(); i++) {
+            // STUDY: MediaTypeFactory — spring-web 내장 mime.types 로 확장자→MIME 매핑 (OS 무의존).
+            //        클라이언트가 보낸 part content-type 은 신뢰하지 않는다.
+            String contentType = MediaTypeFactory.getMediaType(normalizedPaths.get(i))
+                    .orElse(MediaType.APPLICATION_OCTET_STREAM).toString();
+            entities.add(new ArtifactAssetEntity(
+                    artifactId, normalizedPaths.get(i), contentType, files.get(i).getBytes()));
+        }
+        return entities;
     }
 
     // 자산 경로 정규화. 유효하지 않으면 null.
@@ -242,8 +311,8 @@ public class ArtifactController {
         return p;
     }
 
-    // 제목 결정: 명시 제목 → HTML <title> → 파일명 → "제목 없는 아티팩트"
-    static String resolveTitle(String explicit, String html, String filename) {
+    // 제목 결정: 명시 제목 → HTML <title> → 파일명 → fallback (생성: 기본 문구, 수정: 기존 제목)
+    static String resolveTitle(String explicit, String html, String filename, String fallback) {
         String t = trimTo(explicit, MAX_TITLE);
         if (t != null && !t.isBlank()) return t;
         Matcher m = HTML_TITLE.matcher(html);
@@ -253,7 +322,7 @@ public class ArtifactController {
         }
         String f = trimTo(filename, MAX_TITLE);
         if (f != null && !f.isBlank()) return f;
-        return "제목 없는 아티팩트";
+        return fallback;
     }
 
     private static String trimTo(String s, int max) {

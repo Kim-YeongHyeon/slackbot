@@ -39,6 +39,13 @@ public class ArtifactEntity {
         this.createdAt = Instant.now();
     }
 
+    // 제자리 수정 (v0.0.74) — id/createdAt/공유 링크는 유지한 채 내용만 교체.
+    public void update(String title, String author, String html) {
+        this.title = title;
+        this.author = author;
+        this.html = html;
+    }
+
     public Long getId() { return id; }
     public String getTitle() { return title; }
     public String getAuthor() { return author; }

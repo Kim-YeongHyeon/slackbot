@@ -2,6 +2,7 @@ package com.jirabot.slack.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -25,6 +27,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
@@ -220,16 +224,94 @@ class ArtifactControllerTest {
 
     @Test
     void resolveTitle_fallbackChain() {
+        String def = ArtifactController.DEFAULT_TITLE;
         // 명시 제목 우선
-        assertThat(ArtifactController.resolveTitle("명시", "<title>태그</title>", "file")).isEqualTo("명시");
+        assertThat(ArtifactController.resolveTitle("명시", "<title>태그</title>", "file", def)).isEqualTo("명시");
         // 없으면 <title> 태그
-        assertThat(ArtifactController.resolveTitle(null, "<html><title>주간 리포트</title></html>", "f"))
+        assertThat(ArtifactController.resolveTitle(null, "<html><title>주간 리포트</title></html>", "f", def))
                 .isEqualTo("주간 리포트");
-        assertThat(ArtifactController.resolveTitle("", "<TITLE lang=\"ko\">대문자</TITLE>", null))
+        assertThat(ArtifactController.resolveTitle("", "<TITLE lang=\"ko\">대문자</TITLE>", null, def))
                 .isEqualTo("대문자");
-        // 태그도 없으면 파일명 → 최후엔 기본값
-        assertThat(ArtifactController.resolveTitle(null, "<html></html>", "report")).isEqualTo("report");
-        assertThat(ArtifactController.resolveTitle(null, "<html></html>", null)).isEqualTo("제목 없는 아티팩트");
+        // 태그도 없으면 파일명 → 최후엔 fallback (생성: 기본 문구 / 수정: 기존 제목)
+        assertThat(ArtifactController.resolveTitle(null, "<html></html>", "report", def)).isEqualTo("report");
+        assertThat(ArtifactController.resolveTitle(null, "<html></html>", null, def)).isEqualTo(def);
+        assertThat(ArtifactController.resolveTitle(null, "<html></html>", null, "기존 제목")).isEqualTo("기존 제목");
+    }
+
+    // ===== 제자리 수정 (v0.0.74) =====
+
+    @Test
+    void updateJson_replacesContentAndClearsAssets_keepsId() throws Exception {
+        ArtifactEntity existing = saved("옛 제목", "<html>old</html>");
+        when(repository.findById(7L)).thenReturn(Optional.of(existing));
+
+        mockMvc.perform(put("/api/artifacts/7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"html\":\"<html><title>새 제목</title>new</html>\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(7))
+                .andExpect(jsonPath("$.title").value("새 제목"))
+                .andExpect(jsonPath("$.assetCount").value(0));
+
+        assertThat(existing.getHtml()).contains("new");
+        assertThat(existing.getTitle()).isEqualTo("새 제목");
+        assertThat(existing.getAuthor()).isEqualTo("김영현"); // 미지정 → 유지
+        // PUT = 전체 교체 — 자산 미전송 시 기존 자산 삭제
+        verify(assetRepository).deleteByArtifactId(7L);
+    }
+
+    @Test
+    void updateJson_noTitleAnywhere_keepsExistingTitle() throws Exception {
+        ArtifactEntity existing = saved("기존 제목", "<html>old</html>");
+        when(repository.findById(7L)).thenReturn(Optional.of(existing));
+
+        mockMvc.perform(put("/api/artifacts/7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"html\":\"<html>no title tag</html>\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("기존 제목"));
+    }
+
+    @Test
+    void updateMultipart_replacesAssets_deleteBeforeInsert() throws Exception {
+        ArtifactEntity existing = saved("t", "<html>old</html>");
+        when(repository.findById(7L)).thenReturn(Optional.of(existing));
+
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/artifacts/7")
+                        .file(new MockMultipartFile("assets", "n.css", null, new byte[]{1}))
+                        .param("assetPaths", "page_files/new.css")
+                        .param("html", "<html>v2</html>"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assetCount").value(1));
+
+        // UNIQUE(artifact_id, path) 위반 방지 — 기존 자산 벌크 삭제가 saveAll 보다 먼저여야 한다.
+        InOrder inOrder = inOrder(assetRepository);
+        inOrder.verify(assetRepository).deleteByArtifactId(7L);
+        inOrder.verify(assetRepository).saveAll(any());
+        assertThat(existing.getHtml()).isEqualTo("<html>v2</html>");
+    }
+
+    @Test
+    void update_missingId_returns404() throws Exception {
+        when(repository.findById(99L)).thenReturn(Optional.empty());
+
+        mockMvc.perform(put("/api/artifacts/99")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"html\":\"<html></html>\"}"))
+                .andExpect(status().isNotFound());
+        verify(assetRepository, never()).deleteByArtifactId(99L);
+    }
+
+    @Test
+    void update_blankHtml_rejected_keepsAssets() throws Exception {
+        when(repository.findById(7L)).thenReturn(Optional.of(saved("t", "<html>old</html>")));
+
+        mockMvc.perform(put("/api/artifacts/7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"html\":\" \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").exists());
+        verify(assetRepository, never()).deleteByArtifactId(7L);
     }
 
     @Test
@@ -275,7 +357,8 @@ class ArtifactControllerTest {
                 .andExpect(header().string("Content-Type", "image/png"))
                 .andExpect(header().string("Content-Security-Policy", "sandbox allow-scripts"))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
-                .andExpect(header().string("Cache-Control", "public, max-age=3600"))
+                // 캐시 금지 (v0.0.74) — 제자리 수정 후 구버전 자산이 보이면 안 된다
+                .andExpect(header().doesNotExist("Cache-Control"))
                 .andExpect(result -> assertThat(result.getResponse().getContentAsByteArray())
                         .containsExactly(9, 8, 7));
     }

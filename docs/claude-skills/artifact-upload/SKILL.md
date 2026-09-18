@@ -50,6 +50,31 @@ curl "${args[@]}" "$U/api/artifacts"
 HTML 에 `<img src="page_files/img.png">` 라면 assetPaths 도 `page_files/img.png`.
 위 스니펫은 `DIR` 의 폴더명을 경로 접두사로 보존하므로 이 규칙을 자동으로 만족한다.
 
+## 케이스 3 — 기존 아티팩트 수정 (같은 링크 유지)
+
+이미 올린 아티팩트의 내용을 바꿀 때는 **새로 올리지 말고 PUT** 을 쓴다 — id 와 공유 링크가
+그대로 유지되어 이미 링크를 받은 사람이 새 내용을 보게 된다. 사용법은 케이스 1/2 와 같고
+`POST /api/artifacts` 를 `PUT /api/artifacts/{id}` 로 바꾸기만 하면 된다:
+
+```bash
+# 어떤 id 인지 모르면 목록에서 제목으로 찾는다
+curl -s -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" -H 'ngrok-skip-browser-warning: 1' "$U/api/artifacts"
+
+# HTML 단일 파일 수정
+curl -s -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" -X PUT "$U/api/artifacts/7" \
+  -H 'ngrok-skip-browser-warning: 1' \
+  -F "html=<report.html;type=text/html;charset=utf-8"
+
+# 자산 동반 수정: 케이스 2 스니펫에서 마지막 줄만 교체
+curl "${args[@]}" -X PUT "$U/api/artifacts/7"
+```
+
+주의:
+- **PUT 은 전체 교체다.** 자산이 있는 아티팩트를 수정할 때 자산을 다시 보내지 않으면
+  기존 자산이 모두 삭제된다 — html 만 고치더라도 폴더를 함께 다시 전송할 것.
+- 제목을 안 보내면 새 HTML 의 `<title>` → 파일명 → **기존 제목 유지** 순으로 결정된다.
+- 존재하지 않는 id 면 404.
+
 ## 응답과 산출물
 
 성공: `{"id": 7, "title": "...", "assetCount": 2}` → 공개 링크는
@@ -94,6 +119,8 @@ Claude 공유 링크(claude.ai/...)는 직접 등록 불가(iframe 차단). 아�
 | 400 + `{"error":"..."}` | 응답의 한글 메시지가 원인을 그대로 설명함 (경로/크기/개수) |
 | `assets(N)와 assetPaths(M) 개수가 다릅니다` | 파일과 경로 필드를 쌍으로 반복했는지 확인 |
 | 413 / 커넥션 끊김 | 요청 전체 40MB 초과 — 자산을 줄여서 재시도 |
+| PUT 이 404 | 해당 id 아티팩트 없음 — `GET /api/artifacts` 로 id 확인 |
+| 수정 후 이미지/CSS 깨짐 | PUT 은 전체 교체 — 자산 폴더를 함께 다시 보냈는지 확인 |
 | 첫 방문 시 ngrok 경고 페이지 | 무료 도메인 특성. 브라우저에서 "Visit Site" 1회 클릭 (curl 은 `ngrok-skip-browser-warning: 1` 헤더) |
 
 ## 설치 (파일 1개)
