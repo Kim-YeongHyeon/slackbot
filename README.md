@@ -108,6 +108,18 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### sol dashboard 개편 2단계 — 공개 아티팩트 갤러리 (v0.0.71)
+
+아티팩트 탭 구현: HTML을 올리면 **공개 링크**(`/artifacts/view/{id}`)가 생겨 Claude 팀플랜/대시보드
+계정이 없는 사람도 링크만으로 열람 가능. Claude 아티팩트 스타일 카드 그리드(iframe 미리보기+제목+
+링크복사+삭제), 클릭 시 새 탭 상세보기.
+- 저장: Postgres TEXT (Flyway V5, 5MB/건 제한). 제목 미입력 시 HTML `<title>`→파일명 자동.
+- **XSS 방어**: 뷰어는 `Content-Security-Policy: sandbox allow-scripts` 로 서빙 — 업로드 HTML이
+  고유 origin이 되어 대시보드 API 접근/폼 제출 불가(스크립트·차트는 동작). 카드 미리보기도 sandbox iframe.
+- 인증 경계: 목록/업로드/삭제(`/api/artifacts`)는 기존 Basic Auth 뒤, 뷰어만 Go `PublicProxy`로 무인증
+  (ngrok 무료 도메인 특성상 외부인 첫 방문 시 "Visit Site" 경고 1회 표시됨).
+- Claude 공유 링크 직접 등록은 미지원(iframe 차단) — HTML 복사/다운로드 업로드 안내.
+
 ### sol dashboard 개편 1단계 — 이름 + 2단 탭 (v0.0.70)
 
 - 대시보드 이름을 **sol dashboard** 로 변경(타이틀/헤더/Basic Auth realm).

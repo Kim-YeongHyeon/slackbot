@@ -496,6 +496,79 @@ function showTab(name) {
   LOADERS[name]().catch(reportErr);
 }
 
+// ===== 아티팩트 갤러리 (v0.0.71) =====
+// 카드 미리보기는 sandbox iframe (allow-scripts만 — same-origin 금지: 업로드 HTML의 XSS 방어)
+async function loadArtifacts() {
+  const list = await (await apiFetch('/api/artifacts')).json();
+  const grid = document.getElementById('art-grid');
+  if (!list.length) {
+    grid.innerHTML = '<p class="muted">아직 아티팩트가 없습니다. 위에서 첫 HTML을 올려보세요.</p>';
+    return;
+  }
+  grid.innerHTML = list.map(a => `
+    <div class="art-card" data-id="${a.id}">
+      <div class="art-preview">
+        <iframe src="/artifacts/view/${a.id}" sandbox="allow-scripts" loading="lazy" scrolling="no" tabindex="-1"></iframe>
+      </div>
+      <div class="art-meta">
+        <div class="art-title" title="${esc(a.title)}">${esc(a.title)}</div>
+        <div class="art-sub muted">${fmtDate(a.createdAt)}${a.author ? ' · ' + esc(a.author) : ''} · ${(a.sizeBytes/1024).toFixed(0)}KB</div>
+        <div class="art-actions">
+          <button class="btn art-copy" data-copy="${a.id}">🔗 링크 복사</button>
+          <button class="btn art-del" data-del="${a.id}">🗑</button>
+        </div>
+      </div>
+    </div>`).join('');
+  grid.querySelectorAll('.art-card .art-preview, .art-card .art-title').forEach(el => {
+    el.onclick = () => window.open('/artifacts/view/' + el.closest('.art-card').dataset.id, '_blank');
+  });
+  grid.querySelectorAll('.art-copy').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    await navigator.clipboard.writeText(location.origin + '/artifacts/view/' + b.dataset.copy);
+    b.textContent = '✅ 복사됨'; setTimeout(() => b.textContent = '🔗 링크 복사', 1500);
+  });
+  grid.querySelectorAll('.art-del').forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    if (!confirm('이 아티팩트를 삭제할까요? 공유된 링크도 함께 무효화됩니다.')) return;
+    await apiFetch('/api/artifacts/' + b.dataset.del, { method: 'DELETE' });
+    loadArtifacts().catch(reportErr);
+  });
+}
+
+async function uploadArtifact() {
+  const msg = document.getElementById('art-msg');
+  const fileInput = document.getElementById('art-file');
+  const pasteArea = document.getElementById('art-paste');
+  let html = '', filename = '';
+  if (pasteArea.style.display !== 'none' && pasteArea.value.trim()) {
+    html = pasteArea.value;
+  } else if (fileInput.files.length) {
+    const f = fileInput.files[0];
+    if (f.size > 5 * 1024 * 1024) { msg.textContent = '❌ 5MB 제한을 초과했습니다.'; return; }
+    filename = f.name.replace(/\.html?$/i, '');
+    html = await f.text();
+  } else {
+    msg.textContent = '❌ HTML 파일을 선택하거나 붙여넣어 주세요.'; return;
+  }
+  msg.textContent = '업로드 중…';
+  try {
+    const res = await apiFetch('/api/artifacts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: document.getElementById('art-title').value, html, filename })
+    });
+    const body = await res.json();
+    if (!res.ok) { msg.textContent = '❌ ' + (body.error || 'HTTP ' + res.status); return; }
+    msg.textContent = '✅ 올렸습니다: ' + body.title;
+    document.getElementById('art-title').value = ''; fileInput.value = ''; pasteArea.value = '';
+    loadArtifacts().catch(reportErr);
+  } catch (e) { msg.textContent = '❌ 업로드 실패: ' + e.message; }
+}
+document.getElementById('btn-art-upload').onclick = () => uploadArtifact().catch(reportErr);
+document.getElementById('art-paste-toggle').onclick = () => {
+  const ta = document.getElementById('art-paste');
+  ta.style.display = ta.style.display === 'none' ? '' : 'none';
+};
+
 // 2단 탭 (v0.0.70): 상위 [지라봇|아티팩트]. 지라봇 → 하위 탭바 표시 + 마지막 하위 탭 복원.
 // 아티팩트 → 하위 탭바 숨김 + 아티팩트 패널 표시.
 let lastJirabotTab = 'overview';

@@ -106,3 +106,28 @@ func TestDashboardProxy_ProxiesPostMethod(t *testing.T) {
 		t.Fatalf("upstream method = %q, want POST (수동 동기화 버튼)", gotMethod)
 	}
 }
+
+func TestPublicProxy_NoCredentials_ReachesUpstream(t *testing.T) {
+	// 아티팩트 뷰어는 무인증 공개 — 자격증명 없이도 업스트림에 도달해야 한다 (v0.0.71).
+	hit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "<html>artifact</html>")
+	}))
+	defer upstream.Close()
+
+	p, err := NewPublicProxy(upstream.URL)
+	if err != nil {
+		t.Fatalf("NewPublicProxy: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/view/1", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !hit {
+		t.Fatal("upstream must be reached without credentials (public viewer)")
+	}
+}

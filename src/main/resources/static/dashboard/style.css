@@ -85,3 +85,23 @@ footer { text-align: center; padding: 16px; border-top: 1px solid var(--border);
 .top-tab:hover { color: var(--text); }
 .top-tab.active { color: var(--text); background: var(--panel); border: 1px solid var(--border); border-bottom: none; }
 #tabs { padding-top: 8px; }
+
+/* ===== 아티팩트 갤러리 (v0.0.71) — Claude 아티팩트 카드 스타일 ===== */
+.art-upload { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 16px 20px; margin-bottom: 20px; }
+.art-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.art-form input[type="text"] { flex: 1; min-width: 220px; }
+.art-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.art-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden; transition: border-color .15s, transform .15s; }
+.art-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.art-preview { height: 170px; overflow: hidden; background: #fff; cursor: pointer; position: relative; }
+.art-preview iframe { width: 400%; height: 400%; transform: scale(0.25); transform-origin: 0 0;
+  border: none; pointer-events: none; }
+.art-meta { padding: 10px 12px; border-top: 1px solid var(--border); }
+.art-title { font-weight: 700; cursor: pointer; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.art-title:hover { color: var(--accent); }
+.art-sub { font-size: 12px; margin: 4px 0 8px; }
+.art-actions { display: flex; gap: 6px; }
+.art-actions .btn { font-size: 12px; padding: 4px 10px; }

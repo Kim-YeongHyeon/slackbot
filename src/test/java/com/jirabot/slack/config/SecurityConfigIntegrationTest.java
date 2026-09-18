@@ -67,6 +67,10 @@ class SecurityConfigIntegrationTest {
     @MockitoBean
     private GitHubUserMappingRepository gitHubUserMappingRepository;
 
+    // L11: 새 JPA repo 는 여기 명시적으로 mock 해야 컨텍스트가 뜬다 (v0.0.71 artifacts).
+    @MockitoBean
+    private com.jirabot.slack.repository.ArtifactRepository artifactRepository;
+
     @MockitoBean
     private JiraSyncService jiraSyncService;
 

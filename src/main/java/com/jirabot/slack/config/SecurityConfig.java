@@ -52,6 +52,9 @@ public class SecurityConfig {
                         // ngrok 터널은 Go봇(:3000)만 노출하므로 외부 인터넷에서는 이 경로에 도달 불가.
                         // 판매/외부 노출 시 이 지점에 인증(예: 토큰 필터)을 추가할 것.
                         .requestMatchers("/dashboard/**", "/api/dashboard/**").permitAll()
+                        // 아티팩트: 관리 API 는 대시보드와 동일 신뢰 경계(Go봇 Basic Auth), 뷰어는 의도적 완전 공개
+                        // (링크 공유용, v0.0.71). 뷰어 응답은 CSP sandbox 로 서빙됨 — ArtifactController 참고.
+                        .requestMatchers("/api/artifacts/**", "/artifacts/view/**").permitAll()
                         // STUDY: /api/slack/** 는 SlackSignatureFilter 에서 HMAC 검증으로 이미 신원을 확인했으므로
                         // Spring Security 의 authorization 단계에서는 permitAll. 실패 시 필터에서 403 으로 이미 차단됨.
                         .requestMatchers("/api/slack/**").permitAll()
