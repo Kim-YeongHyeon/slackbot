@@ -108,6 +108,12 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### sol dashboard 개편 1단계 — 이름 + 2단 탭 (v0.0.70)
+
+- 대시보드 이름을 **sol dashboard** 로 변경(타이틀/헤더/Basic Auth realm).
+- 탭 2단화: 상위 [지라봇 | 아티팩트] — 기존 11개 탭은 지라봇 하위 탭으로(동작 무변경, 마지막 하위 탭 기억).
+  아티팩트 탭은 placeholder (2단계 v0.0.71 에서 공개 HTML 아티팩트 갤러리 제공 예정).
+
 ### JDK 워치독 — 자동 업데이트 후 봇 자동 재시작 (v0.0.69)
 
 unattended-upgrades 가 openjdk 를 in-place 교체하면 실행 중인 JVM 이 서브프로세스(claude CLI)를 못

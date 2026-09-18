@@ -496,7 +496,24 @@ function showTab(name) {
   LOADERS[name]().catch(reportErr);
 }
 
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => showTab(t.dataset.tab));
+// 2단 탭 (v0.0.70): 상위 [지라봇|아티팩트]. 지라봇 → 하위 탭바 표시 + 마지막 하위 탭 복원.
+// 아티팩트 → 하위 탭바 숨김 + 아티팩트 패널 표시.
+let lastJirabotTab = 'overview';
+function showTopTab(name) {
+  document.querySelectorAll('.top-tab').forEach(t => t.classList.toggle('active', t.dataset.top === name));
+  const subNav = document.getElementById('tabs');
+  if (name === 'jirabot') {
+    subNav.style.display = '';
+    showTab(lastJirabotTab);
+  } else {
+    subNav.style.display = 'none';
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-artifacts'));
+    if (typeof loadArtifacts === 'function') loadArtifacts().catch(reportErr);
+  }
+}
+document.querySelectorAll('.top-tab').forEach(t => t.onclick = () => showTopTab(t.dataset.top));
+
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => { lastJirabotTab = t.dataset.tab; showTab(t.dataset.tab); });
 document.getElementById('trend-weeks').onchange = loadTrends;
 ['pr-repo', 'pr-author', 'pr-sort'].forEach(id =>
   document.getElementById(id).onchange = renderPrs);

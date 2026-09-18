@@ -49,7 +49,7 @@ func (d *DashboardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if ok {
 			d.logger.Warn("dashboard auth failed", "user", u, "path", r.URL.Path)
 		}
-		w.Header().Set("WWW-Authenticate", `Basic realm="jirabot dashboard"`)
+		w.Header().Set("WWW-Authenticate", `Basic realm="sol dashboard"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
