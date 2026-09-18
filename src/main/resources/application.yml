@@ -1,6 +1,11 @@
 server:
   port: 8080
 
+# 대시보드 로그인 계정 (v0.0.73 — 전 경로 로그인 필수). Go 터널 프록시와 같은 값을 쓴다.
+dashboard:
+  user: ${DASHBOARD_USER:}
+  password: ${DASHBOARD_PASSWORD:}
+
 spring:
   application:
     name: slackbot-server

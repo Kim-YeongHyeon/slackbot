@@ -39,26 +39,6 @@ func NewDashboardProxy(springBaseURL, user, pass string, logger *slog.Logger) (*
 	}, nil
 }
 
-// PublicProxy proxies to Spring WITHOUT auth — for intentionally-public paths
-// only (artifact viewer /artifacts/view/{id}, v0.0.71). Uploaded HTML is served
-// by Spring with CSP sandbox so it cannot attack dashboard APIs. Never mount
-// this on dashboard/API prefixes.
-type PublicProxy struct {
-	proxy *httputil.ReverseProxy
-}
-
-func NewPublicProxy(springBaseURL string) (*PublicProxy, error) {
-	target, err := url.Parse(springBaseURL)
-	if err != nil {
-		return nil, err
-	}
-	return &PublicProxy{proxy: httputil.NewSingleHostReverseProxy(target)}, nil
-}
-
-func (p *PublicProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p.proxy.ServeHTTP(w, r)
-}
-
 func (d *DashboardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	u, p, ok := r.BasicAuth()
 	// STUDY(go): subtle.ConstantTimeCompare — 일반 == 비교는 일치 길이만큼 빨리 끝나

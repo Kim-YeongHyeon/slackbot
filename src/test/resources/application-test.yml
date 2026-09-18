@@ -20,6 +20,11 @@ slack:
   # StartupEnvValidator(필수 키 fail-fast)가 컨텍스트 테스트에서도 통과하도록 더미 주입.
   bot-token: xoxb-test-token
 
+# v0.0.73 부터 validator 필수 키 + httpBasic 계정 (테스트 더미)
+dashboard:
+  user: sol
+  password: test-pw
+
 claude:
   # /bin/true = 컨텍스트 부팅 시 실제 claude 바이너리가 설치되어 있지 않아도 통과.
   # 실제 동작 테스트는 ProcessRunner 를 Mockito mock 으로 주입하여 수행.

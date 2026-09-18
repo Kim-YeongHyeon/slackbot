@@ -21,13 +21,16 @@ public class StartupEnvValidator implements BeanFactoryPostProcessor {
     private static final Logger log = LoggerFactory.getLogger(StartupEnvValidator.class);
 
     // 프로퍼티 키 → 사용자가 .env 에서 채워야 하는 환경변수 이름.
+    // dashboard.* 는 v0.0.73 부터 필수 — 비어 있으면 대시보드가 무인증으로 뜨는 대신 기동을 막는다.
     private static final Map<String, String> REQUIRED = Map.of(
             "slack.bot-token", "SLACK_BOT_TOKEN",
             "slack.signing-secret", "SLACK_SIGNING_SECRET",
             "jira.base-url", "JIRA_BASE_URL",
             "jira.email", "JIRA_EMAIL",
             "jira.api-token", "JIRA_API_TOKEN",
-            "jira.project-key", "JIRA_PROJECT_KEY");
+            "jira.project-key", "JIRA_PROJECT_KEY",
+            "dashboard.user", "DASHBOARD_USER",
+            "dashboard.password", "DASHBOARD_PASSWORD");
 
     // STUDY: BFPP 는 컨테이너 극초기에 인스턴스화되어 생성자 주입을 못 쓴다(No default constructor 에러).
     //        Environment 는 refresh 시점에 이미 싱글톤으로 등록돼 있으므로 beanFactory 에서 직접 꺼낸다.

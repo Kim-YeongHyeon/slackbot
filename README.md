@@ -108,6 +108,21 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 대시보드 전면 로그인 필수화 (v0.0.73)
+
+어느 경로로 접근하든(**ngrok 터널·사내망 :8080 직접 모두**) 대시보드는 로그인이 필요하다.
+- Spring 에 httpBasic(realm "sol dashboard") 활성화 — 계정은 Go 프록시와 같은
+  `.env` `DASHBOARD_USER`/`DASHBOARD_PASSWORD`. 터널 경유 시 Authorization 헤더가
+  그대로 전달되므로 이중 입력 없음.
+- **아티팩트 뷰어(`/artifacts/view/**`)도 로그인 대상** — 무인증 링크 공유는 중단
+  (사용자 결정). Go `PublicProxy` 제거. CSP sandbox XSS 방어는 유지.
+- `DASHBOARD_USER`/`DASHBOARD_PASSWORD` 는 이제 **기동 필수 env** (누락 시 fail-fast,
+  6→8개). docker-compose 는 `env_file: .env` 로 이미 전달됨.
+- 무인증 유지: `/health`·`/actuator/health`·`/actuator/info`(스크립트·워치독·봇상태 카드),
+  `/api/slack/**`(HMAC), `/api/jira/**`(?token=).
+- 알려진 한계: Basic 인증은 브라우저가 자동 첨부하므로 CSRF 성 form POST 가 이론상 가능
+  (JSON 엔드포인트는 415 로 무해). 기존 무인증 LAN 모델보다 엄격히 개선된 것으로 수용.
+
 ### 아티팩트 폴더 업로드 — page_files 자산 지원 (v0.0.72)
 
 웹페이지/아티팩트를 저장하면 나오는 `page.html` + 자산 폴더(`page_files/` — 이미지·CSS·JS)를 함께

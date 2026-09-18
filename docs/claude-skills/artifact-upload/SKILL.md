@@ -1,19 +1,19 @@
 ---
 name: artifact-upload
-description: HTML 아티팩트(단일 파일 또는 html+자산 폴더)를 sol dashboard 공개 갤러리에 업로드하고 로그인 없이 누구나 열 수 있는 공개 링크를 받는다. "아티팩트 올려줘", "이 HTML 공유해줘/공개 링크 만들어줘", "Claude 아티팩트 팀에 공유" 같은 요청에 사용.
+description: HTML 아티팩트(단일 파일 또는 html+자산 폴더)를 sol dashboard 아티팩트 갤러리에 업로드/수정하고 공유 링크를 받는다. "아티팩트 올려줘", "이 HTML 공유해줘/링크 만들어줘", "아티팩트 수정해줘/교체해줘", "Claude 아티팩트 팀에 공유" 같은 요청에 사용.
 ---
 
 # sol dashboard 아티팩트 업로드
 
-팀 내부 sol dashboard 에는 공개 HTML 아티팩트 갤러리가 있다. HTML 을 업로드하면
-`/artifacts/view/{id}/` 공개 링크가 생겨 **Claude 팀플랜/대시보드 계정이 없는 사람도
-링크만으로 열람**할 수 있다. 이 파일 하나로 충분하다 — 별도 스크립트 없이
-아래 curl 패턴을 상황에 맞게 조립해 실행하면 된다.
+팀 내부 sol dashboard 에는 HTML 아티팩트 갤러리가 있다. HTML 을 업로드하면
+`/artifacts/view/{id}/` 링크가 생긴다. **열람에도 sol 계정 로그인이 필요하다**
+(v0.0.73 부터 — 링크를 열면 브라우저 로그인 창에 sol/sol 입력). 이 파일 하나로
+충분하다 — 별도 스크립트 없이 아래 curl 패턴을 상황에 맞게 조립해 실행하면 된다.
 
 - 서버: `https://tidiness-pointed-amuser.ngrok-free.dev` (ngrok 터널.
   환경변수 `ARTIFACT_SERVER_URL` 이 있으면 그 값을 우선 사용)
-- 업로드 인증: HTTP Basic `sol:sol` (뷰어 링크는 무인증 공개.
-  `ARTIFACT_SERVER_AUTH` 있으면 우선 사용)
+- 인증: HTTP Basic `sol:sol` — 업로드·수정·열람 전부 동일 계정
+  (`ARTIFACT_SERVER_AUTH` 있으면 우선 사용)
 - 필요 도구: bash + curl 뿐
 
 ## 케이스 1 — HTML 단일 파일
@@ -58,8 +58,8 @@ HTML 에 `<img src="page_files/img.png">` 라면 assetPaths 도 `page_files/img.
 업로드 후 링크가 열리는지 확인하고, **공개 링크를 사용자에게 전달하는 것이 최종 산출물**:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -H 'ngrok-skip-browser-warning: 1' \
-  "$U/artifacts/view/{id}/"    # 200 이어야 정상
+curl -s -o /dev/null -w "%{http_code}" -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" \
+  -H 'ngrok-skip-browser-warning: 1' "$U/artifacts/view/{id}/"   # 200 이어야 정상 (무인증이면 401)
 ```
 
 ## 경로 규칙과 한도

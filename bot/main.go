@@ -54,27 +54,17 @@ func main() {
 		}
 		for _, p := range []string{
 			"/dashboard", "/dashboard/", // 정적 페이지
-			"/api/dashboard/",                          // 통계/응답시간/동기화 API
+			"/api/dashboard/",                           // 통계/응답시간/동기화 API
 			"/api/user-mappings", "/api/user-mappings/", // 사용자 관리 탭
 			"/api/feature-requests", "/api/feature-requests/", // 기능요청 게시판
 			"/api/github-mappings", "/api/github-mappings/", // GitHub↔Jira 매핑
-			"/api/artifacts", "/api/artifacts/", // 아티팩트 목록/업로드/삭제 (인증측)
-
+			"/api/artifacts", "/api/artifacts/", // 아티팩트 목록/업로드/삭제
+			"/artifacts/view/", // 아티팩트 뷰어 — v0.0.73 부터 로그인 필수 (무인증 공유 중단)
 			"/actuator/health", // 봇 상태 탭의 서버 health 카드
 		} {
 			mux.Handle(p, dash)
 		}
 		logger.Info("dashboard proxy enabled", "user", cfg.DashboardUser)
-
-		// 아티팩트 뷰어는 의도적 완전 공개 — 링크만으로 팀플랜 미등록자도 열람 (v0.0.71).
-		// 업로드 HTML 은 Spring 이 CSP sandbox 로 서빙해 대시보드 API 공격 불가.
-		pub, err := NewPublicProxy(cfg.SpringBaseURL)
-		if err != nil {
-			logger.Error("invalid SPRING_BASE_URL", "err", err)
-			os.Exit(1)
-		}
-		mux.Handle("/artifacts/view/", pub)
-		logger.Info("public artifact viewer enabled")
 	}
 
 	server := &http.Server{

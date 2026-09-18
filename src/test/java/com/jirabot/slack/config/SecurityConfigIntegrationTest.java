@@ -37,6 +37,9 @@ import org.springframework.test.web.servlet.MockMvc;
         "jira.email=test@example.com",
         "jira.api-token=test-token",
         "jira.project-key=TEST",
+        // v0.0.73: 대시보드 전면 로그인 — validator 필수 키 + httpBasic 계정
+        "dashboard.user=sol",
+        "dashboard.password=test-pw",
         "spring.autoconfigure.exclude=" +
                 "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration," +
                 "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration"
@@ -82,6 +85,43 @@ class SecurityConfigIntegrationTest {
     void healthEndpointIsPublic() throws Exception {
         mockMvc.perform(get("/health"))
                 .andExpect(status().isOk());
+    }
+
+    // v0.0.73: 대시보드 전면 로그인 필수 — 터널이 아닌 :8080 직접 접근도 401 이어야 한다.
+    @Test
+    void dashboardPathsRequireLogin() throws Exception {
+        mockMvc.perform(get("/dashboard/")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/dashboard/summary")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/artifacts")).andExpect(status().isUnauthorized());
+        // 뷰어도 로그인 대상 (v0.0.73 — 무인증 링크 공유 중단)
+        mockMvc.perform(get("/artifacts/view/1/")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void dashboardPathsAcceptBasicAuth() throws Exception {
+        org.mockito.Mockito.when(artifactRepository.findAllSummaries())
+                .thenReturn(java.util.List.of());
+
+        mockMvc.perform(get("/api/artifacts").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void wrongPasswordIsRejected() throws Exception {
+        mockMvc.perform(get("/api/artifacts").header("Authorization", basic("sol", "wrong")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void actuatorHealthStaysPublic() throws Exception {
+        // start.sh / jdk-watchdog.sh / 봇상태 카드가 자격증명 없이 호출 — 로그인 대상에서 제외 유지.
+        mockMvc.perform(get("/actuator/health"))
+                .andExpect(status().isOk());
+    }
+
+    private static String basic(String user, String password) {
+        return "Basic " + java.util.Base64.getEncoder()
+                .encodeToString((user + ":" + password).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     @Test

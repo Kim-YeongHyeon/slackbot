@@ -107,32 +107,27 @@ func TestDashboardProxy_ProxiesPostMethod(t *testing.T) {
 	}
 }
 
-func TestPublicProxy_NoCredentials_ReachesUpstream(t *testing.T) {
-	// 아티팩트 뷰어는 무인증 공개 — 자격증명 없이도 업스트림에 도달해야 한다 (v0.0.71).
+func TestArtifactViewer_NoCredentials_Returns401(t *testing.T) {
+	// v0.0.73: 아티팩트 뷰어도 로그인 필수 — 무인증 공유 중단. 업스트림에 도달하면 안 된다.
 	hit := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hit = true
-		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, "<html>artifact</html>")
 	}))
 	defer upstream.Close()
 
-	p, err := NewPublicProxy(upstream.URL)
-	if err != nil {
-		t.Fatalf("NewPublicProxy: %v", err)
-	}
+	d := newTestProxy(t, upstream.URL)
 	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/view/1", nil))
+	d.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/artifacts/view/1/", nil))
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 (뷰어 무인증 접근 차단)", rec.Code)
 	}
-	if !hit {
-		t.Fatal("upstream must be reached without credentials (public viewer)")
+	if hit {
+		t.Fatal("upstream must not be reached without credentials")
 	}
 }
 
-func TestPublicProxy_AssetSubPathPreserved(t *testing.T) {
+func TestArtifactViewer_ValidCredentials_AssetSubPathPreserved(t *testing.T) {
 	// 자산 서빙 (v0.0.72): /artifacts/view/{id}/page_files/... 하위 경로가
 	// 훼손 없이 그대로 업스트림에 전달되어야 한다 (한글 파일명 포함).
 	var gotPath string
@@ -142,13 +137,12 @@ func TestPublicProxy_AssetSubPathPreserved(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, err := NewPublicProxy(upstream.URL)
-	if err != nil {
-		t.Fatalf("NewPublicProxy: %v", err)
-	}
+	d := newTestProxy(t, upstream.URL)
 	const path = "/artifacts/view/1/page_files/%EC%9D%B4%EB%AF%B8%EC%A7%80.png"
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.SetBasicAuth("admin", "secret")
 	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	d.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)

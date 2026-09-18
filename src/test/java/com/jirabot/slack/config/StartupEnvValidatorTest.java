@@ -15,7 +15,10 @@ class StartupEnvValidatorTest {
                 .withProperty("jira.base-url", "https://x.atlassian.net")
                 .withProperty("jira.email", "a@b.c")
                 .withProperty("jira.api-token", "tok")
-                .withProperty("jira.project-key", "ES2");
+                .withProperty("jira.project-key", "ES2")
+                // v0.0.73: 대시보드 전면 로그인 — 계정 누락 시 무인증 기동 대신 fail-fast
+                .withProperty("dashboard.user", "sol")
+                .withProperty("dashboard.password", "pw");
     }
 
     @Test
@@ -44,6 +47,8 @@ class StartupEnvValidatorTest {
 
         assertThatThrownBy(() -> new StartupEnvValidator().validate(env))
                 .hasMessageContaining("SLACK_SIGNING_SECRET")
-                .hasMessageContaining("JIRA_PROJECT_KEY");
+                .hasMessageContaining("JIRA_PROJECT_KEY")
+                .hasMessageContaining("DASHBOARD_USER")
+                .hasMessageContaining("DASHBOARD_PASSWORD");
     }
 }
