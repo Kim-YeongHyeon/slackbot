@@ -124,6 +124,8 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
   확장자가 보존되므로 실사용 문제 없음).
 - **XSS 방어 유지**: 자산 응답에도 `Content-Security-Policy: sandbox allow-scripts` + `nosniff` —
   직접 열리는 HTML/SVG 자산도 고유 origin. `Cache-Control: public, max-age=3600`.
+- **다른 서버에서 업로드**: Claude Code 스킬 [docs/claude-skills/artifact-upload/](docs/claude-skills/artifact-upload/) 을
+  대상 서버 `~/.claude/skills/` 에 복사하면 대시보드를 모르는 세션도 "아티팩트 올려줘"로 업로드 가능.
 
 ### sol dashboard 개편 2단계 — 공개 아티팩트 갤러리 (v0.0.71)
 
