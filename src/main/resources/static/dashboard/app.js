@@ -508,11 +508,11 @@ async function loadArtifacts() {
   grid.innerHTML = list.map(a => `
     <div class="art-card" data-id="${a.id}">
       <div class="art-preview">
-        <iframe src="/artifacts/view/${a.id}" sandbox="allow-scripts" loading="lazy" scrolling="no" tabindex="-1"></iframe>
+        <iframe src="/artifacts/view/${a.id}/" sandbox="allow-scripts" loading="lazy" scrolling="no" tabindex="-1"></iframe>
       </div>
       <div class="art-meta">
         <div class="art-title" title="${esc(a.title)}">${esc(a.title)}</div>
-        <div class="art-sub muted">${fmtDate(a.createdAt)}${a.author ? ' · ' + esc(a.author) : ''} · ${(a.sizeBytes/1024).toFixed(0)}KB</div>
+        <div class="art-sub muted">${fmtDate(a.createdAt)}${a.author ? ' · ' + esc(a.author) : ''} · ${(a.sizeBytes/1024).toFixed(0)}KB${a.assetCount ? ' · 파일 ' + a.assetCount + '개' : ''}</div>
         <div class="art-actions">
           <button class="btn art-copy" data-copy="${a.id}">🔗 링크 복사</button>
           <button class="btn art-del" data-del="${a.id}">🗑</button>
@@ -520,11 +520,11 @@ async function loadArtifacts() {
       </div>
     </div>`).join('');
   grid.querySelectorAll('.art-card .art-preview, .art-card .art-title').forEach(el => {
-    el.onclick = () => window.open('/artifacts/view/' + el.closest('.art-card').dataset.id, '_blank');
+    el.onclick = () => window.open('/artifacts/view/' + el.closest('.art-card').dataset.id + '/', '_blank');
   });
   grid.querySelectorAll('.art-copy').forEach(b => b.onclick = async (e) => {
     e.stopPropagation();
-    await navigator.clipboard.writeText(location.origin + '/artifacts/view/' + b.dataset.copy);
+    await navigator.clipboard.writeText(location.origin + '/artifacts/view/' + b.dataset.copy + '/');
     b.textContent = '✅ 복사됨'; setTimeout(() => b.textContent = '🔗 링크 복사', 1500);
   });
   grid.querySelectorAll('.art-del').forEach(b => b.onclick = async (e) => {
@@ -538,7 +538,11 @@ async function loadArtifacts() {
 async function uploadArtifact() {
   const msg = document.getElementById('art-msg');
   const fileInput = document.getElementById('art-file');
+  const dirInput = document.getElementById('art-dir');
   const pasteArea = document.getElementById('art-paste');
+  // 폴더 파일 목록: [{file, relPath}] — relPath 는 선택한 폴더명이 첫 세그먼트
+  // (예: page_files/img.png) 라서 HTML 의 상대 참조와 그대로 일치한다.
+  let dirFiles = [...dirInput.files].map(f => ({ file: f, relPath: f.webkitRelativePath || f.name }));
   let html = '', filename = '';
   if (pasteArea.style.display !== 'none' && pasteArea.value.trim()) {
     html = pasteArea.value;
@@ -548,18 +552,44 @@ async function uploadArtifact() {
     filename = f.name.replace(/\.html?$/i, '');
     html = await f.text();
   } else {
-    msg.textContent = '❌ HTML 파일을 선택하거나 붙여넣어 주세요.'; return;
+    // 자동감지: html+_files 를 담은 상위 폴더를 통째로 선택한 경우 —
+    // 루트(2세그먼트)의 .html 을 본문으로 쓰고, 나머지 경로는 폴더명 세그먼트를 벗긴다.
+    const rootHtml = dirFiles.find(d => d.relPath.split('/').length === 2 && /\.html?$/i.test(d.relPath));
+    if (!rootHtml) { msg.textContent = '❌ HTML 파일을 선택하거나 붙여넣어 주세요.'; return; }
+    if (rootHtml.file.size > 5 * 1024 * 1024) { msg.textContent = '❌ HTML이 5MB 제한을 초과했습니다.'; return; }
+    filename = rootHtml.file.name.replace(/\.html?$/i, '');
+    html = await rootHtml.file.text();
+    dirFiles = dirFiles.filter(d => d !== rootHtml)
+      .map(d => ({ file: d.file, relPath: d.relPath.split('/').slice(1).join('/') }));
   }
-  msg.textContent = '업로드 중…';
+  // 서버 제한(파일 5MB · 합계 25MB · 200개)을 넘기 전에 클라에서 먼저 안내 —
+  // 컨테이너 한도(40MB)에 걸리면 커넥션 중단으로 메시지 없이 실패한다.
+  if (dirFiles.length > 200) { msg.textContent = `❌ 폴더 파일이 너무 많습니다 (${dirFiles.length}개 > 200개 제한).`; return; }
+  const oversize = dirFiles.find(d => d.file.size > 5 * 1024 * 1024);
+  if (oversize) { msg.textContent = `❌ 파일이 5MB 제한을 초과했습니다: ${oversize.relPath}`; return; }
+  const total = dirFiles.reduce((s, d) => s + d.file.size, 0);
+  if (total > 25 * 1024 * 1024) { msg.textContent = `❌ 폴더 합계가 25MB 제한을 초과했습니다 (${(total/1024/1024).toFixed(1)}MB).`; return; }
+
+  msg.textContent = dirFiles.length ? `업로드 중… (파일 ${dirFiles.length}개)` : '업로드 중…';
   try {
-    const res = await apiFetch('/api/artifacts', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: document.getElementById('art-title').value, html, filename })
-    });
+    const title = document.getElementById('art-title').value;
+    let res;
+    if (dirFiles.length) {
+      // 경로는 part filename 이 아니라 assetPaths 텍스트 필드로 — 인덱스 정렬 (서버와 계약)
+      const fd = new FormData();
+      fd.append('title', title); fd.append('filename', filename); fd.append('html', html);
+      dirFiles.forEach(d => { fd.append('assets', d.file, d.file.name); fd.append('assetPaths', d.relPath); });
+      res = await apiFetch('/api/artifacts', { method: 'POST', body: fd }); // Content-Type 은 브라우저가 boundary 포함 설정
+    } else {
+      res = await apiFetch('/api/artifacts', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, html, filename })
+      });
+    }
     const body = await res.json();
     if (!res.ok) { msg.textContent = '❌ ' + (body.error || 'HTTP ' + res.status); return; }
-    msg.textContent = '✅ 올렸습니다: ' + body.title;
-    document.getElementById('art-title').value = ''; fileInput.value = ''; pasteArea.value = '';
+    msg.textContent = '✅ 올렸습니다: ' + body.title + (body.assetCount ? ` (파일 ${body.assetCount}개)` : '');
+    document.getElementById('art-title').value = ''; fileInput.value = ''; dirInput.value = ''; pasteArea.value = '';
     loadArtifacts().catch(reportErr);
   } catch (e) { msg.textContent = '❌ 업로드 실패: ' + e.message; }
 }

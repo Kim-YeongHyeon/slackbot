@@ -131,3 +131,29 @@ func TestPublicProxy_NoCredentials_ReachesUpstream(t *testing.T) {
 		t.Fatal("upstream must be reached without credentials (public viewer)")
 	}
 }
+
+func TestPublicProxy_AssetSubPathPreserved(t *testing.T) {
+	// 자산 서빙 (v0.0.72): /artifacts/view/{id}/page_files/... 하위 경로가
+	// 훼손 없이 그대로 업스트림에 전달되어야 한다 (한글 파일명 포함).
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	p, err := NewPublicProxy(upstream.URL)
+	if err != nil {
+		t.Fatalf("NewPublicProxy: %v", err)
+	}
+	const path = "/artifacts/view/1/page_files/%EC%9D%B4%EB%AF%B8%EC%A7%80.png"
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if gotPath != path {
+		t.Fatalf("upstream path = %q, want %q (프록시가 하위 경로를 변형하면 안 됨)", gotPath, path)
+	}
+}

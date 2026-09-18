@@ -4,6 +4,12 @@ server:
 spring:
   application:
     name: slackbot-server
+  servlet:
+    multipart:
+      # 아티팩트 자산 업로드 (v0.0.72). 앱 검증(파일 5MB·합계 25MB)이 먼저 친절한 400 을
+      # 주도록 컨테이너 한도는 여유 있게 — 여기 걸리면 413/커넥션 중단으로 떨어진다.
+      max-file-size: 10MB
+      max-request-size: 40MB
   # STUDY: Spring Boot는 application.yml/properties에서 ${VAR:default} 로 env var 주입 가능.
   datasource:
     # STUDY: 호스트를 변수화 — bare-metal 은 기본 localhost, docker-compose 에서는 POSTGRES_HOST=postgres 주입.

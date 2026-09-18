@@ -108,6 +108,23 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 아티팩트 폴더 업로드 — page_files 자산 지원 (v0.0.72)
+
+웹페이지/아티팩트를 저장하면 나오는 `page.html` + 자산 폴더(`page_files/` — 이미지·CSS·JS)를 함께
+올릴 수 있다. HTML 안의 상대 참조가 뷰어에서 그대로 동작한다.
+- **URL 스킴 변경**: 정식 공개 링크는 `/artifacts/view/{id}/` (trailing slash — 상대 참조 기준).
+  기존 형식 `/artifacts/view/{id}` 는 301 리다이렉트로 계속 동작. 자산은 `/artifacts/view/{id}/경로`.
+- 업로드: 폴더 선택 input(webkitdirectory) 추가. html 파일 + `_files` 폴더를 각각 선택하거나,
+  둘을 담은 상위 폴더 하나만 선택해도 됨(루트 .html 자동 감지). 멀티파트 전송, 경로는 `assetPaths`
+  텍스트 필드로 전달(파일명 슬래시 보존이 서블릿 구현 의존적이라 불신).
+- 저장: Postgres `artifact_assets` BYTEA (Flyway V6, 부모 삭제 시 CASCADE). 한도: 파일 5MB ·
+  아티팩트당 합계 25MB · 200개.
+- MIME 은 서버가 확장자로 결정(`MediaTypeFactory`, 클라이언트 타입 불신). 확장자 없는 자산은
+  `application/octet-stream` + `nosniff` 라 브라우저가 CSS/JS 로 해석하지 않음(저장 페이지는
+  확장자가 보존되므로 실사용 문제 없음).
+- **XSS 방어 유지**: 자산 응답에도 `Content-Security-Policy: sandbox allow-scripts` + `nosniff` —
+  직접 열리는 HTML/SVG 자산도 고유 origin. `Cache-Control: public, max-age=3600`.
+
 ### sol dashboard 개편 2단계 — 공개 아티팩트 갤러리 (v0.0.71)
 
 아티팩트 탭 구현: HTML을 올리면 **공개 링크**(`/artifacts/view/{id}`)가 생겨 Claude 팀플랜/대시보드

@@ -71,6 +71,10 @@ class SecurityConfigIntegrationTest {
     @MockitoBean
     private com.jirabot.slack.repository.ArtifactRepository artifactRepository;
 
+    // L11 (v0.0.72 artifact assets)
+    @MockitoBean
+    private com.jirabot.slack.repository.ArtifactAssetRepository artifactAssetRepository;
+
     @MockitoBean
     private JiraSyncService jiraSyncService;
 

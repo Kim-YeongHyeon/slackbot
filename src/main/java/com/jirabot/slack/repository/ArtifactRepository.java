@@ -16,9 +16,12 @@ public interface ArtifactRepository extends JpaRepository<ArtifactEntity, Long> 
         String getAuthor();
         Instant getCreatedAt();
         int getSizeBytes();
+        long getAssetCount();
     }
 
     @Query("SELECT a.id AS id, a.title AS title, a.author AS author, a.createdAt AS createdAt, "
-            + "LENGTH(a.html) AS sizeBytes FROM ArtifactEntity a ORDER BY a.createdAt DESC")
+            + "LENGTH(a.html) AS sizeBytes, "
+            + "(SELECT COUNT(s) FROM ArtifactAssetEntity s WHERE s.artifactId = a.id) AS assetCount "
+            + "FROM ArtifactEntity a ORDER BY a.createdAt DESC")
     List<ArtifactSummary> findAllSummaries();
 }
