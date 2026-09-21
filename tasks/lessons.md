@@ -306,3 +306,17 @@ LLM 기능만 죽는 반쪽 장애가 된다.
 - "분류가 전부 unknown/즉사(수 ms)" 패턴이면 모델/프롬프트가 아니라 스폰 실패부터 의심 (L15 의 소요시간
   휴리스틱과 동일 계열).
 - 근본 대응 후보: unattended-upgrades 후 자동 재시작 훅, 또는 openjdk 를 apt-mark hold 하고 수동 업그레이드.
+
+## L18. 유닛테스트 통과 ≠ 런타임 헤더/라우팅 — Security 헤더라이터와 {id} 매핑은 라이브로 확인하라
+
+v0.0.75 에서 유닛테스트 495개가 전부 green 인 상태로 라이브 검증에서 버그 2개가 나왔다:
+1. **X-Frame-Options 라이터는 컨트롤러 헤더를 무조건 덮어쓴다.** Cache-Control 라이터는
+   containsHeader 를 체크해 skip 하지만 XFO 라이터는 안 한다 — Spring Security 헤더라이터들의
+   동작이 라이터마다 다르다. standalone MockMvc 테스트는 Security 필터가 없어 이걸 절대 못 잡는다.
+   해결: SecurityConfig 에서 전역 `frameOptions.sameOrigin()`.
+2. **`@GetMapping("/x/{id}")` 는 정적 파일명도 삼킨다.** `/artifacts/review/{id}` 가
+   `index.html`/`review.js` 까지 매칭해 long 변환 400 — 같은 프리픽스에 정적 리소스를 둘 거면
+   `{id:\d+}` 정규식이 필수다.
+
+**규칙**: 헤더/라우팅이 걸린 변경은 배포 후 curl 로 실제 응답 헤더와 정적 경로를 반드시 찍어본다
+(L16 의 확장 — "코드 계층의 테스트"는 컨테이너/필터 계층의 동작을 증명하지 못한다).

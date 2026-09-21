@@ -5,6 +5,7 @@ import com.jirabot.slack.entity.ArtifactEntity;
 import com.jirabot.slack.repository.ArtifactAssetRepository;
 import com.jirabot.slack.repository.ArtifactRepository;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -31,6 +32,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.core.io.ClassPathResource;
 
 // STUDY: HTML 아티팩트 갤러리 (v0.0.71~). 목록/업로드/수정/삭제(/api/artifacts)와
 //        뷰어(/artifacts/view/{id}/)는 v0.0.73 부터 전부 로그인(httpBasic) 필수 — SecurityConfig 참고.
@@ -46,6 +48,9 @@ public class ArtifactController {
     static final int MAX_ASSET_COUNT = 200;
     static final int MAX_ASSET_PATH = 500;
     static final String DEFAULT_TITLE = "제목 없는 아티팩트";
+    // 뷰어 하위 경로로 주입 에이전트를 서빙 (v0.0.75). 실제 자산과 충돌하지 않도록 "__" 접두.
+    // 하위 경로라 RFC 7617 사전 인증전송으로 sandbox 문서에서도 자산과 동일 메커니즘으로 로드된다.
+    static final String AGENT_PATH = "__comment-agent.js";
 
     private static final Pattern HTML_TITLE = Pattern.compile(
             "<title[^>]*>([^<]{1,200})</title>", Pattern.CASE_INSENSITIVE);
@@ -63,10 +68,21 @@ public class ArtifactController {
 
     private final ArtifactRepository repository;
     private final ArtifactAssetRepository assetRepository;
+    // classpath 리소스(static/ 아님)를 기동 시 1회 읽어 캐시 — 요청마다 파일 IO 를 하지 않는다.
+    private final String agentJs;
 
     public ArtifactController(ArtifactRepository repository, ArtifactAssetRepository assetRepository) {
         this.repository = repository;
         this.assetRepository = assetRepository;
+        // STUDY: ClassPathResource — 클래스패스(빌드 시 jar 안)에서 리소스를 읽는다. static/ 밑에 두면
+        //        Spring 이 정적 매핑으로도 노출하므로, 뷰어 핸들러가 유일한 서빙 경로가 되도록 밖에 둔다.
+        try {
+            this.agentJs = new String(new ClassPathResource("comment-agent.js")
+                    .getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            // 리소스 누락은 배포 사고 — checked IOException 을 unchecked 로 승격해 기동을 실패시킨다.
+            throw new UncheckedIOException("comment-agent.js 리소스를 읽지 못했습니다", e);
+        }
     }
 
     @GetMapping("/api/artifacts")
@@ -190,26 +206,65 @@ public class ArtifactController {
     public ResponseEntity<Object> view(@PathVariable long id, @PathVariable String path) {
         if (path.isEmpty() || "/".equals(path)) {
             return repository.findById(id)
+                    // X-Frame-Options: SAMEORIGIN (v0.0.75) — Security 기본 DENY 가 review iframe 을
+                    // 차단하던 것 + 카드 미리보기 잠복 버그(v0.0.71~)를 함께 해결. 문서 하단에 댓글
+                    // 에이전트 <script> 를 주입해 sandbox 문서 안에서 선택/앵커/하이라이트를 담당시킨다.
                     .<ResponseEntity<Object>>map(a -> ResponseEntity.ok()
                             .header("Content-Security-Policy", "sandbox allow-scripts")
                             .header("X-Content-Type-Options", "nosniff")
+                            .header("X-Frame-Options", "SAMEORIGIN")
                             .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
-                            .body(a.getHtml()))
+                            .body(injectAgent(a.getHtml(), id)))
                     .orElseGet(() -> ResponseEntity.status(404)
                             .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
                             .body("<html><body style='font-family:sans-serif'>"
                                     + "<h3>아티팩트를 찾을 수 없습니다</h3><p>삭제되었거나 잘못된 링크입니다.</p></body></html>"));
         }
         String assetPath = path.substring(1);
+        // 댓글 에이전트 서빙 (v0.0.75) — 자산 repo 조회 *전에* 분기. 캐시된 classpath JS 를 돌려준다.
+        // XFO SAMEORIGIN 은 안 붙인다 — 서브리소스(스크립트)라 프레이밍 대상이 아니다.
+        if (AGENT_PATH.equals(assetPath)) {
+            return ResponseEntity.ok()
+                    .header("X-Content-Type-Options", "nosniff")
+                    .contentType(new MediaType("text", "javascript", StandardCharsets.UTF_8))
+                    .body(agentJs);
+        }
         return assetRepository.findByArtifactIdAndPath(id, assetPath)
                 .<ResponseEntity<Object>>map(asset -> ResponseEntity.ok()
                         .header("Content-Security-Policy", "sandbox allow-scripts")
                         .header("X-Content-Type-Options", "nosniff")
+                        .header("X-Frame-Options", "SAMEORIGIN")
                         .contentType(MediaType.parseMediaType(asset.getContentType()))
                         .body(asset.getData()))
                 .orElseGet(() -> ResponseEntity.status(404)
                         .contentType(MediaType.TEXT_PLAIN)
                         .body("asset not found"));
+    }
+
+    // 리뷰 페이지 진입점 (v0.0.75) — 정적 SPA 로 302. 인증·일반 origin 페이지가 사이드바+API 를 담당.
+    // {id:\d+} 정규식 필수 — 없으면 {id} 가 index.html/review.js 등 정적 파일명까지 매칭해
+    // long 변환 실패(400)로 리뷰 페이지 자체가 안 열린다 (v0.0.75 라이브 검증에서 발견).
+    @GetMapping("/artifacts/review/{id:\\d+}")
+    public ResponseEntity<Void> reviewPage(@PathVariable long id) {
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .location(URI.create("/artifacts/review/index.html?id=" + id))
+                .build();
+    }
+
+    // </body> 마지막 매치 앞에 에이전트 <script defer> 를 주입 (없으면 문서 끝에 append).
+    // STUDY: toLowerCase().lastIndexOf 는 터키어 로케일 등에서 'I'/'İ' 매핑이 깨진다(로케일 함정) —
+    //        CASE_INSENSITIVE 정규식 Matcher 로 마지막 매치 위치를 안전하게 찾는다.
+    static String injectAgent(String html, long id) {
+        String tag = "<script src=\"/artifacts/view/" + id + "/" + AGENT_PATH + "\" defer></script>";
+        Matcher m = Pattern.compile("</body>", Pattern.CASE_INSENSITIVE).matcher(html);
+        int last = -1;
+        while (m.find()) {
+            last = m.start();
+        }
+        if (last < 0) {
+            return html + tag;
+        }
+        return html.substring(0, last) + tag + html.substring(last);
     }
 
     // ===== 공용 검증/조립 =====

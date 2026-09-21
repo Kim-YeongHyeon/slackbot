@@ -515,6 +515,7 @@ async function loadArtifacts() {
         <div class="art-sub muted">${fmtDate(a.createdAt)}${a.author ? ' · ' + esc(a.author) : ''} · ${(a.sizeBytes/1024).toFixed(0)}KB${a.assetCount ? ' · 파일 ' + a.assetCount + '개' : ''}</div>
         <div class="art-actions">
           <button class="btn art-copy" data-copy="${a.id}">🔗 링크 복사</button>
+          <button class="btn art-review" data-review="${a.id}">💬${a.openCommentCount ? ' ' + a.openCommentCount : ''}</button>
           <button class="btn art-edit" data-edit="${a.id}" data-title="${esc(a.title)}">✏️</button>
           <button class="btn art-del" data-del="${a.id}">🗑</button>
         </div>
@@ -537,6 +538,11 @@ async function loadArtifacts() {
   grid.querySelectorAll('.art-edit').forEach(b => b.onclick = (e) => {
     e.stopPropagation();
     startArtifactEdit(b.dataset.edit, b.dataset.title);
+  });
+  // 인라인 댓글 리뷰 (v0.0.75) — 새 탭에서 리뷰 페이지 열기 (💬 N = 미해결 루트 댓글 수)
+  grid.querySelectorAll('.art-review').forEach(b => b.onclick = (e) => {
+    e.stopPropagation();
+    window.open('/artifacts/review/' + b.dataset.review, '_blank');
   });
 }
 

@@ -17,11 +17,15 @@ public interface ArtifactRepository extends JpaRepository<ArtifactEntity, Long> 
         Instant getCreatedAt();
         int getSizeBytes();
         long getAssetCount();
+        // 미해결 루트 댓글 수 (v0.0.75) — 카드의 💬 N 배지용. 대댓글·완료 댓글은 제외.
+        long getOpenCommentCount();
     }
 
     @Query("SELECT a.id AS id, a.title AS title, a.author AS author, a.createdAt AS createdAt, "
             + "LENGTH(a.html) AS sizeBytes, "
-            + "(SELECT COUNT(s) FROM ArtifactAssetEntity s WHERE s.artifactId = a.id) AS assetCount "
+            + "(SELECT COUNT(s) FROM ArtifactAssetEntity s WHERE s.artifactId = a.id) AS assetCount, "
+            + "(SELECT COUNT(c) FROM ArtifactCommentEntity c WHERE c.artifactId = a.id "
+            + "AND c.parentId IS NULL AND c.resolved = false) AS openCommentCount "
             + "FROM ArtifactEntity a ORDER BY a.createdAt DESC")
     List<ArtifactSummary> findAllSummaries();
 }

@@ -54,6 +54,11 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 // v0.0.73: 대시보드 전 경로 로그인 필수 — 터널이든 사내망 직접(:8080)이든 동일하게 요구.
                 .httpBasic(basic -> basic.realmName("sol dashboard"))
+                // STUDY: X-Frame-Options 라이터는 Cache-Control 라이터와 달리 containsHeader 체크 없이
+                // 무조건 덮어쓴다 — 컨트롤러에서 SAMEORIGIN 을 넣어도 커밋 시점에 DENY 로 교체된다
+                // (v0.0.75 라이브 검증에서 발견). 전역을 SAMEORIGIN 으로: 같은 origin 만 프레이밍
+                // 가능하므로 클릭재킹 방어는 유지되고, 리뷰 페이지 iframe·카드 미리보기가 동작한다.
+                .headers(h -> h.frameOptions(f -> f.sameOrigin()))
                 .formLogin(AbstractHttpConfigurer::disable)
                 .logout(AbstractHttpConfigurer::disable)
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -70,7 +75,9 @@ public class SecurityConfig {
                                 "/dashboard/**", "/api/dashboard/**",
                                 "/api/user-mappings/**", "/api/feature-requests/**",
                                 "/api/github-mappings/**",
-                                "/api/artifacts/**", "/artifacts/view/**").authenticated()
+                                // v0.0.75: 아티팩트 인라인 댓글 리뷰 페이지(정적 SPA) — 로그인 필수.
+                                "/api/artifacts/**", "/artifacts/view/**",
+                                "/artifacts/review/**").authenticated()
                         // STUDY: /api/slack/** 는 SlackSignatureFilter 에서 HMAC 검증으로 이미 신원을 확인했으므로
                         // Spring Security 의 authorization 단계에서는 permitAll. 실패 시 필터에서 403 으로 이미 차단됨.
                         .requestMatchers("/api/slack/**").permitAll()

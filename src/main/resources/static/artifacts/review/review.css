@@ -1,0 +1,62 @@
+/* 아티팩트 인라인 댓글 리뷰 (v0.0.75). 대시보드 팔레트 로컬 복사 — style.css 링크 안 함. */
+:root {
+  --bg: #0f1419; --panel: #1a2129; --border: #2c3540;
+  --text: #e6edf3; --muted: #8b98a5; --accent: #4493f8;
+  --green: #3fb950; --red: #f85149; --yellow: #d29922;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, "Pretendard", "Noto Sans KR", sans-serif;
+  background: var(--bg); color: var(--text); min-height: 100vh; }
+
+.review-header { display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 20px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 20; background: var(--bg); }
+.doc-title { font-size: 16px; font-weight: 700; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.link { color: var(--accent); text-decoration: none; font-size: 13px; }
+.link:hover { text-decoration: underline; }
+.muted { color: var(--muted); font-size: 12px; }
+
+.btn { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.danger { color: var(--red); }
+.btn.small { font-size: 12px; padding: 3px 8px; }
+
+.review-main { display: flex; align-items: flex-start; }
+.doc-col { flex: 1; position: relative; background: #fff; }
+#doc-frame { width: 100%; border: 0; display: block; }
+.rail { width: 340px; flex-shrink: 0; position: relative; padding: 0 12px; }
+
+/* 카드 — 레일 안에서 절대 배치 (JS 가 top 계산) */
+.cmt-card { position: absolute; left: 12px; right: 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; font-size: 13px; transition: top .15s, box-shadow .15s; }
+.cmt-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cmt-card.resolved { opacity: .55; }
+.cmt-card.orphan { border-color: var(--yellow); }
+.cmt-quote { font-size: 12px; color: var(--muted); border-left: 2px solid var(--border);
+  padding-left: 8px; margin-bottom: 6px; white-space: pre-wrap; word-break: break-word; }
+.cmt-badge { display: inline-block; font-size: 11px; color: var(--yellow); margin-bottom: 6px; }
+.cmt-body { white-space: pre-wrap; word-break: break-word; }
+.cmt-by { color: var(--muted); font-size: 11px; margin-top: 6px; }
+.cmt-actions { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+
+.cmt-replies { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
+.cmt-reply { padding: 5px 0; border-bottom: 1px solid var(--border); }
+.cmt-reply:last-child { border-bottom: none; }
+
+.cmt-compose { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.cmt-card textarea, .cmt-card input[type="text"] {
+  width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 13px; font-family: inherit; resize: vertical; }
+.cmt-card textarea:focus, .cmt-card input:focus { outline: none; border-color: var(--accent); }
+
+/* 드래그 후 뜨는 "댓글" 버블 */
+.cmt-bubble { position: absolute; left: 12px;
+  background: var(--accent); color: #fff; border: none; border-radius: 16px;
+  padding: 6px 14px; font-size: 13px; cursor: pointer; z-index: 15; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+
+.review-error { padding: 40px; font-size: 15px; color: var(--red); }

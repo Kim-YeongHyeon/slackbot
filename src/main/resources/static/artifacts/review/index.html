@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>아티팩트 리뷰</title>
+  <!-- 대시보드 style.css 를 링크하지 않는다 — 팔레트만 review.css 에 로컬 복사 (레이아웃 독립). -->
+  <link rel="stylesheet" href="review.css?v=0.0.75">
+</head>
+<body>
+<header class="review-header">
+  <span id="doc-title" class="doc-title">아티팩트 리뷰</span>
+  <div class="header-right">
+    <a class="link" href="/dashboard/">← 갤러리로</a>
+    <button id="btn-toggle-resolved" class="btn">완료된 댓글 보기</button>
+    <span id="author-display" class="muted"></span>
+  </div>
+</header>
+
+<div class="review-main">
+  <div class="doc-col">
+    <iframe id="doc-frame" sandbox="allow-scripts" title="아티팩트"></iframe>
+  </div>
+  <div id="rail" class="rail"></div>
+</div>
+
+<script src="review.js?v=0.0.75"></script>
+</body>
+</html>

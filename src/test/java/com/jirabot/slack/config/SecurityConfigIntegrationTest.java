@@ -78,6 +78,10 @@ class SecurityConfigIntegrationTest {
     @MockitoBean
     private com.jirabot.slack.repository.ArtifactAssetRepository artifactAssetRepository;
 
+    // L11 (v0.0.75 artifact comments)
+    @MockitoBean
+    private com.jirabot.slack.repository.ArtifactCommentRepository artifactCommentRepository;
+
     @MockitoBean
     private JiraSyncService jiraSyncService;
 
@@ -95,6 +99,10 @@ class SecurityConfigIntegrationTest {
         mockMvc.perform(get("/api/artifacts")).andExpect(status().isUnauthorized());
         // 뷰어도 로그인 대상 (v0.0.73 — 무인증 링크 공유 중단)
         mockMvc.perform(get("/artifacts/view/1/")).andExpect(status().isUnauthorized());
+        // v0.0.75: 인라인 댓글 리뷰 페이지·댓글 API 도 로그인 필수.
+        // 리뷰 진입점은 302 리다이렉트지만, 무인증이면 리다이렉트 전에 401 이어야 한다.
+        mockMvc.perform(get("/artifacts/review/1")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/api/artifacts/1/comments")).andExpect(status().isUnauthorized());
     }
 
     @Test
@@ -104,6 +112,23 @@ class SecurityConfigIntegrationTest {
 
         mockMvc.perform(get("/api/artifacts").header("Authorization", basic("sol", "test-pw")))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void reviewStaticPage_servedWithAuth() throws Exception {
+        // {id:\d+} 회귀 방지 — 컨트롤러 매핑이 index.html 을 삼키면 400 이 나며 리뷰 SPA 가 깨진다.
+        mockMvc.perform(get("/artifacts/review/index.html?id=1")
+                        .header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void artifactViewer_framableBySameOrigin() throws Exception {
+        // v0.0.75 라이브 검증에서 발견: XFO 라이터는 컨트롤러가 넣은 헤더를 무조건 덮어쓴다.
+        // 전역 sameOrigin 설정이 빠지면 리뷰 iframe·카드 미리보기가 전부 차단되므로 회귀 고정.
+        mockMvc.perform(get("/artifacts/view/1/").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("X-Frame-Options", "SAMEORIGIN"));
     }
 
     @Test

@@ -2,6 +2,8 @@ package com.jirabot.slack.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -70,6 +72,7 @@ class ArtifactControllerTest {
             public Instant getCreatedAt() { return Instant.parse("2026-06-12T00:00:00Z"); }
             public int getSizeBytes() { return 2048; }
             public long getAssetCount() { return 3; }
+            public long getOpenCommentCount() { return 4; }
         }));
 
         mockMvc.perform(get("/api/artifacts"))
@@ -77,6 +80,7 @@ class ArtifactControllerTest {
                 .andExpect(jsonPath("$[0].title").value("주간 리포트"))
                 .andExpect(jsonPath("$[0].sizeBytes").value(2048))
                 .andExpect(jsonPath("$[0].assetCount").value(3))
+                .andExpect(jsonPath("$[0].openCommentCount").value(4))
                 .andExpect(jsonPath("$[0].html").doesNotExist())
                 .andExpect(result -> assertThat(result.getResponse().getContentAsString())
                         .doesNotContain("html"));
@@ -332,7 +336,15 @@ class ArtifactControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Security-Policy", "sandbox allow-scripts"))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
-                .andExpect(result -> assertThat(result.getResponse().getContentAsString()).contains("hi"));
+                // v0.0.75: XFO SAMEORIGIN (리뷰 iframe 허용) + 에이전트 <script> 주입은 유지되어야 한다.
+                .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"))
+                .andExpect(result -> {
+                    String out = result.getResponse().getContentAsString();
+                    assertThat(out).contains("hi");
+                    assertThat(out).contains("/artifacts/view/7/" + ArtifactController.AGENT_PATH);
+                });
+        // 주입은 새 문자열 생성일 뿐 — DB(엔티티)를 저장하지 않는다 (원문 불변).
+        verify(repository, never()).save(any());
     }
 
     @Test
@@ -357,6 +369,8 @@ class ArtifactControllerTest {
                 .andExpect(header().string("Content-Type", "image/png"))
                 .andExpect(header().string("Content-Security-Policy", "sandbox allow-scripts"))
                 .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                // v0.0.75: 자산 응답에도 XFO SAMEORIGIN
+                .andExpect(header().string("X-Frame-Options", "SAMEORIGIN"))
                 // 캐시 금지 (v0.0.74) — 제자리 수정 후 구버전 자산이 보이면 안 된다
                 .andExpect(header().doesNotExist("Cache-Control"))
                 .andExpect(result -> assertThat(result.getResponse().getContentAsByteArray())
@@ -387,5 +401,80 @@ class ArtifactControllerTest {
 
         mockMvc.perform(delete("/api/artifacts/4")).andExpect(status().isNotFound());
         verify(repository, never()).deleteById(any());
+    }
+
+    // ===== 인라인 댓글 에이전트 주입 (v0.0.75) =====
+
+    @Test
+    void injectAgent_insertsScriptBeforeLastBodyClose() {
+        String out = ArtifactController.injectAgent("<html><body>hi</body></html>", 7L);
+        // 정확히 </body> 앞에 삽입 — 태그는 딱 한 번만 등장
+        assertThat(out).contains("<script src=\"/artifacts/view/7/__comment-agent.js\" defer></script></body>");
+        assertThat(countOccurrences(out, "__comment-agent.js")).isEqualTo(1);
+    }
+
+    @Test
+    void injectAgent_lastBodyClose_whenMultiple() {
+        // 문서에 </body> 가 여러 번이면 마지막 앞에 삽입해야 한다
+        String out = ArtifactController.injectAgent("<body>a</body><body>b</body>", 3L);
+        int scriptIdx = out.indexOf("__comment-agent.js");
+        int lastBody = out.lastIndexOf("</body>");
+        assertThat(scriptIdx).isLessThan(lastBody);
+        assertThat(countOccurrences(out, "__comment-agent.js")).isEqualTo(1);
+    }
+
+    @Test
+    void injectAgent_uppercaseBodyTag_matchedCaseInsensitively() {
+        String out = ArtifactController.injectAgent("<HTML><BODY>hi</BODY></HTML>", 9L);
+        assertThat(out).contains("<script src=\"/artifacts/view/9/__comment-agent.js\" defer></script></BODY>");
+    }
+
+    @Test
+    void injectAgent_noBodyTag_appendsAtEnd() {
+        String out = ArtifactController.injectAgent("<div>no body tag</div>", 2L);
+        assertThat(out).endsWith("<script src=\"/artifacts/view/2/__comment-agent.js\" defer></script>");
+    }
+
+    @Test
+    void injectAgent_referencesCorrectId() {
+        assertThat(ArtifactController.injectAgent("<body></body>", 42L))
+                .contains("/artifacts/view/42/__comment-agent.js");
+    }
+
+    @Test
+    void view_servesAgentJs_evenWithEmptyAssetRepo() throws Exception {
+        // 에이전트는 자산 repo 조회 전에 분기 — 자산이 없어도 200 이어야 한다.
+        mockMvc.perform(get("/artifacts/view/7/__comment-agent.js"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(result -> {
+                    assertThat(result.getResponse().getContentType()).startsWith("text/javascript");
+                    assertThat(result.getResponse().getContentAsString()).contains("cmt");
+                });
+        // 자산 repo 는 건드리지 않는다 (분기가 조회보다 먼저)
+        verify(assetRepository, never()).findByArtifactIdAndPath(anyLong(), anyString());
+    }
+
+    @Test
+    void reviewPage_redirectsToStaticSpaWithIdParam() throws Exception {
+        mockMvc.perform(get("/artifacts/review/5"))
+                .andExpect(status().isFound())
+                .andExpect(header().string("Location", "/artifacts/review/index.html?id=5"));
+    }
+
+    @Test
+    void reviewPage_staticFilenamesDoNotMatchIdMapping() throws Exception {
+        // {id:\d+} 회귀 방지 — 정규식이 빠지면 index.html 이 {id} 에 매칭되어 long 변환 400 으로
+        // 리뷰 페이지(js/css 포함)가 전부 깨진다. standalone 에선 정적 핸들러가 없어 404 가 정상.
+        mockMvc.perform(get("/artifacts/review/index.html"))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/artifacts/review/review.js"))
+                .andExpect(status().isNotFound());
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        int n = 0, i = 0;
+        while ((i = haystack.indexOf(needle, i)) >= 0) { n++; i += needle.length(); }
+        return n;
     }
 }

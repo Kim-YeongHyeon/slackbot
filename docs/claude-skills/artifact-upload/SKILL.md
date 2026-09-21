@@ -87,6 +87,14 @@ curl -s -o /dev/null -w "%{http_code}" -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" \
   -H 'ngrok-skip-browser-warning: 1' "$U/artifacts/view/{id}/"   # 200 이어야 정상 (무인증이면 401)
 ```
 
+## 인라인 댓글/리뷰 (v0.0.75) — 웹 UI 전용
+
+아티팩트에 Google Docs 스타일 인라인 댓글을 달 수 있다. **댓글/리뷰는 웹 UI 에서만** 하고,
+curl 로는 다루지 않는다. 사용자에게 리뷰 링크를 안내하면 된다:
+`{서버}/artifacts/review/{id}` (브라우저에서 sol 로그인 → 텍스트 드래그해 우측 레일에 코멘트).
+주의: 이후 이 아티팩트를 PUT 으로 **수정하면 기존 댓글이 원문 위치를 잃을 수 있다**(삭제되지는
+않고 "위치 없음" 고아 카드로 잔존).
+
 ## 경로 규칙과 한도
 
 - 한글·공백 경로 그대로 지원 (`Shard 모델 - Claude_files/s.js` OK). 선행 `./` 는 서버가 제거

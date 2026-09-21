@@ -59,8 +59,9 @@ func main() {
 			"/api/feature-requests", "/api/feature-requests/", // 기능요청 게시판
 			"/api/github-mappings", "/api/github-mappings/", // GitHub↔Jira 매핑
 			"/api/artifacts", "/api/artifacts/", // 아티팩트 목록/업로드/삭제
-			"/artifacts/view/", // 아티팩트 뷰어 — v0.0.73 부터 로그인 필수 (무인증 공유 중단)
-			"/actuator/health", // 봇 상태 탭의 서버 health 카드
+			"/artifacts/view/",   // 아티팩트 뷰어 — v0.0.73 부터 로그인 필수 (무인증 공유 중단)
+			"/artifacts/review/", // 인라인 댓글 리뷰 페이지 (v0.0.75)
+			"/actuator/health",   // 봇 상태 탭의 서버 health 카드
 		} {
 			mux.Handle(p, dash)
 		}

@@ -108,6 +108,26 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 아티팩트 인라인 댓글 — 드래그 코멘트 (v0.0.75)
+
+아티팩트 뷰어에서 텍스트를 드래그해 Google Docs 처럼 우측 레일에 댓글을 단다. 대댓글(1단계),
+[완료]로 댓글+하이라이트 소멸, 완료 댓글은 토글로 다시 보기(되돌리기 가능).
+- **진입점**: 갤러리 카드의 `💬 N`(미해결 루트 댓글 수) 버튼 → 새 탭 `/artifacts/review/{id}`
+  (Spring 이 `index.html?id=` 로 302). 인증된 일반 origin 페이지가 사이드바+API 를 담당.
+- **아키텍처(sandbox 유지)**: 아티팩트 HTML 은 여전히 CSP `sandbox allow-scripts`(고유 origin)로
+  서빙되어 문서 스크립트가 API 를 못 부른다. 대신 뷰어 응답 `</body>` 앞에 **주입 에이전트**
+  (`/artifacts/view/{id}/__comment-agent.js`)가 들어가 선택 캡처·앵커링·하이라이트를 하고,
+  부모 리뷰 페이지와 **postMessage** 로만 통신한다(Hypothesis 패턴). 에이전트는 부모의 `init`
+  이 오기 전엔 `ready` 만 보내고 휴면 — 일반 뷰어·카드 미리보기엔 영향 0.
+- **앵커**: W3C TextQuoteSelector — quote(≤500자)+prefix/suffix(32자). `prefix+quote+suffix` 정확
+  일치 → quote 후보 문맥점수 최고순. 하이라이트는 CSS Custom Highlight API(`::highlight`)로 DOM 무변조.
+- **XFO 변경**: 뷰어/자산 응답에 `X-Frame-Options: SAMEORIGIN` 명시 — Security 기본 DENY 가
+  리뷰 iframe 을 막던 것 + **갤러리 카드 미리보기 잠복 버그(v0.0.71~)도 함께 수정**.
+- **API**: `/api/artifacts/{artifactId}/comments` (GET/POST/PATCH/DELETE). 테이블 `artifact_comments`
+  (Flyway V7, `parent_id` 자기참조 CASCADE). 댓글 body/author/quote 는 리뷰 페이지에서 전부 `esc()`.
+- **한계**: CSS Custom Highlight API 미지원 브라우저는 하이라이트만 없이 나머지는 동작.
+  HTML 을 PUT 으로 수정해 인용 위치가 사라지면 "원문 위치를 찾을 수 없음" 고아 카드로 잔존.
+
 ### 아티팩트 제자리 수정 — 같은 링크 유지 (v0.0.74)
 
 이미 올린 아티팩트를 새 URL 없이 수정할 수 있다 (`PUT /api/artifacts/{id}`, JSON/멀티파트 둘 다).
