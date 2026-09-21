@@ -44,6 +44,8 @@
 
   // ===== iframe → 에이전트 통신 =====
   frame.src = '/artifacts/view/' + id + '/';
+  // 상단 "원본 보기" — 댓글 UI 없는 순수 뷰어(새 탭). 리뷰가 기본 진입점 (v0.0.76).
+  document.getElementById('btn-raw-view').href = '/artifacts/view/' + id + '/';
 
   function sendToFrame(type, extra) {
     if (!frame.contentWindow) return;

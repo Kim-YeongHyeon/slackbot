@@ -521,12 +521,13 @@ async function loadArtifacts() {
         </div>
       </div>
     </div>`).join('');
+  // 리뷰(댓글 포함)가 기본 진입점 (v0.0.76) — 순수 뷰어는 리뷰 페이지 상단 [원본 보기]로.
   grid.querySelectorAll('.art-card .art-preview, .art-card .art-title').forEach(el => {
-    el.onclick = () => window.open('/artifacts/view/' + el.closest('.art-card').dataset.id + '/', '_blank');
+    el.onclick = () => window.open('/artifacts/review/' + el.closest('.art-card').dataset.id, '_blank');
   });
   grid.querySelectorAll('.art-copy').forEach(b => b.onclick = async (e) => {
     e.stopPropagation();
-    await navigator.clipboard.writeText(location.origin + '/artifacts/view/' + b.dataset.copy + '/');
+    await navigator.clipboard.writeText(location.origin + '/artifacts/review/' + b.dataset.copy);
     b.textContent = '✅ 복사됨'; setTimeout(() => b.textContent = '🔗 링크 복사', 1500);
   });
   grid.querySelectorAll('.art-del').forEach(b => b.onclick = async (e) => {

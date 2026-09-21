@@ -77,10 +77,11 @@ curl "${args[@]}" -X PUT "$U/api/artifacts/7"
 
 ## 응답과 산출물
 
-성공: `{"id": 7, "title": "...", "assetCount": 2}` → 공개 링크는
-`{서버}/artifacts/view/{id}/` (**trailing slash 필수** — 구 형식은 301 리다이렉트).
+성공: `{"id": 7, "title": "...", "assetCount": 2}` → **사용자에게 전달할 링크는 리뷰 페이지**
+`{서버}/artifacts/review/{id}` (v0.0.76 부터 기본 진입점 — 문서 + 드래그 댓글.
+순수 뷰어 `/artifacts/view/{id}/` 는 리뷰 페이지 상단 [원본 보기] 버튼으로 열 수 있으니 따로 안내 불필요).
 
-업로드 후 링크가 열리는지 확인하고, **공개 링크를 사용자에게 전달하는 것이 최종 산출물**:
+업로드 후 원문이 서빙되는지 확인하고, **리뷰 링크를 사용자에게 전달하는 것이 최종 산출물**:
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}" -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" \
@@ -90,8 +91,8 @@ curl -s -o /dev/null -w "%{http_code}" -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" \
 ## 인라인 댓글/리뷰 (v0.0.75) — 웹 UI 전용
 
 아티팩트에 Google Docs 스타일 인라인 댓글을 달 수 있다. **댓글/리뷰는 웹 UI 에서만** 하고,
-curl 로는 다루지 않는다. 사용자에게 리뷰 링크를 안내하면 된다:
-`{서버}/artifacts/review/{id}` (브라우저에서 sol 로그인 → 텍스트 드래그해 우측 레일에 코멘트).
+curl 로는 다루지 않는다. 리뷰 링크(`{서버}/artifacts/review/{id}`)가 기본 공유 링크다 —
+브라우저에서 sol 로그인 → 텍스트 드래그해 우측 레일에 코멘트, 상단 [원본 보기]로 순수 뷰어 열람.
 주의: 이후 이 아티팩트를 PUT 으로 **수정하면 기존 댓글이 원문 위치를 잃을 수 있다**(삭제되지는
 않고 "위치 없음" 고아 카드로 잔존).
 
