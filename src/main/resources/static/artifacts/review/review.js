@@ -95,7 +95,10 @@
   apiFetch('/api/artifacts').then(function (r) { return r.ok ? r.json() : []; })
     .then(function (list) {
       var found = (list || []).filter(function (a) { return a.id === id; })[0];
-      if (found) titleEl.textContent = found.title;
+      if (found) {
+        titleEl.textContent = found.title;
+        document.title = found.title;   // 브라우저 탭 제목도 아티팩트 제목으로
+      }
     }).catch(function () {});
   refetch().catch(function (e) {
     rail.innerHTML = '<div class="review-error">댓글을 불러오지 못했습니다: ' + esc(e.message) + '</div>';
