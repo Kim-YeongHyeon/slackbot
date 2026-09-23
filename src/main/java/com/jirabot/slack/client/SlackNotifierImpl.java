@@ -165,13 +165,19 @@ public class SlackNotifierImpl implements SlackNotifier {
     @Override
     public void postMessage(String channel, String text) {
         try {
-            slackWebClient.post()
+            String resp = slackWebClient.post()
                     .uri("/chat.postMessage")
                     .bodyValue(Map.of("channel", channel, "text", text))
                     .retrieve()
                     .bodyToMono(String.class)
                     .block();
-            log.debug("Slack message sent channel={}", channel);
+            // STUDY: Slack Web API 는 실패해도 HTTP 200 + {"ok":false,"error":"not_in_channel"} 을 준다 —
+            //        HTTP 상태만 보면 조용히 누락된다. 스케줄 발송(v0.0.78)의 실패가 로그에 남도록 ok 를 확인.
+            if (resp != null && resp.contains("\"ok\":false")) {
+                log.warn("Slack postMessage rejected channel={} response={}", channel, resp);
+            } else {
+                log.debug("Slack message sent channel={}", channel);
+            }
         } catch (Exception e) {
             log.warn("Failed to send Slack message: {}", e.toString());
         }

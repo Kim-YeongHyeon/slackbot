@@ -139,6 +139,15 @@ reminder:
   # 일일 리마인더에서 "진행 중" 으로 이 일수 이상 정체된 이슈를 ⚠️ 로 태그(진입 시각 기준).
   stale-days: ${REMINDER_STALE_DAYS:7}
 
+# 평일 아침 "오늘의 부탁" 채널 메시지 (v0.0.78). 문구: classpath messages/daily-prompt.txt
+# (DAILY_PROMPT_MESSAGE_FILE 로 외부 파일 지정 시 재빌드 없이 교체 가능). enabled=false 로 비상 차단.
+daily-prompt:
+  enabled: ${DAILY_PROMPT_ENABLED:true}
+  channel: ${DAILY_PROMPT_CHANNEL:C06702A7BPD}
+  cron: ${DAILY_PROMPT_CRON:0 30 9 * * MON-FRI}
+  zone: ${DAILY_PROMPT_ZONE:Asia/Seoul}
+  message-file: ${DAILY_PROMPT_MESSAGE_FILE:}
+
 # STUDY: Actuator. /actuator/health = 헬스체크. Phase 1에서는 별도 /health 컨트롤러도 제공.
 management:
   endpoints:

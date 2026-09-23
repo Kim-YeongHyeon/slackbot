@@ -108,6 +108,17 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 평일 아침 "오늘의 부탁" 채널 메시지 (v0.0.78)
+
+평일(월~금) 09:30 KST 에 `C06702A7BPD` 채널로 "오늘의 부탁" 안내 메시지를 자동 발송한다.
+- 문구: `src/main/resources/messages/daily-prompt.txt` (Slack mrkdwn). `DAILY_PROMPT_MESSAGE_FILE`
+  로 외부 파일을 지정하면 재빌드 없이 파일만 고쳐 다음 발송부터 반영.
+- 설정(env): `DAILY_PROMPT_CHANNEL`, `DAILY_PROMPT_CRON`(기본 `0 30 9 * * MON-FRI`),
+  `DAILY_PROMPT_ZONE`, `DAILY_PROMPT_ENABLED=false` 로 비상 차단. 채널이 비면 발송 생략.
+- 공휴일은 구분하지 않는다(평일이면 발송).
+- `SlackNotifier.postMessage` 가 Slack 의 `ok:false`(HTTP 200) 응답을 경고 로그로 남기도록 개선 —
+  기존엔 not_in_channel 등이 조용히 누락됐다.
+
 ### 리뷰 탭 제목 = 아티팩트 제목 (v0.0.77)
 
 리뷰 페이지의 브라우저 탭 제목이 "아티팩트 리뷰" 고정이던 것을 아티팩트 제목으로 표시

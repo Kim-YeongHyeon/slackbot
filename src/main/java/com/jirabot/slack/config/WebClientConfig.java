@@ -19,7 +19,7 @@ import reactor.netty.http.client.HttpClient;
 @Configuration
 @EnableConfigurationProperties({ClaudeProperties.class, JiraProperties.class, IntentProperties.class,
         JiraWebhookProperties.class, NotifyProperties.class, ReminderProperties.class, NotionProperties.class,
-        GitHubProperties.class})
+        GitHubProperties.class, DailyPromptProperties.class})
 public class WebClientConfig {
 
     // STUDY: HttpClient 레벨에서 connect/read timeout을 별도로 설정해야 한다.
