@@ -108,6 +108,12 @@ Slack/Jira webhook 경로는 기존과 동일하게 무인증(각자 서명/toke
 토큰으로 호출돼 webhook actor 가 항상 토큰 소유자로 기록되므로(실제 클릭자와 무관) "변경자: @토큰소유자"가
 오해를 줬다. 버튼 클릭 시 원본 메시지는 `buildTransitionedBlocks` 가 실제 클릭자 이름으로 이미 갱신한다.
 
+### 대시보드 gtm 탭 (v0.0.79)
+
+상위 탭에 `gtm` 을 추가해 Looker Studio 대시보드를 iframe 으로 보여준다. 정적 파일만 변경(서버 코드 없음).
+- URL: `static/dashboard/app.js` 의 `GTM_LOOKER_URL` (Looker 리포트 → 공유 → 삽입). 비어 있으면 안내 문구만 표시.
+- Google 로그인/서드파티 쿠키로 iframe 이 막히면 탭 상단의 "새 창에서 열기" 링크를 사용.
+
 ### 평일 아침 "오늘의 부탁" 채널 메시지 (v0.0.78)
 
 평일(월~금) 09:30 KST 에 `C06702A7BPD` 채널로 "오늘의 부탁" 안내 메시지를 자동 발송한다.

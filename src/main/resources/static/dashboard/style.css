@@ -86,6 +86,8 @@ footer { text-align: center; padding: 16px; border-top: 1px solid var(--border);
 .top-tab.active { color: var(--text); background: var(--panel); border: 1px solid var(--border); border-bottom: none; }
 #tabs { padding-top: 8px; }
 
+#gtm-frame { width: 100%; height: calc(100vh - 140px); border: 0; border-radius: 10px; }
+
 /* ===== 아티팩트 갤러리 (v0.0.71) — Claude 아티팩트 카드 스타일 ===== */
 .art-upload { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
   padding: 16px 20px; margin-bottom: 20px; }

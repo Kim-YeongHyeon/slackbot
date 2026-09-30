@@ -638,6 +638,16 @@ document.getElementById('art-paste-toggle').onclick = () => {
 // 2단 탭 (v0.0.70): 상위 [지라봇|아티팩트]. 지라봇 → 하위 탭바 표시 + 마지막 하위 탭 복원.
 // 아티팩트 → 하위 탭바 숨김 + 아티팩트 패널 표시.
 let lastJirabotTab = 'overview';
+// Looker Studio 리포트 embed URL (https://lookerstudio.google.com/embed/reporting/...). 비우면 안내 문구만 표시.
+const GTM_LOOKER_URL = '';
+function showGtm() {
+  const f = document.getElementById('gtm-frame');
+  const has = !!GTM_LOOKER_URL;
+  document.getElementById('gtm-empty').style.display = has ? 'none' : '';
+  document.getElementById('gtm-bar').style.display = has ? '' : 'none';
+  f.style.display = has ? '' : 'none';
+  if (has && !f.src) { f.src = GTM_LOOKER_URL; document.getElementById('gtm-open').href = GTM_LOOKER_URL; }
+}
 function showTopTab(name) {
   document.querySelectorAll('.top-tab').forEach(t => t.classList.toggle('active', t.dataset.top === name));
   const subNav = document.getElementById('tabs');
@@ -646,8 +656,9 @@ function showTopTab(name) {
     showTab(lastJirabotTab);
   } else {
     subNav.style.display = 'none';
-    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-artifacts'));
-    if (typeof loadArtifacts === 'function') loadArtifacts().catch(reportErr);
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+    if (name === 'gtm') showGtm();
+    else if (typeof loadArtifacts === 'function') loadArtifacts().catch(reportErr);
   }
 }
 document.querySelectorAll('.top-tab').forEach(t => t.onclick = () => showTopTab(t.dataset.top));
