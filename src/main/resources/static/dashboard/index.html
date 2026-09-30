@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>sol dashboard</title>
-  <link rel="stylesheet" href="style.css?v=0.0.78">
+  <link rel="stylesheet" href="style.css?v=0.0.79">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -19,6 +19,7 @@
 <nav id="top-tabs">
   <button class="top-tab active" data-top="jirabot">지라봇</button>
   <button class="top-tab" data-top="artifacts">아티팩트</button>
+    <button class="top-tab" data-top="gtm">GTM</button>
 </nav>
 
 <nav id="tabs">
@@ -197,6 +198,12 @@
     <div id="fr-msg" class="msg"></div>
     <table id="table-features"><thead><tr><th>상태</th><th>제목</th><th>내용</th><th>작성자</th><th>작성일</th><th>완료일</th><th></th></tr></thead><tbody></tbody></table>
   </section>
+  <!-- GTM (상위 탭): Looker Studio 대시보드. URL 은 app.js 의 GTM_LOOKER_URL -->
+  <section id="panel-gtm" class="panel">
+    <p id="gtm-empty" class="muted" style="display:none">Looker Studio URL 이 아직 설정되지 않았습니다 (app.js 의 <code>GTM_LOOKER_URL</code>).</p>
+    <p id="gtm-bar" class="muted" style="display:none">표시되지 않으면(Google 로그인 차단 등) <a id="gtm-open" target="_blank" rel="noopener">새 창에서 열기</a></p>
+    <iframe id="gtm-frame" title="GTM 대시보드" style="display:none"></iframe>
+  </section>
   <!-- 아티팩트 (상위 탭) -->
   <section id="panel-artifacts" class="panel">
     <div class="art-upload">
@@ -220,6 +227,6 @@
 </main>
 
 <footer class="muted">사내망 전용 · 데이터는 로컬 DB 기준 (Jira 와의 차이는 [지금 동기화] 후 새로고침)</footer>
-<script src="app.js?v=0.0.78"></script>
+<script src="app.js?v=0.0.79"></script>
 </body>
 </html>
