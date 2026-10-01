@@ -14,6 +14,18 @@ set -eo pipefail
 BASE_URL="${SPRING_BASE_URL:-http://localhost:8080}"
 API_URL="${BASE_URL}/api/user-mappings"
 
+# v0.0.82: 사용자 매핑 API 는 관리자 전용 — .env 의 관리자 계정(DASHBOARD_USER/PASSWORD)으로 인증한다.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -z "${DASHBOARD_USER:-}" || -z "${DASHBOARD_PASSWORD:-}" ]] && [[ -f "${SCRIPT_DIR}/../.env" ]]; then
+    DASHBOARD_USER="$(grep -E '^DASHBOARD_USER=' "${SCRIPT_DIR}/../.env" | cut -d= -f2-)"
+    DASHBOARD_PASSWORD="$(grep -E '^DASHBOARD_PASSWORD=' "${SCRIPT_DIR}/../.env" | cut -d= -f2-)"
+fi
+if [[ -z "${DASHBOARD_USER:-}" || -z "${DASHBOARD_PASSWORD:-}" ]]; then
+    echo "관리자 계정이 필요합니다: DASHBOARD_USER / DASHBOARD_PASSWORD 환경변수 또는 .env 를 설정하세요." >&2
+    exit 1
+fi
+AUTH=(-u "${DASHBOARD_USER}:${DASHBOARD_PASSWORD}")
+
 # 색상
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -36,7 +48,7 @@ show_help() {
 list_mappings() {
     echo -e "${YELLOW}등록된 매핑 목록:${NC}"
     echo ""
-    if ! response=$(curl -s --fail "${API_URL}"); then
+    if ! response=$(curl -s --fail "${AUTH[@]}" "${API_URL}"); then
         echo -e "${RED}서버에 연결할 수 없습니다. Spring Boot가 실행 중인지 확인하세요.${NC}"
         exit 1
     fi
@@ -60,7 +72,7 @@ register_mapping() {
     local slack_id="$1"
     local jira_name="$2"
 
-    response=$(curl -s -X POST "${API_URL}" \
+    response=$(curl -s "${AUTH[@]}" -X POST "${API_URL}" \
         -H "Content-Type: application/json" \
         -d "{\"slackUserId\": \"${slack_id}\", \"jiraDisplayName\": \"${jira_name}\"}") || true
 

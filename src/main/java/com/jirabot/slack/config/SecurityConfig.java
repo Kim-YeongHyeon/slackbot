@@ -67,16 +67,18 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
                         // 헬스는 무인증 유지 — start.sh/jdk-watchdog/봇상태 카드가 자격증명 없이 호출.
                         .requestMatchers("/health", "/actuator/health", "/actuator/info").permitAll()
-                        // 회원 관리 API — 관리자(sol) 전용 (v0.0.79). 아래 authenticated 목록보다 먼저 와야 한다
-                        // (첫 매칭 규칙이 적용됨). 일반 사용자는 403.
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        // 관리자 전용 API (일반 사용자는 403). 아래 authenticated 목록보다 먼저 와야 한다
+                        // (첫 매칭 규칙이 적용됨). 회원 관리(v0.0.79) + 사용자 관리 탭의
+                        // Slack↔Jira·GitHub↔Jira 매핑(v0.0.82).
+                        .requestMatchers("/api/admin/**",
+                                "/api/user-mappings", "/api/user-mappings/**",
+                                "/api/github-mappings", "/api/github-mappings/**").hasRole("ADMIN")
                         // 대시보드 전체 (정적 UI·통계·관리 API·아티팩트 갤러리+뷰어) — 로그인 필수 (v0.0.73).
                         // 뷰어(/artifacts/view/**)도 사용자 결정으로 포함: 무인증 링크 공유 기능은 중단.
                         // 뷰어 응답의 CSP sandbox 는 유지 — 로그인해도 저장형 XSS 방어는 필요 (ArtifactController).
                         .requestMatchers(
                                 "/dashboard/**", "/api/dashboard/**",
-                                "/api/user-mappings/**", "/api/feature-requests/**",
-                                "/api/github-mappings/**",
+                                "/api/feature-requests/**",
                                 // v0.0.75: 아티팩트 인라인 댓글 리뷰 페이지(정적 SPA) — 로그인 필수.
                                 "/api/artifacts/**", "/artifacts/view/**",
                                 "/artifacts/review/**").authenticated()

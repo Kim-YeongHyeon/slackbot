@@ -162,6 +162,29 @@ class SecurityConfigIntegrationTest {
     }
 
     @Test
+    void userMappingApis_adminOnly() throws Exception {
+        // v0.0.82: 사용자 관리 탭(Slack↔Jira·GitHub↔Jira 매핑) 은 관리자 전용 — 일반 사용자는 조회·변경 모두 403.
+        givenDbUser("kim", "pw1234", true);
+        String kim = basic("kim", "pw1234");
+        mockMvc.perform(get("/api/user-mappings").header("Authorization", kim)).andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/github-mappings").header("Authorization", kim)).andExpect(status().isForbidden());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/user-mappings/U123").header("Authorization", kim))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/github-mappings").header("Authorization", kim)
+                        .contentType("application/json").content("{}"))
+                .andExpect(status().isForbidden());
+
+        // 관리자는 그대로 사용 가능
+        mockMvc.perform(get("/api/user-mappings").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/github-mappings").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isOk());
+        // 무인증은 여전히 401
+        mockMvc.perform(get("/api/user-mappings")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void admin_canUseAdminApi() throws Exception {
         mockMvc.perform(get("/api/admin/users").header("Authorization", basic("sol", "test-pw")))
                 .andExpect(status().isOk());

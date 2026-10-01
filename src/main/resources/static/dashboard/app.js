@@ -778,7 +778,9 @@ async function loadMe() {
   if (!res.ok) return;
   const me = await res.json();
   document.getElementById('me-name').textContent = '👤 ' + me.displayName + (me.admin ? '' : ` (${me.username})`);
+  // 관리자 전용 탭 (서버도 ROLE_ADMIN 으로 막는다 — 숨김은 UX)
   document.getElementById('tab-members').hidden = !me.admin;
+  document.getElementById('tab-users').hidden = !me.admin;
 }
 
 async function loadMembers() {
