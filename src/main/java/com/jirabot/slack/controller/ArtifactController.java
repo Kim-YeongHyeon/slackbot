@@ -1,5 +1,6 @@
 package com.jirabot.slack.controller;
 
+import com.jirabot.slack.config.DashboardUserDetailsService;
 import com.jirabot.slack.entity.ArtifactAssetEntity;
 import com.jirabot.slack.entity.ArtifactEntity;
 import com.jirabot.slack.repository.ArtifactAssetRepository;
@@ -21,6 +22,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -71,9 +73,13 @@ public class ArtifactController {
     // classpath 리소스(static/ 아님)를 기동 시 1회 읽어 캐시 — 요청마다 파일 IO 를 하지 않는다.
     private final String agentJs;
 
-    public ArtifactController(ArtifactRepository repository, ArtifactAssetRepository assetRepository) {
+    private final DashboardUserDetailsService userDetailsService;
+
+    public ArtifactController(ArtifactRepository repository, ArtifactAssetRepository assetRepository,
+                              DashboardUserDetailsService userDetailsService) {
         this.repository = repository;
         this.assetRepository = assetRepository;
+        this.userDetailsService = userDetailsService;
         // STUDY: ClassPathResource — 클래스패스(빌드 시 jar 안)에서 리소스를 읽는다. static/ 밑에 두면
         //        Spring 이 정적 매핑으로도 노출하므로, 뷰어 핸들러가 유일한 서빙 경로가 되도록 밖에 둔다.
         try {
@@ -92,10 +98,10 @@ public class ArtifactController {
 
     // 붙여넣기 모드/기존 클라이언트용 JSON 업로드 (자산 없음). consumes 명시로 멀티파트 핸들러와 분기.
     @PostMapping(value = "/api/artifacts", consumes = MediaType.APPLICATION_JSON_VALUE)
-    public ResponseEntity<Object> create(@RequestBody Map<String, String> body) {
+    public ResponseEntity<Object> create(@RequestBody Map<String, String> body, Authentication auth) {
         String html = requireValidHtml(body.get("html"));
         String title = resolveTitle(body.get("title"), html, body.get("filename"), DEFAULT_TITLE);
-        String author = trimTo(body.get("author"), 100);
+        String author = uploaderName(auth);
 
         ArtifactEntity saved = repository.save(new ArtifactEntity(title, author, html));
         log.info("Artifact created id={} title='{}' size={}B author={}", saved.getId(), title,
@@ -113,17 +119,17 @@ public class ArtifactController {
     public ResponseEntity<Object> createMultipart(
             @RequestParam(value = "title", required = false) String title,
             @RequestParam(value = "filename", required = false) String filename,
-            @RequestParam(value = "author", required = false) String author,
             @RequestParam(value = "html", required = false) String html,
             @RequestParam(value = "assets", required = false) List<MultipartFile> assets,
-            @RequestParam(value = "assetPaths", required = false) List<String> assetPaths) throws IOException {
+            @RequestParam(value = "assetPaths", required = false) List<String> assetPaths,
+            Authentication auth) throws IOException {
         String validHtml = requireValidHtml(html);
         List<MultipartFile> files = assets == null ? List.of() : assets;
         List<String> normalized = validateAssets(files, assetPaths == null ? List.of() : assetPaths);
 
         String resolvedTitle = resolveTitle(title, validHtml, filename, DEFAULT_TITLE);
         ArtifactEntity saved = repository.save(
-                new ArtifactEntity(resolvedTitle, trimTo(author, 100), validHtml));
+                new ArtifactEntity(resolvedTitle, uploaderName(auth), validHtml));
         assetRepository.saveAll(toAssetEntities(saved.getId(), files, normalized));
 
         log.info("Artifact created id={} title='{}' htmlSize={}B assets={}",
@@ -136,11 +142,12 @@ public class ArtifactController {
     // 자산도 보낸 것으로 통째 교체 — JSON 수정처럼 자산을 안 보내면 기존 자산은 삭제된다).
     @PutMapping(value = "/api/artifacts/{id}", consumes = MediaType.APPLICATION_JSON_VALUE)
     @Transactional
-    public ResponseEntity<Object> update(@PathVariable long id, @RequestBody Map<String, String> body) {
+    public ResponseEntity<Object> update(@PathVariable long id, @RequestBody Map<String, String> body,
+                                         Authentication auth) {
         return repository.findById(id)
                 .<ResponseEntity<Object>>map(artifact -> {
                     String html = requireValidHtml(body.get("html"));
-                    applyUpdate(artifact, body.get("title"), body.get("filename"), body.get("author"), html);
+                    applyUpdate(artifact, body.get("title"), body.get("filename"), uploaderName(auth), html);
                     assetRepository.deleteByArtifactId(id);
                     log.info("Artifact updated id={} title='{}' assets=0", id, artifact.getTitle());
                     return ResponseEntity.ok(Map.of("id", id, "title", artifact.getTitle(), "assetCount", 0));
@@ -154,10 +161,10 @@ public class ArtifactController {
             @PathVariable long id,
             @RequestParam(value = "title", required = false) String title,
             @RequestParam(value = "filename", required = false) String filename,
-            @RequestParam(value = "author", required = false) String author,
             @RequestParam(value = "html", required = false) String html,
             @RequestParam(value = "assets", required = false) List<MultipartFile> assets,
-            @RequestParam(value = "assetPaths", required = false) List<String> assetPaths) throws IOException {
+            @RequestParam(value = "assetPaths", required = false) List<String> assetPaths,
+            Authentication auth) throws IOException {
         ArtifactEntity artifact = repository.findById(id).orElse(null);
         if (artifact == null) {
             return ResponseEntity.notFound().build();
@@ -166,7 +173,7 @@ public class ArtifactController {
         List<MultipartFile> files = assets == null ? List.of() : assets;
         List<String> normalized = validateAssets(files, assetPaths == null ? List.of() : assetPaths);
 
-        applyUpdate(artifact, title, filename, author, validHtml);
+        applyUpdate(artifact, title, filename, uploaderName(auth), validHtml);
         assetRepository.deleteByArtifactId(id); // 벌크 삭제 — saveAll 보다 먼저 실행됨 (repo STUDY 참고)
         assetRepository.saveAll(toAssetEntities(id, files, normalized));
 
@@ -269,12 +276,19 @@ public class ArtifactController {
 
     // ===== 공용 검증/조립 =====
 
-    // 수정 공통: 제목은 명시 → <title> → 파일명 → "기존 제목 유지", 작성자는 미지정 시 유지.
+    // 올린 사람 = 로그인 계정 이름 (v0.0.83). 요청의 author 는 받지 않는다 — 사칭 방지, 표기 통일
+    // (같은 사람이 "김영현"/"yhkim"/"YeongHyeonKim" 으로 제각각 기록되던 문제).
+    private String uploaderName(Authentication auth) {
+        return trimTo(userDetailsService.displayNameOf(auth), 100);
+    }
+
+    // 수정 공통: 제목은 명시 → <title> → 파일명 → "기존 제목 유지".
+    // 올린 사람은 최초 업로더를 유지한다 — 비어 있을 때만(옛 데이터) 수정한 사람으로 채운다.
     private static void applyUpdate(ArtifactEntity artifact, String title, String filename,
-                                    String author, String html) {
+                                    String editorName, String html) {
         String newTitle = resolveTitle(title, html, filename, artifact.getTitle());
-        String newAuthor = (author == null || author.isBlank())
-                ? artifact.getAuthor() : trimTo(author, 100);
+        String newAuthor = (artifact.getAuthor() == null || artifact.getAuthor().isBlank())
+                ? editorName : artifact.getAuthor();
         artifact.update(newTitle, newAuthor, html);
     }
 

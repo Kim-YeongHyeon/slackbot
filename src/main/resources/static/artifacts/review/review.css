@@ -13,6 +13,8 @@ body { font-family: -apple-system, "Pretendard", "Noto Sans KR", sans-serif;
   position: sticky; top: 0; z-index: 20; background: var(--bg); }
 .doc-title { font-size: 16px; font-weight: 700; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+/* 올린 사람 — 제목 바로 옆에 붙인다 (space-between 사이에서 가운데로 뜨지 않게 margin-right:auto) */
+#doc-author { margin: 0 auto 0 10px; font-size: 13px; white-space: nowrap; }
 .header-right { display: flex; align-items: center; gap: 12px; }
 .link { color: var(--accent); text-decoration: none; font-size: 13px; }
 .link:hover { text-decoration: underline; }

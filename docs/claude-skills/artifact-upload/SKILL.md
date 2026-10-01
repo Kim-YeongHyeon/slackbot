@@ -24,10 +24,12 @@ U="${ARTIFACT_SERVER_URL:-https://tidiness-pointed-amuser.ngrok-free.dev}"
 curl -s -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" -X POST "$U/api/artifacts" \
   -H 'ngrok-skip-browser-warning: 1' \
   -F "html=<report.html;type=text/html;charset=utf-8" \
-  -F "title=주간 리포트" -F "author=홍길동"        # title/author 는 선택
+  -F "title=주간 리포트"        # title 은 선택
 ```
 
 `title` 을 생략하면 HTML `<title>` 태그 → `filename` 필드 → "제목 없는 아티팩트" 순으로 자동 결정.
+**올린 사람은 인증한 계정 이름으로 자동 기록된다** (v0.0.83 — `author` 필드는 보내도 무시됨).
+수정(PUT) 시에도 최초 업로더가 유지된다.
 
 ## 케이스 2 — 저장된 웹페이지 (html + 자산 폴더)
 

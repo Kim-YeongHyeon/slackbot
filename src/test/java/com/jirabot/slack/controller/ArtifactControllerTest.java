@@ -19,10 +19,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
+import com.jirabot.slack.config.DashboardUserDetailsService;
 import com.jirabot.slack.entity.ArtifactAssetEntity;
 import com.jirabot.slack.entity.ArtifactEntity;
+import com.jirabot.slack.entity.DashboardUserEntity;
 import com.jirabot.slack.repository.ArtifactAssetRepository;
 import com.jirabot.slack.repository.ArtifactRepository;
+import com.jirabot.slack.repository.DashboardUserRepository;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -32,6 +35,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -41,11 +46,21 @@ class ArtifactControllerTest {
     private ArtifactAssetRepository assetRepository;
     private MockMvc mockMvc;
 
+    // 업로드한 로그인 계정 (v0.0.83 — 올린 사람은 로그인 계정 이름으로 자동 기록)
+    private static final UsernamePasswordAuthenticationToken KIM = new UsernamePasswordAuthenticationToken(
+            "kim", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+    private static final UsernamePasswordAuthenticationToken ADMIN = new UsernamePasswordAuthenticationToken(
+            "yhkim", null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+
     @BeforeEach
     void setUp() {
         repository = mock(ArtifactRepository.class);
         assetRepository = mock(ArtifactAssetRepository.class);
-        mockMvc = standaloneSetup(new ArtifactController(repository, assetRepository)).build();
+        DashboardUserRepository users = mock(DashboardUserRepository.class);
+        when(users.findByUsername("kim"))
+                .thenReturn(Optional.of(new DashboardUserEntity("kim", "김철수", "{bcrypt}h")));
+        mockMvc = standaloneSetup(new ArtifactController(repository, assetRepository,
+                new DashboardUserDetailsService(users, "yhkim", "pw", "김영현"))).build();
     }
 
     private static ArtifactEntity saved(String title, String html) {
@@ -92,7 +107,8 @@ class ArtifactControllerTest {
     void create_savesAndReturnsIdTitle() throws Exception {
         mockSavedWithId(1L);
 
-        mockMvc.perform(post("/api/artifacts")
+        // body 에 다른 사람 이름을 넣어도 무시 — 올린 사람은 로그인 계정(김철수)
+        mockMvc.perform(post("/api/artifacts").principal(KIM)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"title\":\"리포트\",\"html\":\"<html></html>\",\"author\":\"김영현\"}"))
                 .andExpect(status().isOk())
@@ -101,6 +117,43 @@ class ArtifactControllerTest {
         ArgumentCaptor<ArtifactEntity> cap = ArgumentCaptor.forClass(ArtifactEntity.class);
         verify(repository).save(cap.capture());
         assertThat(cap.getValue().getHtml()).isEqualTo("<html></html>");
+        assertThat(cap.getValue().getAuthor()).isEqualTo("김철수");
+    }
+
+    @Test
+    void createMultipart_uploaderFromLogin_ignoresAuthorParam() throws Exception {
+        mockSavedWithId(5L);
+        mockMvc.perform(multipart("/api/artifacts").principal(ADMIN)
+                        .param("html", "<html></html>")
+                        .param("author", "다른사람"))
+                .andExpect(status().isOk());
+        ArgumentCaptor<ArtifactEntity> cap = ArgumentCaptor.forClass(ArtifactEntity.class);
+        verify(repository).save(cap.capture());
+        assertThat(cap.getValue().getAuthor()).isEqualTo("김영현");   // 관리자 표시 이름
+    }
+
+    @Test
+    void update_keepsOriginalUploader_evenWhenEditedByOther() throws Exception {
+        // 수정은 내용만 바뀐다 — 올린 사람은 최초 업로더 유지
+        ArtifactEntity existing = new ArtifactEntity("t", "김영현", "<html>old</html>");
+        when(repository.findById(7L)).thenReturn(Optional.of(existing));
+        mockMvc.perform(put("/api/artifacts/7").principal(KIM)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"html\":\"<html>new</html>\",\"author\":\"아무개\"}"))
+                .andExpect(status().isOk());
+        assertThat(existing.getAuthor()).isEqualTo("김영현");
+        assertThat(existing.getHtml()).isEqualTo("<html>new</html>");
+    }
+
+    @Test
+    void update_blankUploader_filledWithEditor() throws Exception {
+        // 옛 데이터(올린 사람 미기록)는 수정한 사람으로 채운다
+        ArtifactEntity existing = new ArtifactEntity("t", null, "<html>old</html>");
+        when(repository.findById(7L)).thenReturn(Optional.of(existing));
+        mockMvc.perform(multipart(HttpMethod.PUT, "/api/artifacts/7").principal(KIM)
+                        .param("html", "<html>new</html>"))
+                .andExpect(status().isOk());
+        assertThat(existing.getAuthor()).isEqualTo("김철수");
     }
 
     @Test

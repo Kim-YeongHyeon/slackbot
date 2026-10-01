@@ -96,6 +96,8 @@
       if (found) {
         titleEl.textContent = found.title;
         document.title = found.title;   // 브라우저 탭 제목도 아티팩트 제목으로
+        // 올린 사람 (v0.0.83 — 업로드한 로그인 계정 이름으로 자동 기록)
+        if (found.author) document.getElementById('doc-author').textContent = '· 올린 사람 ' + found.author;
       }
     }).catch(function () {});
   refetch().catch(function (e) {
