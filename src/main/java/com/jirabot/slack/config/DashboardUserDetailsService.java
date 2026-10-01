@@ -19,17 +19,25 @@ public class DashboardUserDetailsService implements UserDetailsService {
     private final DashboardUserRepository repository;
     private final String adminUser;
     private final String adminPassword;
+    private final String adminDisplayName;
 
     public DashboardUserDetailsService(DashboardUserRepository repository,
                                        @Value("${dashboard.user}") String adminUser,
-                                       @Value("${dashboard.password}") String adminPassword) {
+                                       @Value("${dashboard.password}") String adminPassword,
+                                       @Value("${dashboard.admin-name:관리자}") String adminDisplayName) {
         this.repository = repository;
         this.adminUser = adminUser;
         this.adminPassword = adminPassword;
+        this.adminDisplayName = adminDisplayName == null || adminDisplayName.isBlank() ? "관리자" : adminDisplayName;
     }
 
     public String adminUsername() {
         return adminUser;
+    }
+
+    // 헤더에 표시할 관리자 이름 (DASHBOARD_ADMIN_NAME, 기본 "관리자").
+    public String adminDisplayName() {
+        return adminDisplayName;
     }
 
     @Override

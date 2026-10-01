@@ -5,6 +5,8 @@ server:
 dashboard:
   user: ${DASHBOARD_USER:}
   password: ${DASHBOARD_PASSWORD:}
+  # 관리자 계정의 헤더 표시 이름 (v0.0.80, 기본 "관리자")
+  admin-name: ${DASHBOARD_ADMIN_NAME:관리자}
 
 spring:
   application:

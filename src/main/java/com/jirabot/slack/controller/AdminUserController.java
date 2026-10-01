@@ -67,7 +67,7 @@ public class AdminUserController {
     public Map<String, Object> me(Authentication auth) {
         String username = auth.getName();
         boolean admin = auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
-        String displayName = admin ? "관리자"
+        String displayName = admin ? userDetailsService.adminDisplayName()
                 : repository.findByUsername(username).map(DashboardUserEntity::getDisplayName).orElse(username);
         return Map.of("username", username, "displayName", displayName, "admin", admin);
     }

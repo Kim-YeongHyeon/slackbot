@@ -23,7 +23,7 @@ class DashboardUserDetailsServiceTest {
     @BeforeEach
     void setUp() {
         repo = mock(DashboardUserRepository.class);
-        service = new DashboardUserDetailsService(repo, "sol", "sol-pw");
+        service = new DashboardUserDetailsService(repo, "sol", "sol-pw", "김영현");
     }
 
     @Test
@@ -50,6 +50,12 @@ class DashboardUserDetailsServiceTest {
         u.setEnabled(false);
         when(repo.findByUsername("lee")).thenReturn(Optional.of(u));
         assertThat(service.loadUserByUsername("lee").isEnabled()).isFalse();
+    }
+
+    @Test
+    void adminDisplayName_configurable_blankFallsBackToDefault() {
+        assertThat(service.adminDisplayName()).isEqualTo("김영현");
+        assertThat(new DashboardUserDetailsService(repo, "sol", "pw", " ").adminDisplayName()).isEqualTo("관리자");
     }
 
     @Test

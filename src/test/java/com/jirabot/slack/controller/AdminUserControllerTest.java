@@ -39,7 +39,7 @@ class AdminUserControllerTest {
         encoder = PasswordEncoderFactories.createDelegatingPasswordEncoder();
         when(repo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         mockMvc = standaloneSetup(new AdminUserController(repo, encoder,
-                new DashboardUserDetailsService(repo, "sol", "sol-pw"))).build();
+                new DashboardUserDetailsService(repo, "sol", "sol-pw", "김영현"))).build();
     }
 
     private static String json(String username, String displayName, String password) {

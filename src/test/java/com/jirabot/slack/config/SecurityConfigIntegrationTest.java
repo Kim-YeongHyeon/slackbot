@@ -40,6 +40,7 @@ import org.springframework.test.web.servlet.MockMvc;
         // v0.0.73: 대시보드 전면 로그인 — validator 필수 키 + httpBasic 계정
         "dashboard.user=sol",
         "dashboard.password=test-pw",
+        "dashboard.admin-name=김영현",
         "spring.autoconfigure.exclude=" +
                 "org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration," +
                 "org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration"
@@ -190,7 +191,9 @@ class SecurityConfigIntegrationTest {
         mockMvc.perform(get("/api/dashboard/me").header("Authorization", basic("sol", "test-pw")))
                 .andExpect(status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
-                        .jsonPath("$.admin").value(true));
+                        .jsonPath("$.admin").value(true))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.displayName").value("김영현"));
         givenDbUser("kim", "pw1234", true);
         mockMvc.perform(get("/api/dashboard/me").header("Authorization", basic("kim", "pw1234")))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
