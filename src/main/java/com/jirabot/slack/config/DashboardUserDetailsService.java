@@ -2,6 +2,7 @@ package com.jirabot.slack.config;
 
 import com.jirabot.slack.repository.DashboardUserRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -38,6 +39,25 @@ public class DashboardUserDetailsService implements UserDetailsService {
     // 헤더에 표시할 관리자 이름 (DASHBOARD_ADMIN_NAME, 기본 "관리자").
     public String adminDisplayName() {
         return adminDisplayName;
+    }
+
+    public static boolean isAdmin(Authentication auth) {
+        return auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+    }
+
+    // 로그인 사용자의 표시 이름 — 헤더(/api/dashboard/me)와 댓글 작성자(v0.0.81)가 같은 규칙을 쓴다.
+    // 관리자 → DASHBOARD_ADMIN_NAME, DB 사용자 → 회원 관리에 등록된 이름, (계정이 지워진 직후 등) → 아이디.
+    public String displayNameOf(Authentication auth) {
+        if (auth == null) {
+            return null;
+        }
+        if (isAdmin(auth)) {
+            return adminDisplayName;
+        }
+        return repository.findByUsername(auth.getName())
+                .map(u -> u.getDisplayName())
+                .orElse(auth.getName());
     }
 
     @Override

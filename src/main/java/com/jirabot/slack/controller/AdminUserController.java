@@ -65,11 +65,9 @@ public class AdminUserController {
     // STUDY: 컨트롤러 파라미터에 Authentication 을 선언하면 Spring MVC 가 SecurityContext 의 현재 인증을 주입한다.
     @GetMapping("/api/dashboard/me")
     public Map<String, Object> me(Authentication auth) {
-        String username = auth.getName();
-        boolean admin = auth.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
-        String displayName = admin ? userDetailsService.adminDisplayName()
-                : repository.findByUsername(username).map(DashboardUserEntity::getDisplayName).orElse(username);
-        return Map.of("username", username, "displayName", displayName, "admin", admin);
+        return Map.of("username", auth.getName(),
+                "displayName", userDetailsService.displayNameOf(auth),
+                "admin", DashboardUserDetailsService.isAdmin(auth));
     }
 
     @GetMapping("/api/admin/users")

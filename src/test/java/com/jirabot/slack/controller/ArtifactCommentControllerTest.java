@@ -14,29 +14,44 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
+import com.jirabot.slack.config.DashboardUserDetailsService;
 import com.jirabot.slack.entity.ArtifactCommentEntity;
+import com.jirabot.slack.entity.DashboardUserEntity;
 import com.jirabot.slack.repository.ArtifactCommentRepository;
 import com.jirabot.slack.repository.ArtifactRepository;
+import com.jirabot.slack.repository.DashboardUserRepository;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 
 class ArtifactCommentControllerTest {
 
     private ArtifactRepository artifactRepository;
     private ArtifactCommentRepository commentRepository;
+    private DashboardUserRepository userRepository;
     private MockMvc mockMvc;
+
+    // 로그인 사용자 (v0.0.81 — 작성자는 로그인 계정에서 정한다)
+    private static final UsernamePasswordAuthenticationToken KIM = new UsernamePasswordAuthenticationToken(
+            "kim", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+    private static final UsernamePasswordAuthenticationToken ADMIN = new UsernamePasswordAuthenticationToken(
+            "yhkim", null, List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
 
     @BeforeEach
     void setUp() {
         artifactRepository = mock(ArtifactRepository.class);
         commentRepository = mock(ArtifactCommentRepository.class);
-        mockMvc = standaloneSetup(
-                new ArtifactCommentController(artifactRepository, commentRepository)).build();
+        userRepository = mock(DashboardUserRepository.class);
+        when(userRepository.findByUsername("kim"))
+                .thenReturn(Optional.of(new DashboardUserEntity("kim", "김철수", "{bcrypt}h")));
+        mockMvc = standaloneSetup(new ArtifactCommentController(artifactRepository, commentRepository,
+                new DashboardUserDetailsService(userRepository, "yhkim", "pw", "김영현"))).build();
     }
 
     // 실제 save 는 id 를 채워 반환 — mock 도 id 있는 엔티티를 돌려줘야 응답 직렬화가 NPE 안 난다.
@@ -86,9 +101,9 @@ class ArtifactCommentControllerTest {
         when(artifactRepository.existsById(1L)).thenReturn(true);
         mockSavedWithId(10L);
 
-        mockMvc.perform(post("/api/artifacts/1/comments")
+        mockMvc.perform(post("/api/artifacts/1/comments").principal(KIM)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"body\":\"좋은 지적\",\"author\":\"김영현\","
+                        .content("{\"body\":\"좋은 지적\","
                                 + "\"quote\":\"인용문\",\"prefix\":\"앞\",\"suffix\":\"뒤\"}"))
                 .andExpect(status().isOk());
 
@@ -98,10 +113,43 @@ class ArtifactCommentControllerTest {
         assertThat(saved.getArtifactId()).isEqualTo(1L);
         assertThat(saved.getParentId()).isNull();
         assertThat(saved.getBody()).isEqualTo("좋은 지적");
-        assertThat(saved.getAuthor()).isEqualTo("김영현");
+        assertThat(saved.getAuthor()).isEqualTo("김철수");   // 회원 관리에 등록된 이름
         assertThat(saved.getQuote()).isEqualTo("인용문");
         assertThat(saved.getPrefix()).isEqualTo("앞");
         assertThat(saved.getSuffix()).isEqualTo("뒤");
+    }
+
+    // ===== 작성자 = 로그인 계정 (v0.0.81) =====
+
+    private String savedAuthorAfterPost(UsernamePasswordAuthenticationToken who, String json) throws Exception {
+        when(artifactRepository.existsById(1L)).thenReturn(true);
+        mockSavedWithId(10L);
+        mockMvc.perform(post("/api/artifacts/1/comments").principal(who)
+                        .contentType(MediaType.APPLICATION_JSON).content(json))
+                .andExpect(status().isOk());
+        ArgumentCaptor<ArtifactCommentEntity> cap = ArgumentCaptor.forClass(ArtifactCommentEntity.class);
+        verify(commentRepository).save(cap.capture());
+        return cap.getValue().getAuthor();
+    }
+
+    @Test
+    void create_authorInBody_isIgnored_noSpoofing() throws Exception {
+        // 로그인 후엔 남의 이름으로 쓸 수 없어야 한다 — 요청에 author 를 넣어도 무시
+        assertThat(savedAuthorAfterPost(KIM, "{\"body\":\"hi\",\"author\":\"김영현\"}"))
+                .isEqualTo("김철수");
+    }
+
+    @Test
+    void create_asAdmin_usesAdminDisplayName() throws Exception {
+        assertThat(savedAuthorAfterPost(ADMIN, "{\"body\":\"hi\"}")).isEqualTo("김영현");
+    }
+
+    @Test
+    void create_userDeletedMidSession_fallsBackToUsername() throws Exception {
+        // 계정이 방금 삭제된 경우 등 — DB 에 없으면 아이디로라도 남긴다 (익명보다 낫다)
+        UsernamePasswordAuthenticationToken ghost = new UsernamePasswordAuthenticationToken(
+                "ghost", null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+        assertThat(savedAuthorAfterPost(ghost, "{\"body\":\"hi\"}")).isEqualTo("ghost");
     }
 
     @Test

@@ -35,12 +35,10 @@
   var pending = null;         // 작성 중 선택 {quote, prefix, suffix, y}
   var railTopOffset = 0;      // rail 의 문서상 top (스크롤 좌표 보정용)
 
-  var author = '';
-  try { author = localStorage.getItem('cmt_author') || ''; } catch (_) {}
-  updateAuthorDisplay();
-  function updateAuthorDisplay() {
-    authorDisplay.textContent = author ? '작성자: ' + author : '';
-  }
+  // 작성자는 서버가 로그인 계정으로 정한다 (v0.0.81) — 여기선 누구로 작성되는지 표시만 한다.
+  apiFetch('/api/dashboard/me').then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (me) { if (me) authorDisplay.textContent = '👤 ' + me.displayName; })
+    .catch(function () {});
 
   // ===== iframe → 에이전트 통신 =====
   frame.src = '/artifacts/view/' + id + '/';
@@ -220,7 +218,7 @@
       var ta = q('[data-reply-body]');
       var text = ta.value.trim();
       if (!text) return;
-      postComment({ body: text, author: author, parentId: c.id }).then(function () { return refetch(); });
+      postComment({ body: text, parentId: c.id }).then(function () { return refetch(); });
     };
   }
 
@@ -339,7 +337,6 @@
       ? '<div class="cmt-quote">' + esc(pending.quote.length > 80 ? pending.quote.slice(0, 80) + '…' : pending.quote) + '</div>' : '';
     card.innerHTML = quotePreview
       + '<div class="cmt-compose">'
-      + '<input type="text" data-c-author placeholder="이름" value="' + esc(author) + '">'
       + '<textarea rows="3" data-c-body placeholder="댓글을 입력하세요…"></textarea>'
       + '<div class="cmt-actions">'
       + '<button class="btn small primary" data-c-submit>등록</button>'
@@ -351,12 +348,8 @@
     card.querySelector('[data-c-submit]').onclick = function () {
       var body = card.querySelector('[data-c-body]').value.trim();
       if (!body) return;
-      var name = card.querySelector('[data-c-author]').value.trim();
-      author = name;
-      try { localStorage.setItem('cmt_author', author); } catch (_) {}
-      updateAuthorDisplay();
       postComment({
-        body: body, author: author,
+        body: body,
         quote: pending && pending.quote, prefix: pending && pending.prefix, suffix: pending && pending.suffix
       }).then(function () {
         closeComposer();

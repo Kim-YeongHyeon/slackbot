@@ -1,5 +1,6 @@
 package com.jirabot.slack.controller;
 
+import com.jirabot.slack.config.DashboardUserDetailsService;
 import com.jirabot.slack.entity.ArtifactCommentEntity;
 import com.jirabot.slack.repository.ArtifactCommentRepository;
 import com.jirabot.slack.repository.ArtifactRepository;
@@ -8,6 +9,7 @@ import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,11 +45,14 @@ public class ArtifactCommentController {
 
     private final ArtifactRepository artifactRepository;
     private final ArtifactCommentRepository commentRepository;
+    private final DashboardUserDetailsService userDetailsService;
 
     public ArtifactCommentController(ArtifactRepository artifactRepository,
-                                     ArtifactCommentRepository commentRepository) {
+                                     ArtifactCommentRepository commentRepository,
+                                     DashboardUserDetailsService userDetailsService) {
         this.artifactRepository = artifactRepository;
         this.commentRepository = commentRepository;
+        this.userDetailsService = userDetailsService;
     }
 
     // 전체 목록 (resolved 포함 — 클라이언트가 필터). 아티팩트 없으면 404.
@@ -60,9 +65,12 @@ public class ArtifactCommentController {
     }
 
     // 댓글/대댓글 등록. 대댓글이면 앵커 필드는 입력과 무관하게 null 로 저장 (루트 앵커 상속).
+    // 작성자는 로그인 계정에서 정한다 (v0.0.81) — 요청 body 의 author 는 무시해 사칭을 막는다.
+    // 이름은 작성 시점 스냅샷으로 저장: 계정 이름이 바뀌거나 삭제돼도 과거 댓글의 작성자는 유지된다.
     @PostMapping
     public ResponseEntity<Object> create(@PathVariable long artifactId,
-                                         @RequestBody Map<String, Object> body) {
+                                         @RequestBody Map<String, Object> body,
+                                         Authentication auth) {
         if (!artifactRepository.existsById(artifactId)) {
             return ResponseEntity.notFound().build();
         }
@@ -73,7 +81,7 @@ public class ArtifactCommentController {
         if (text.length() > MAX_BODY) {
             throw new BadRequest("댓글이 너무 깁니다 (" + MAX_BODY + "자 이내).");
         }
-        String author = trimTo(str(body.get("author")), MAX_AUTHOR);
+        String author = trimTo(userDetailsService.displayNameOf(auth), MAX_AUTHOR);
         Long parentId = coerceLong(body.get("parentId"));
 
         String quote;
@@ -144,7 +152,7 @@ public class ArtifactCommentController {
 
     // ===== 헬퍼 =====
 
-    // JSON Map 값을 문자열로 (숫자 등 비문자열은 무시하고 null). body/author/quote/prefix/suffix 용.
+    // JSON Map 값을 문자열로 (숫자 등 비문자열은 무시하고 null). body/quote/prefix/suffix 용.
     private static String str(Object v) {
         return (v instanceof String s) ? s : null;
     }
