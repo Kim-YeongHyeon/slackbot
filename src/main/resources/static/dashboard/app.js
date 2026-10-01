@@ -488,7 +488,7 @@ async function loadBot() {
 const LOADERS = { overview: loadOverview, sprint: loadSprint, trends: loadTrends,
   workload: loadWorkload, bugs: loadBugs, prs: loadPrs, issues: loadIssues,
   users: async () => { await loadUsers(); await loadGhMappings(); },
-  knowledge: loadKnowledge, bot: loadBot, features: loadFeatures };
+  knowledge: loadKnowledge, bot: loadBot, features: loadFeatures, members: loadMembers };
 
 function showTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
@@ -771,5 +771,75 @@ document.getElementById('btn-user-add').onclick = async () => {
   loadUsers();
 };
 
+// ===== 회원 관리 (v0.0.79, 관리자 전용) =====
+// 서버가 /api/admin/** 를 ROLE_ADMIN 으로 막으므로 탭 숨김은 UX 일 뿐 — 보안 경계는 서버.
+async function loadMe() {
+  const res = await apiFetch('/api/dashboard/me');
+  if (!res.ok) return;
+  const me = await res.json();
+  document.getElementById('me-name').textContent = '👤 ' + me.displayName + (me.admin ? '' : ` (${me.username})`);
+  document.getElementById('tab-members').hidden = !me.admin;
+}
+
+async function loadMembers() {
+  const res = await apiFetch('/api/admin/users');
+  if (!res.ok) throw new Error('/api/admin/users → HTTP ' + res.status);
+  const list = await res.json();
+  rows('table-members', list.map(u =>
+    `<tr><td>${esc(u.displayName)}</td><td>${esc(u.username)}</td>` +
+    `<td>${u.enabled ? '<span class="badge done">사용 중</span>' : '<span class="badge todo">비활성</span>'}</td>` +
+    `<td class="muted">${fmtDate(u.createdAt)}</td>` +
+    `<td><button class="btn" data-m-reset="${u.id}" data-m-user="${esc(u.username)}">비밀번호 초기화</button> ` +
+    `<button class="btn" data-m-toggle="${u.id}" data-m-enabled="${u.enabled}">${u.enabled ? '비활성화' : '활성화'}</button> ` +
+    `<button class="btn danger" data-m-del="${u.id}" data-m-user="${esc(u.username)}">삭제</button></td></tr>`).join('')
+    || '<tr><td colspan="5" class="muted">아직 만든 사용자가 없습니다</td></tr>');
+
+  const tbody = document.querySelector('#table-members tbody');
+  tbody.querySelectorAll('[data-m-reset]').forEach(b => b.onclick = async () => {
+    const pw = prompt(`${b.dataset.mUser} 의 새 비밀번호 (4자 이상, 평소 쓰지 않는 간단한 비밀번호)`);
+    if (!pw) return;
+    await memberPatch(b.dataset.mReset, { password: pw }, '비밀번호를 초기화했습니다');
+  });
+  tbody.querySelectorAll('[data-m-toggle]').forEach(b => b.onclick = () =>
+    memberPatch(b.dataset.mToggle, { enabled: b.dataset.mEnabled !== 'true' },
+      b.dataset.mEnabled === 'true' ? '비활성화했습니다 (즉시 로그인 불가)' : '활성화했습니다'));
+  tbody.querySelectorAll('[data-m-del]').forEach(b => b.onclick = async () => {
+    if (!confirm(`${b.dataset.mUser} 계정을 삭제할까요?`)) return;
+    const res = await apiFetch('/api/admin/users/' + b.dataset.mDel, { method: 'DELETE' });
+    memberMsg(res.ok ? 'ok' : 'err', res.ok ? '삭제했습니다' : '삭제 실패 (HTTP ' + res.status + ')');
+    loadMembers().catch(reportErr);
+  });
+}
+
+function memberMsg(cls, text) {
+  const msg = document.getElementById('member-msg');
+  msg.className = 'msg ' + cls; msg.textContent = text;
+}
+
+async function memberPatch(id, body, okText) {
+  const res = await apiFetch('/api/admin/users/' + id, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  });
+  const d = await res.json().catch(() => ({}));
+  memberMsg(res.ok ? 'ok' : 'err', res.ok ? okText : (d.error ?? '실패 (HTTP ' + res.status + ')'));
+  loadMembers().catch(reportErr);
+}
+
+document.getElementById('btn-member-add').onclick = async () => {
+  const displayName = document.getElementById('m-name').value.trim();
+  const username = document.getElementById('m-username').value.trim();
+  const password = document.getElementById('m-password').value;
+  const res = await apiFetch('/api/admin/users', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ displayName, username, password })
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { memberMsg('err', d.error ?? '생성 실패 (HTTP ' + res.status + ')'); return; }
+  memberMsg('ok', `${d.displayName}(${d.username}) 계정을 만들었습니다 — 아이디/비밀번호를 본인에게 전달해주세요`);
+  ['m-name', 'm-username', 'm-password'].forEach(id => document.getElementById(id).value = '');
+  loadMembers().catch(reportErr);
+};
+
 /* 초기 로드 */
+loadMe().catch(reportErr);
 loadOverview().catch(reportErr);

@@ -4,13 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>sol dashboard</title>
-  <link rel="stylesheet" href="style.css?v=0.0.78">
+  <link rel="stylesheet" href="style.css?v=0.0.79">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
 <header>
   <h1>🌞 sol dashboard</h1>
   <div class="header-right">
+    <span id="me-name" class="muted"></span>
     <span id="last-sync" class="muted">마지막 동기화: -</span>
     <button id="btn-sync" class="btn primary">지금 동기화</button>
   </div>
@@ -33,6 +34,7 @@
   <button class="tab" data-tab="knowledge">버그 지식</button>
   <button class="tab" data-tab="bot">봇 상태</button>
   <button class="tab" data-tab="features">기능요청</button>
+  <button class="tab" data-tab="members" id="tab-members" hidden>회원 관리</button>
 </nav>
 
 <main>
@@ -184,6 +186,20 @@
   </section>
 
   <!-- 기능요청 -->
+  <!-- 회원 관리 (관리자 전용, v0.0.79) -->
+  <section id="panel-members" class="panel">
+    <h2>회원 관리 <span class="muted">(관리자 전용 — 만든 아이디/비밀번호로 대시보드 로그인)</span></h2>
+    <div class="form-row">
+      <input id="m-name" type="text" placeholder="이름 (예: 홍길동)" maxlength="100">
+      <input id="m-username" type="text" placeholder="아이디 (영문 소문자·숫자 3~30자)" maxlength="30" autocomplete="off">
+      <input id="m-password" type="password" placeholder="비밀번호 (4자 이상)" autocomplete="new-password">
+      <button id="btn-member-add" class="btn primary">사용자 만들기</button>
+    </div>
+    <div class="msg warn">⚠️ 평소 사용하지 않는 간단한 비밀번호를 사용해주세요. (비밀번호는 암호화되어 저장되지만 사내 도구라 기본적인 보호만 제공합니다)</div>
+    <div id="member-msg" class="msg"></div>
+    <table id="table-members"><thead><tr><th>이름</th><th>아이디</th><th>상태</th><th>생성일</th><th></th></tr></thead><tbody></tbody></table>
+  </section>
+
   <section id="panel-features" class="panel">
     <h2>기능요청 게시판 <span class="muted">(등록하면 관리자에게 Slack DM이 갑니다)</span></h2>
     <div class="filters">
@@ -220,6 +236,6 @@
 </main>
 
 <footer class="muted">사내망 전용 · 데이터는 로컬 DB 기준 (Jira 와의 차이는 [지금 동기화] 후 새로고침)</footer>
-<script src="app.js?v=0.0.78"></script>
+<script src="app.js?v=0.0.79"></script>
 </body>
 </html>

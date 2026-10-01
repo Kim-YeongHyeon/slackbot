@@ -13,7 +13,8 @@ description: HTML 아티팩트(단일 파일 또는 html+자산 폴더)를 sol d
 - 서버: `https://tidiness-pointed-amuser.ngrok-free.dev` (ngrok 터널.
   환경변수 `ARTIFACT_SERVER_URL` 이 있으면 그 값을 우선 사용)
 - 인증: HTTP Basic `sol:sol` — 업로드·수정·열람 전부 동일 계정
-  (`ARTIFACT_SERVER_AUTH` 있으면 우선 사용)
+  (`ARTIFACT_SERVER_AUTH` 있으면 우선 사용. v0.0.79 부터 관리자가 만들어준 **본인 계정**
+  `아이디:비밀번호` 로도 동작 — 예: `export ARTIFACT_SERVER_AUTH=kim:mypw`)
 - 필요 도구: bash + curl 뿐
 
 ## 케이스 1 — HTML 단일 파일

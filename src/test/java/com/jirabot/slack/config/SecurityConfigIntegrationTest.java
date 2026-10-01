@@ -82,6 +82,10 @@ class SecurityConfigIntegrationTest {
     @MockitoBean
     private com.jirabot.slack.repository.ArtifactCommentRepository artifactCommentRepository;
 
+    // L11 (v0.0.79 dashboard users)
+    @MockitoBean
+    private com.jirabot.slack.repository.DashboardUserRepository dashboardUserRepository;
+
     @MockitoBean
     private JiraSyncService jiraSyncService;
 
@@ -129,6 +133,70 @@ class SecurityConfigIntegrationTest {
         mockMvc.perform(get("/artifacts/view/1/").header("Authorization", basic("sol", "test-pw")))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
                         .header().string("X-Frame-Options", "SAMEORIGIN"));
+    }
+
+    // ===== v0.0.79: DB 사용자 계정 + 관리자 전용 회원 관리 =====
+
+    private void givenDbUser(String username, String rawPassword, boolean enabled) {
+        com.jirabot.slack.entity.DashboardUserEntity u = new com.jirabot.slack.entity.DashboardUserEntity(
+                username, "테스트", passwordEncoder.encode(rawPassword));
+        u.setEnabled(enabled);
+        org.mockito.Mockito.when(dashboardUserRepository.findByUsername(username))
+                .thenReturn(java.util.Optional.of(u));
+    }
+
+    @Autowired
+    private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+
+    @Test
+    void dbUser_canUseDashboard_butNotAdminApi() throws Exception {
+        givenDbUser("kim", "pw1234", true);
+        org.mockito.Mockito.when(artifactRepository.findAllSummaries()).thenReturn(java.util.List.of());
+
+        mockMvc.perform(get("/api/artifacts").header("Authorization", basic("kim", "pw1234")))
+                .andExpect(status().isOk());
+        // 회원 관리는 관리자 전용 — 일반 사용자는 403 (인증은 됐으니 401 아님)
+        mockMvc.perform(get("/api/admin/users").header("Authorization", basic("kim", "pw1234")))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void admin_canUseAdminApi() throws Exception {
+        mockMvc.perform(get("/api/admin/users").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void dbUser_wrongPassword_or_disabled_or_unknown_401() throws Exception {
+        givenDbUser("kim", "pw1234", true);
+        mockMvc.perform(get("/api/artifacts").header("Authorization", basic("kim", "nope")))
+                .andExpect(status().isUnauthorized());
+
+        givenDbUser("lee", "pw1234", false);   // 비활성화 계정
+        mockMvc.perform(get("/api/artifacts").header("Authorization", basic("lee", "pw1234")))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/artifacts").header("Authorization", basic("ghost", "pw1234")))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void adminApi_requiresLogin() throws Exception {
+        mockMvc.perform(get("/api/admin/users")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void me_reportsAdminFlag() throws Exception {
+        mockMvc.perform(get("/api/dashboard/me").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.admin").value(true));
+        givenDbUser("kim", "pw1234", true);
+        mockMvc.perform(get("/api/dashboard/me").header("Authorization", basic("kim", "pw1234")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.admin").value(false))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .jsonPath("$.displayName").value("테스트"));
     }
 
     @Test

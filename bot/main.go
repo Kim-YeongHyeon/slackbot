@@ -44,10 +44,11 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	// 대시보드를 터널로 노출 (DASHBOARD_USER/PASSWORD 둘 다 있을 때만, Basic Auth).
+	// 대시보드를 터널로 노출 (DASHBOARD_USER/PASSWORD 둘 다 있을 때만 — Spring 도 같은 값을 필수로 요구).
+	// 인증은 v0.0.79 부터 Spring 이 전담 (관리자 + DB 사용자) — 이 프록시는 그대로 전달만 한다.
 	// 화이트리스트 경로만 등록한다 — 그 외 Spring API 는 터널에서 계속 404.
 	if cfg.DashboardUser != "" && cfg.DashboardPassword != "" {
-		dash, err := NewDashboardProxy(cfg.SpringBaseURL, cfg.DashboardUser, cfg.DashboardPassword, logger)
+		dash, err := NewDashboardProxy(cfg.SpringBaseURL)
 		if err != nil {
 			logger.Error("invalid SPRING_BASE_URL", "err", err)
 			os.Exit(1)
@@ -59,13 +60,14 @@ func main() {
 			"/api/feature-requests", "/api/feature-requests/", // 기능요청 게시판
 			"/api/github-mappings", "/api/github-mappings/", // GitHub↔Jira 매핑
 			"/api/artifacts", "/api/artifacts/", // 아티팩트 목록/업로드/삭제
+			"/api/admin/",        // 회원 관리 (관리자 전용 — Spring 이 ROLE_ADMIN 검사, v0.0.79)
 			"/artifacts/view/",   // 아티팩트 뷰어 — v0.0.73 부터 로그인 필수 (무인증 공유 중단)
 			"/artifacts/review/", // 인라인 댓글 리뷰 페이지 (v0.0.75)
 			"/actuator/health",   // 봇 상태 탭의 서버 health 카드
 		} {
 			mux.Handle(p, dash)
 		}
-		logger.Info("dashboard proxy enabled", "user", cfg.DashboardUser)
+		logger.Info("dashboard proxy enabled (auth delegated to Spring)")
 	}
 
 	server := &http.Server{

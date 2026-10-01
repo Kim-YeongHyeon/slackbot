@@ -3,7 +3,7 @@ package com.jirabot.slack.config;
 import com.jirabot.slack.filter.CachedBodyFilter;
 import com.jirabot.slack.filter.SlackSignatureFilter;
 import java.time.Clock;
-import org.springframework.beans.factory.annotation.Value;
+import java.time.Duration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -11,8 +11,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
+import org.springframework.security.crypto.factory.PasswordEncoderFactories;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
@@ -28,16 +28,15 @@ public class SecurityConfig {
         return Clock.systemUTC();
     }
 
-    // 대시보드 로그인 계정 (v0.0.73 — 전 경로 로그인 필수). Go 터널 프록시와 같은 .env 값을 쓰므로
-    // 터널 경유 시 브라우저가 이미 보낸 Authorization 헤더가 그대로 통과해 이중 입력이 없다.
-    // STUDY: {noop} — DelegatingPasswordEncoder 의 평문 비교 접두사. 단일 내부 계정 + .env 평문
-    //        저장이라 해시 인코딩의 실익이 없어 채택. 계정이 늘면 BCrypt 로 전환할 것.
+    // 대시보드 계정 (v0.0.79): 관리자(sol, .env) + DB 사용자 — DashboardUserDetailsService 참고.
+    // STUDY: DelegatingPasswordEncoder — 해시 앞의 {id} 접두사로 알고리즘을 고른다({noop}/{bcrypt} 공존,
+    //        새 비밀번호는 기본 bcrypt). Basic 인증은 매 요청 검증하므로 CachingPasswordEncoder 로 감싸
+    //        성공한 검증만 10분 캐시 — BCrypt 를 요청마다 반복하지 않는다.
+    //        UserDetailsService + PasswordEncoder 빈이 하나씩 있으면 Boot 가 DaoAuthenticationProvider 를 자동 구성.
     @Bean
-    public InMemoryUserDetailsManager dashboardUser(
-            @Value("${dashboard.user}") String user,
-            @Value("${dashboard.password}") String password) {
-        return new InMemoryUserDetailsManager(
-                User.withUsername(user).password("{noop}" + password).roles("DASHBOARD").build());
+    public PasswordEncoder passwordEncoder() {
+        return new CachingPasswordEncoder(
+                PasswordEncoderFactories.createDelegatingPasswordEncoder(), Duration.ofMinutes(10), 1000);
     }
 
     @Bean
@@ -68,6 +67,9 @@ public class SecurityConfig {
                         .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
                         // 헬스는 무인증 유지 — start.sh/jdk-watchdog/봇상태 카드가 자격증명 없이 호출.
                         .requestMatchers("/health", "/actuator/health", "/actuator/info").permitAll()
+                        // 회원 관리 API — 관리자(sol) 전용 (v0.0.79). 아래 authenticated 목록보다 먼저 와야 한다
+                        // (첫 매칭 규칙이 적용됨). 일반 사용자는 403.
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         // 대시보드 전체 (정적 UI·통계·관리 API·아티팩트 갤러리+뷰어) — 로그인 필수 (v0.0.73).
                         // 뷰어(/artifacts/view/**)도 사용자 결정으로 포함: 무인증 링크 공유 기능은 중단.
                         // 뷰어 응답의 CSP sandbox 는 유지 — 로그인해도 저장형 XSS 방어는 필요 (ArtifactController).
