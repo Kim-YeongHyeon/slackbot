@@ -4,6 +4,7 @@ import com.jirabot.slack.filter.CachedBodyFilter;
 import com.jirabot.slack.filter.SlackSignatureFilter;
 import java.time.Clock;
 import java.time.Duration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -43,7 +44,8 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             CachedBodyFilter cachedBodyFilter,
-            SlackSignatureFilter slackSignatureFilter) throws Exception {
+            SlackSignatureFilter slackSignatureFilter,
+            @Value("${dashboard.auth-realm:sol dashboard}") String authRealm) throws Exception {
 
         http
                 // STUDY: CSRF 미적용 + Basic 인증 조합의 알려진 한계 — 브라우저가 자격증명을 자동 첨부하므로
@@ -52,7 +54,10 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
                 // v0.0.73: 대시보드 전 경로 로그인 필수 — 터널이든 사내망 직접(:8080)이든 동일하게 요구.
-                .httpBasic(basic -> basic.realmName("sol dashboard"))
+                // STUDY: 브라우저는 Basic 로그인 정보를 "사이트 + realm 이름" 단위로 기억한다. realm 을 바꾸면
+                //        기존에 기억된 계정(예: 폐지된 sol/sol)이 전부 무효가 되어 모두에게 로그인 창이 새로 뜬다.
+                //        DASHBOARD_AUTH_REALM 만 바꿔 재시작하면 언제든 전원 재로그인 (v0.0.85).
+                .httpBasic(basic -> basic.realmName(authRealm.replace("\"", "")))
                 // STUDY: X-Frame-Options 라이터는 Cache-Control 라이터와 달리 containsHeader 체크 없이
                 // 무조건 덮어쓴다 — 컨트롤러에서 SAMEORIGIN 을 넣어도 커밋 시점에 DENY 로 교체된다
                 // (v0.0.75 라이브 검증에서 발견). 전역을 SAMEORIGIN 으로: 같은 origin 만 프레이밍

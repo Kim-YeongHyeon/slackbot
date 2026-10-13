@@ -12,6 +12,9 @@ dashboard:
   password: ${DASHBOARD_PASSWORD:}
   # 관리자 계정의 헤더 표시 이름 (v0.0.80, 기본 "관리자")
   admin-name: ${DASHBOARD_ADMIN_NAME:관리자}
+  # 브라우저 로그인 창의 영역(realm) 이름 (v0.0.85). 바꾸면 모든 브라우저에 기억된 로그인이 무효화되어
+  # 전원 재로그인 — 계정 정책 변경(예: 공용 sol 계정 폐지) 후 오래된 캐시를 정리할 때 사용.
+  auth-realm: ${DASHBOARD_AUTH_REALM:sol dashboard 2}
 
 spring:
   application:

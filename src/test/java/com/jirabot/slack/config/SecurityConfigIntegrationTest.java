@@ -120,6 +120,16 @@ class SecurityConfigIntegrationTest {
     }
 
     @Test
+    void loginChallenge_usesConfiguredRealm() throws Exception {
+        // v0.0.85: realm 이름이 바뀌어야 브라우저에 기억된 옛 계정(sol/sol)이 무효화된다.
+        // 테스트 프로퍼티에 realm 을 따로 안 주므로 application.yml 기본값이 실제로 쓰이는지 확인.
+        mockMvc.perform(get("/dashboard/"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .header().string("WWW-Authenticate", "Basic realm=\"sol dashboard 2\""));
+    }
+
+    @Test
     void dashboardWithoutTrailingSlash_redirects() throws Exception {
         // v0.0.84 회귀 방지: /dashboard 를 forward 하면 주소창이 그대로 남아 상대경로 style.css·app.js 가
         // /style.css·/app.js 로 풀려 404 → 화면이 깨진다. 반드시 /dashboard/ 로 redirect 해야 한다.
