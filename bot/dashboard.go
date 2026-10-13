@@ -32,3 +32,11 @@ func NewDashboardProxy(springBaseURL string) (*DashboardProxy, error) {
 func (d *DashboardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	d.proxy.ServeHTTP(w, r)
 }
+
+// RootRedirect sends the bare tunnel URL (https://<domain>/) to the dashboard.
+// Without it people who open the domain itself get Go's plain "404 page not
+// found" and assume access is blocked (v0.0.84). Mounted on the exact-root
+// pattern "/{$}" so every other unmatched path still 404s.
+func RootRedirect(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/dashboard/", http.StatusFound)
+}

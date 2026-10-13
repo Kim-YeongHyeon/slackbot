@@ -6,22 +6,22 @@ description: HTML 아티팩트(단일 파일 또는 html+자산 폴더)를 sol d
 # sol dashboard 아티팩트 업로드
 
 팀 내부 sol dashboard 에는 HTML 아티팩트 갤러리가 있다. HTML 을 업로드하면
-`/artifacts/view/{id}/` 링크가 생긴다. **열람에도 sol 계정 로그인이 필요하다**
-(v0.0.73 부터 — 링크를 열면 브라우저 로그인 창에 sol/sol 입력). 이 파일 하나로
+`/artifacts/view/{id}/` 링크가 생긴다. **열람에도 로그인이 필요하다** — 관리자가 대시보드
+"회원 관리" 탭에서 만들어 준 본인 계정으로 브라우저 로그인 창에 입력한다. 이 파일 하나로
 충분하다 — 별도 스크립트 없이 아래 curl 패턴을 상황에 맞게 조립해 실행하면 된다.
 
 - 서버: `https://tidiness-pointed-amuser.ngrok-free.dev` (ngrok 터널.
   환경변수 `ARTIFACT_SERVER_URL` 이 있으면 그 값을 우선 사용)
-- 인증: HTTP Basic `sol:sol` — 업로드·수정·열람 전부 동일 계정
-  (`ARTIFACT_SERVER_AUTH` 있으면 우선 사용. v0.0.79 부터 관리자가 만들어준 **본인 계정**
-  `아이디:비밀번호` 로도 동작 — 예: `export ARTIFACT_SERVER_AUTH=kim:mypw`)
+- 인증: HTTP Basic **본인 계정** — 업로드·수정·열람 전부 동일. 환경변수로 넣어 둔다:
+  `export ARTIFACT_SERVER_AUTH=아이디:비밀번호` (관리자에게 받은 계정. 공용 `sol:sol` 계정은
+  v0.0.80 에 폐지 — 쓰면 401). **설정이 없으면 사용자에게 계정을 물어본 뒤 진행한다.**
 - 필요 도구: bash + curl 뿐
 
 ## 케이스 1 — HTML 단일 파일
 
 ```bash
 U="${ARTIFACT_SERVER_URL:-https://tidiness-pointed-amuser.ngrok-free.dev}"
-curl -s -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" -X POST "$U/api/artifacts" \
+curl -s -u "$ARTIFACT_SERVER_AUTH" -X POST "$U/api/artifacts" \
   -H 'ngrok-skip-browser-warning: 1' \
   -F "html=<report.html;type=text/html;charset=utf-8" \
   -F "title=주간 리포트"        # title 은 선택
@@ -41,7 +41,7 @@ curl -s -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" -X POST "$U/api/artifacts" \
 U="${ARTIFACT_SERVER_URL:-https://tidiness-pointed-amuser.ngrok-free.dev}"
 HTML="page.html"; DIR="page_files"          # ← 실제 경로로 변경 (DIR 은 폴더 "자체")
 base="$(dirname "$DIR")"
-args=( -s -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" -H 'ngrok-skip-browser-warning: 1' -X POST
+args=( -s -u "$ARTIFACT_SERVER_AUTH" -H 'ngrok-skip-browser-warning: 1' -X POST
        -F "html=<$HTML;type=text/html;charset=utf-8" )
 while IFS= read -r -d '' f; do
   args+=( -F "assets=@$f" -F "assetPaths=${f#"$base"/}" )
@@ -61,10 +61,10 @@ HTML 에 `<img src="page_files/img.png">` 라면 assetPaths 도 `page_files/img.
 
 ```bash
 # 어떤 id 인지 모르면 목록에서 제목으로 찾는다
-curl -s -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" -H 'ngrok-skip-browser-warning: 1' "$U/api/artifacts"
+curl -s -u "$ARTIFACT_SERVER_AUTH" -H 'ngrok-skip-browser-warning: 1' "$U/api/artifacts"
 
 # HTML 단일 파일 수정
-curl -s -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" -X PUT "$U/api/artifacts/7" \
+curl -s -u "$ARTIFACT_SERVER_AUTH" -X PUT "$U/api/artifacts/7" \
   -H 'ngrok-skip-browser-warning: 1' \
   -F "html=<report.html;type=text/html;charset=utf-8"
 
@@ -87,7 +87,7 @@ curl "${args[@]}" -X PUT "$U/api/artifacts/7"
 업로드 후 원문이 서빙되는지 확인하고, **리뷰 링크를 사용자에게 전달하는 것이 최종 산출물**:
 
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" \
+curl -s -o /dev/null -w "%{http_code}" -u "$ARTIFACT_SERVER_AUTH" \
   -H 'ngrok-skip-browser-warning: 1' "$U/artifacts/view/{id}/"   # 200 이어야 정상 (무인증이면 401)
 ```
 
@@ -95,7 +95,7 @@ curl -s -o /dev/null -w "%{http_code}" -u "${ARTIFACT_SERVER_AUTH:-sol:sol}" \
 
 아티팩트에 Google Docs 스타일 인라인 댓글을 달 수 있다. **댓글/리뷰는 웹 UI 에서만** 하고,
 curl 로는 다루지 않는다. 리뷰 링크(`{서버}/artifacts/review/{id}`)가 기본 공유 링크다 —
-브라우저에서 sol 로그인 → 텍스트 드래그해 우측 레일에 코멘트, 상단 [원본 보기]로 순수 뷰어 열람.
+브라우저에서 본인 계정으로 로그인 → 텍스트 드래그해 우측 레일에 코멘트, 상단 [원본 보기]로 순수 뷰어 열람.
 주의: 이후 이 아티팩트를 PUT 으로 **수정하면 기존 댓글이 원문 위치를 잃을 수 있다**(삭제되지는
 않고 "위치 없음" 고아 카드로 잔존).
 
@@ -127,13 +127,13 @@ Claude 공유 링크(claude.ai/...)는 직접 등록 불가(iframe 차단). 아�
 
 | 증상 | 원인/대응 |
 |---|---|
-| 401 | Basic Auth 누락/오타 — `-u sol:sol` 확인 |
+| 401 | 계정 누락/오타 또는 폐지된 `sol:sol` 사용 — `ARTIFACT_SERVER_AUTH` 를 본인 계정으로 설정 |
 | 400 + `{"error":"..."}` | 응답의 한글 메시지가 원인을 그대로 설명함 (경로/크기/개수) |
 | `assets(N)와 assetPaths(M) 개수가 다릅니다` | 파일과 경로 필드를 쌍으로 반복했는지 확인 |
 | 413 / 커넥션 끊김 | 요청 전체 40MB 초과 — 자산을 줄여서 재시도 |
 | PUT 이 404 | 해당 id 아티팩트 없음 — `GET /api/artifacts` 로 id 확인 |
 | 수정 후 이미지/CSS 깨짐 | PUT 은 전체 교체 — 자산 폴더를 함께 다시 보냈는지 확인 |
-| 첫 방문 시 ngrok 경고 페이지 | 무료 도메인 특성. 브라우저에서 "Visit Site" 1회 클릭 (curl 은 `ngrok-skip-browser-warning: 1` 헤더) |
+| 첫 방문 시 ngrok 경고 페이지("You are about to visit…") | 무료 도메인 특성. 브라우저에서 "Visit Site" 1회 클릭 (curl 은 `ngrok-skip-browser-warning: 1` 헤더) |
 
 ## 설치 (파일 1개)
 

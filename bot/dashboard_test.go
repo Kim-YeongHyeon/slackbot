@@ -115,3 +115,21 @@ func TestDashboardProxy_SubPathsPreserved(t *testing.T) {
 		}
 	}
 }
+
+func TestRootRedirect_OnlyExactRoot(t *testing.T) {
+	// 도메인만 열면 대시보드로 이동, 그 외 미등록 경로는 여전히 404 (루트 패턴이 전체를 삼키면 안 됨).
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{$}", RootRedirect)
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/dashboard/" {
+		t.Fatalf("GET / = %d Location=%q, want 302 /dashboard/", rec.Code, rec.Header().Get("Location"))
+	}
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/random-path", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /random-path = %d, want 404", rec.Code)
+	}
+}

@@ -120,6 +120,20 @@ class SecurityConfigIntegrationTest {
     }
 
     @Test
+    void dashboardWithoutTrailingSlash_redirects() throws Exception {
+        // v0.0.84 회귀 방지: /dashboard 를 forward 하면 주소창이 그대로 남아 상대경로 style.css·app.js 가
+        // /style.css·/app.js 로 풀려 404 → 화면이 깨진다. 반드시 /dashboard/ 로 redirect 해야 한다.
+        mockMvc.perform(get("/dashboard").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .redirectedUrl("/dashboard/"));
+        mockMvc.perform(get("/dashboard/").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers
+                        .forwardedUrl("/dashboard/index.html"));
+    }
+
+    @Test
     void reviewStaticPage_servedWithAuth() throws Exception {
         // {id:\d+} 회귀 방지 — 컨트롤러 매핑이 index.html 을 삼키면 400 이 나며 리뷰 SPA 가 깨진다.
         mockMvc.perform(get("/artifacts/review/index.html?id=1")

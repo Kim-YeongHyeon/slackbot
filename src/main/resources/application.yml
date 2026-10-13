@@ -1,5 +1,10 @@
 server:
   port: 8080
+  tomcat:
+    # STUDY: Tomcat 은 sendRedirect 의 상대 경로를 "요청 받은 scheme" 기준 절대 URL 로 바꾼다.
+    #        Go 프록시가 http 로 넘겨주므로 https 터널 사용자에게 http:// 주소로 redirect 되던 문제(v0.0.84)
+    #        → Location 을 상대 경로(/dashboard/) 그대로 내보내 브라우저가 현재 https 기준으로 해석하게 한다.
+    use-relative-redirects: true
 
 # 대시보드 로그인 계정 (v0.0.73 — 전 경로 로그인 필수). Go 터널 프록시와 같은 값을 쓴다.
 dashboard:

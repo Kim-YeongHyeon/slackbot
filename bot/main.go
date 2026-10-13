@@ -67,6 +67,8 @@ func main() {
 		} {
 			mux.Handle(p, dash)
 		}
+		// 도메인만 입력해도 대시보드로 (v0.0.84). "/{$}" 는 루트 정확 일치 — 다른 미등록 경로는 계속 404.
+		mux.HandleFunc("/{$}", RootRedirect)
 		logger.Info("dashboard proxy enabled (auth delegated to Spring)")
 	}
 

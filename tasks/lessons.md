@@ -320,3 +320,18 @@ v0.0.75 에서 유닛테스트 495개가 전부 green 인 상태로 라이브 �
 
 **규칙**: 헤더/라우팅이 걸린 변경은 배포 후 curl 로 실제 응답 헤더와 정적 경로를 반드시 찍어본다
 (L16 의 확장 — "코드 계층의 테스트"는 컨테이너/필터 계층의 동작을 증명하지 못한다).
+
+## L19. 대시보드 검증은 "사용자가 실제로 들어오는 경로" 로 — localhost·정답 URL 만으로는 못 잡는다
+
+v0.0.84: 다른 사람들에게 대시보드가 깨지거나 막혀 보였는데, 나는 몇 주간 매번 `localhost:8080/dashboard/`
+(끝 `/` 포함) 또는 ngrok 경고 생략 헤더로만 검증해서 전혀 못 봤다. 실제 원인은 전부 "진입 경로" 쪽:
+1. `/dashboard` 를 **forward** 하면 주소창이 그대로라 상대경로 `style.css`·`app.js` 가 `/style.css` 로 풀려 404.
+   디렉토리형 페이지는 반드시 **redirect** 로 trailing slash 를 붙인다 (아티팩트 뷰어 301 과 같은 원리).
+2. 도메인만 입력하면 Go 기본 `404 page not found` → 막힌 것처럼 보임.
+3. 프록시 뒤 Spring 의 `sendRedirect` 는 Tomcat 이 **요청 scheme(http) 기준 절대 URL** 로 바꾼다 →
+   https 터널 사용자에게 `http://` 로 redirect. `server.tomcat.use-relative-redirects: true` 로 해결.
+   (ResponseEntity.location(URI) 로 직접 넣은 Location 은 상대경로 그대로라 영향 없었음 — 경로마다 다르다.)
+
+**규칙**: UI·인증·라우팅 변경 후에는 **터널 URL + 새 브라우저(쿠키 없음) + 사람이 칠 법한 주소들**
+(`/`, `/dashboard`, `/dashboard/`)로 확인한다. 장애 제보가 오면 추측 전에 ngrok inspector
+(`127.0.0.1:4040/api/requests/http`)에서 실제 받은 상태코드부터 본다 — 이번 원인 3개 중 2개가 거기서 바로 보였다.
