@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -24,6 +25,7 @@ import com.jirabot.slack.entity.ArtifactAssetEntity;
 import com.jirabot.slack.entity.ArtifactEntity;
 import com.jirabot.slack.entity.DashboardUserEntity;
 import com.jirabot.slack.repository.ArtifactAssetRepository;
+import com.jirabot.slack.repository.ArtifactFolderRepository;
 import com.jirabot.slack.repository.ArtifactRepository;
 import com.jirabot.slack.repository.DashboardUserRepository;
 import java.time.Instant;
@@ -44,6 +46,7 @@ class ArtifactControllerTest {
 
     private ArtifactRepository repository;
     private ArtifactAssetRepository assetRepository;
+    private ArtifactFolderRepository folderRepository;
     private MockMvc mockMvc;
 
     // 업로드한 로그인 계정 (v0.0.83 — 올린 사람은 로그인 계정 이름으로 자동 기록)
@@ -59,8 +62,10 @@ class ArtifactControllerTest {
         DashboardUserRepository users = mock(DashboardUserRepository.class);
         when(users.findByUsername("kim"))
                 .thenReturn(Optional.of(new DashboardUserEntity("kim", "김철수", "{bcrypt}h")));
+        folderRepository = mock(ArtifactFolderRepository.class);
+        when(folderRepository.existsById(3L)).thenReturn(true);   // 존재하는 폴더 id=3
         mockMvc = standaloneSetup(new ArtifactController(repository, assetRepository,
-                new DashboardUserDetailsService(users, "yhkim", "pw", "김영현"))).build();
+                new DashboardUserDetailsService(users, "yhkim", "pw", "김영현"), folderRepository)).build();
     }
 
     private static ArtifactEntity saved(String title, String html) {
@@ -88,6 +93,7 @@ class ArtifactControllerTest {
             public int getSizeBytes() { return 2048; }
             public long getAssetCount() { return 3; }
             public long getOpenCommentCount() { return 4; }
+            public Long getFolderId() { return 3L; }
         }));
 
         mockMvc.perform(get("/api/artifacts"))
@@ -96,6 +102,7 @@ class ArtifactControllerTest {
                 .andExpect(jsonPath("$[0].sizeBytes").value(2048))
                 .andExpect(jsonPath("$[0].assetCount").value(3))
                 .andExpect(jsonPath("$[0].openCommentCount").value(4))
+                .andExpect(jsonPath("$[0].folderId").value(3))
                 .andExpect(jsonPath("$[0].html").doesNotExist())
                 .andExpect(result -> assertThat(result.getResponse().getContentAsString())
                         .doesNotContain("html"));
@@ -154,6 +161,77 @@ class ArtifactControllerTest {
                         .param("html", "<html>new</html>"))
                 .andExpect(status().isOk());
         assertThat(existing.getAuthor()).isEqualTo("김철수");
+    }
+
+    // ===== 폴더 (v0.0.86) =====
+
+    @Test
+    void moveToFolder_setsFolder_and_nullMeansUnclassified() throws Exception {
+        ArtifactEntity a = saved("t", "<html></html>");
+        when(repository.findById(7L)).thenReturn(Optional.of(a));
+
+        mockMvc.perform(patch("/api/artifacts/7/folder").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"folderId\":3}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.folderId").value(3));
+        assertThat(a.getFolderId()).isEqualTo(3L);
+
+        mockMvc.perform(patch("/api/artifacts/7/folder").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"folderId\":null}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.folderId").doesNotExist());
+        assertThat(a.getFolderId()).isNull();
+    }
+
+    @Test
+    void moveToFolder_missingArtifactOrFolder_404_badInput_400() throws Exception {
+        when(repository.findById(99L)).thenReturn(Optional.empty());
+        mockMvc.perform(patch("/api/artifacts/99/folder").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"folderId\":3}"))
+                .andExpect(status().isNotFound());
+
+        ArtifactEntity a = saved("t", "<html></html>");
+        when(repository.findById(7L)).thenReturn(Optional.of(a));
+        mockMvc.perform(patch("/api/artifacts/7/folder").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"folderId\":42}"))        // 없는 폴더
+                .andExpect(status().isNotFound());
+        mockMvc.perform(patch("/api/artifacts/7/folder").contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))                         // folderId 누락
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(patch("/api/artifacts/7/folder").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"folderId\":\"설계\"}"))  // 숫자 아님
+                .andExpect(status().isBadRequest());
+        assertThat(a.getFolderId()).isNull();
+    }
+
+    @Test
+    void upload_withFolderId_goesIntoFolder_json_and_multipart() throws Exception {
+        mockSavedWithId(1L);
+        mockMvc.perform(post("/api/artifacts").principal(KIM).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"html\":\"<html></html>\",\"folderId\":3}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(multipart("/api/artifacts").principal(KIM)
+                        .param("html", "<html></html>").param("folderId", "3"))
+                .andExpect(status().isOk());
+        ArgumentCaptor<ArtifactEntity> cap = ArgumentCaptor.forClass(ArtifactEntity.class);
+        verify(repository, org.mockito.Mockito.times(2)).save(cap.capture());
+        assertThat(cap.getAllValues()).allSatisfy(e -> assertThat(e.getFolderId()).isEqualTo(3L));
+    }
+
+    @Test
+    void upload_withoutFolderId_isUnclassified_unknownFolder_rejected() throws Exception {
+        mockSavedWithId(1L);
+        mockMvc.perform(post("/api/artifacts").principal(KIM).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"html\":\"<html></html>\"}"))
+                .andExpect(status().isOk());
+        ArgumentCaptor<ArtifactEntity> cap = ArgumentCaptor.forClass(ArtifactEntity.class);
+        verify(repository).save(cap.capture());
+        assertThat(cap.getValue().getFolderId()).isNull();
+
+        mockMvc.perform(multipart("/api/artifacts").principal(KIM)
+                        .param("html", "<html></html>").param("folderId", "42"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("존재하지 않는 폴더입니다: 42"));
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.jirabot.slack.config.DashboardUserDetailsService;
 import com.jirabot.slack.entity.ArtifactAssetEntity;
 import com.jirabot.slack.entity.ArtifactEntity;
 import com.jirabot.slack.repository.ArtifactAssetRepository;
+import com.jirabot.slack.repository.ArtifactFolderRepository;
 import com.jirabot.slack.repository.ArtifactRepository;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -27,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -74,12 +76,15 @@ public class ArtifactController {
     private final String agentJs;
 
     private final DashboardUserDetailsService userDetailsService;
+    private final ArtifactFolderRepository folderRepository;
 
     public ArtifactController(ArtifactRepository repository, ArtifactAssetRepository assetRepository,
-                              DashboardUserDetailsService userDetailsService) {
+                              DashboardUserDetailsService userDetailsService,
+                              ArtifactFolderRepository folderRepository) {
         this.repository = repository;
         this.assetRepository = assetRepository;
         this.userDetailsService = userDetailsService;
+        this.folderRepository = folderRepository;
         // STUDY: ClassPathResource — 클래스패스(빌드 시 jar 안)에서 리소스를 읽는다. static/ 밑에 두면
         //        Spring 이 정적 매핑으로도 노출하므로, 뷰어 핸들러가 유일한 서빙 경로가 되도록 밖에 둔다.
         try {
@@ -102,8 +107,11 @@ public class ArtifactController {
         String html = requireValidHtml(body.get("html"));
         String title = resolveTitle(body.get("title"), html, body.get("filename"), DEFAULT_TITLE);
         String author = uploaderName(auth);
+        Long folderId = resolveFolderId(body.get("folderId"));
 
-        ArtifactEntity saved = repository.save(new ArtifactEntity(title, author, html));
+        ArtifactEntity entity = new ArtifactEntity(title, author, html);
+        entity.setFolderId(folderId);
+        ArtifactEntity saved = repository.save(entity);
         log.info("Artifact created id={} title='{}' size={}B author={}", saved.getId(), title,
                 html.getBytes(StandardCharsets.UTF_8).length, author);
         return ResponseEntity.ok(Map.of("id", saved.getId(), "title", title));
@@ -122,14 +130,17 @@ public class ArtifactController {
             @RequestParam(value = "html", required = false) String html,
             @RequestParam(value = "assets", required = false) List<MultipartFile> assets,
             @RequestParam(value = "assetPaths", required = false) List<String> assetPaths,
+            @RequestParam(value = "folderId", required = false) String folderIdParam,
             Authentication auth) throws IOException {
         String validHtml = requireValidHtml(html);
         List<MultipartFile> files = assets == null ? List.of() : assets;
         List<String> normalized = validateAssets(files, assetPaths == null ? List.of() : assetPaths);
+        Long folderId = resolveFolderId(folderIdParam);
 
         String resolvedTitle = resolveTitle(title, validHtml, filename, DEFAULT_TITLE);
-        ArtifactEntity saved = repository.save(
-                new ArtifactEntity(resolvedTitle, uploaderName(auth), validHtml));
+        ArtifactEntity entity = new ArtifactEntity(resolvedTitle, uploaderName(auth), validHtml);
+        entity.setFolderId(folderId);
+        ArtifactEntity saved = repository.save(entity);
         assetRepository.saveAll(toAssetEntities(saved.getId(), files, normalized));
 
         log.info("Artifact created id={} title='{}' htmlSize={}B assets={}",
@@ -179,6 +190,38 @@ public class ArtifactController {
 
         log.info("Artifact updated id={} title='{}' assets={}", id, artifact.getTitle(), files.size());
         return ResponseEntity.ok(Map.of("id", id, "title", artifact.getTitle(), "assetCount", files.size()));
+    }
+
+    // 폴더로 옮기기 (v0.0.86). {folderId: 숫자} → 그 폴더, {folderId: null} → 미분류.
+    // 한 폴더에만 속하므로 옮기면 원래 폴더에서 자동으로 빠진다.
+    @PatchMapping("/api/artifacts/{id}/folder")
+    @Transactional
+    public ResponseEntity<Object> moveToFolder(@PathVariable long id, @RequestBody Map<String, Object> body) {
+        ArtifactEntity artifact = repository.findById(id).orElse(null);
+        if (artifact == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (!body.containsKey("folderId")) {
+            throw new BadRequest("folderId 가 필요합니다 (미분류로 옮기려면 null).");
+        }
+        Object raw = body.get("folderId");
+        Long folderId = null;
+        if (raw != null) {
+            if (!(raw instanceof Number n)) {
+                throw new BadRequest("folderId 형식이 잘못되었습니다.");
+            }
+            folderId = n.longValue();
+            if (!folderRepository.existsById(folderId)) {
+                return ResponseEntity.notFound().build();
+            }
+        }
+        artifact.setFolderId(folderId);
+        log.info("Artifact moved id={} folderId={}", id, folderId);
+        // Map.of 는 null 값을 못 넣는다 — 미분류(null)도 그대로 응답하도록 HashMap 사용
+        Map<String, Object> result = new java.util.HashMap<>();
+        result.put("id", id);
+        result.put("folderId", folderId);
+        return ResponseEntity.ok(result);
     }
 
     @DeleteMapping("/api/artifacts/{id}")
@@ -275,6 +318,23 @@ public class ArtifactController {
     }
 
     // ===== 공용 검증/조립 =====
+
+    // 업로드 시 선택 폴더 (v0.0.86). 비었으면 미분류(null), 숫자가 아니거나 없는 폴더면 400.
+    private Long resolveFolderId(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        long id;
+        try {
+            id = Long.parseLong(raw.strip());
+        } catch (NumberFormatException e) {
+            throw new BadRequest("folderId 형식이 잘못되었습니다: " + raw);
+        }
+        if (!folderRepository.existsById(id)) {
+            throw new BadRequest("존재하지 않는 폴더입니다: " + id);
+        }
+        return id;
+    }
 
     // 올린 사람 = 로그인 계정 이름 (v0.0.83). 요청의 author 는 받지 않는다 — 사칭 방지, 표기 통일
     // (같은 사람이 "김영현"/"yhkim"/"YeongHyeonKim" 으로 제각각 기록되던 문제).

@@ -28,6 +28,10 @@ curl -s -u "$ARTIFACT_SERVER_AUTH" -X POST "$U/api/artifacts" \
 ```
 
 `title` 을 생략하면 HTML `<title>` 태그 → `filename` 필드 → "제목 없는 아티팩트" 순으로 자동 결정.
+
+**주제 폴더에 바로 올리기 (선택, v0.0.86):** `-F "folderId=<폴더 id>"` 를 추가한다. 폴더 id 는
+`curl -s -u "$ARTIFACT_SERVER_AUTH" -H 'ngrok-skip-browser-warning: 1' "$U/api/artifact-folders"` 로
+이름과 함께 확인. 생략하면 "미분류" 로 올라가며, 나중에 대시보드에서 폴더로 옮길 수 있다.
 **올린 사람은 인증한 계정 이름으로 자동 기록된다** (v0.0.83 — `author` 필드는 보내도 무시됨).
 수정(PUT) 시에도 최초 업로더가 유지된다.
 

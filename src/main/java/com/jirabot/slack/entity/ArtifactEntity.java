@@ -30,6 +30,10 @@ public class ArtifactEntity {
     @Column(nullable = false)
     private Instant createdAt;
 
+    // 주제 폴더 (v0.0.86) — null 이면 미분류. 평문 FK (Asset/Comment 엔티티와 같은 스타일).
+    @Column(name = "folder_id")
+    private Long folderId;
+
     protected ArtifactEntity() {}
 
     public ArtifactEntity(String title, String author, String html) {
@@ -51,4 +55,7 @@ public class ArtifactEntity {
     public String getAuthor() { return author; }
     public String getHtml() { return html; }
     public Instant getCreatedAt() { return createdAt; }
+    public Long getFolderId() { return folderId; }
+
+    public void setFolderId(Long folderId) { this.folderId = folderId; }
 }

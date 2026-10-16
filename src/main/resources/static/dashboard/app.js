@@ -498,15 +498,120 @@ function showTab(name) {
 
 // ===== 아티팩트 갤러리 (v0.0.71) =====
 // 카드 미리보기는 sandbox iframe (allow-scripts만 — same-origin 금지: 업로드 HTML의 XSS 방어)
+// 주제 폴더 (v0.0.86) — 목록은 전부 받아와 브라우저에서 폴더별로 거른다 (추가 요청 없음).
+// 선택 값: 'all'(전체) | 'none'(미분류) | 폴더 id 문자열. 마지막 선택은 브라우저에 기억.
+let artList = [], artFolders = [], meIsAdmin = false;
+let artSelected = (() => { try { return localStorage.getItem('art_folder') || 'all'; } catch (_) { return 'all'; } })();
+
 async function loadArtifacts() {
-  const list = await (await apiFetch('/api/artifacts')).json();
+  const [listRes, folderRes] = await Promise.all([apiFetch('/api/artifacts'), apiFetch('/api/artifact-folders')]);
+  artList = await listRes.json();
+  artFolders = folderRes.ok ? await folderRes.json() : [];
+  // 선택해 둔 폴더가 지워졌으면 전체로
+  if (!['all', 'none'].includes(artSelected) && !artFolders.some(f => String(f.id) === artSelected)) {
+    selectArtFolder('all', false);
+  }
+  renderArtFolders();
+  renderArtifacts();
+}
+
+function selectArtFolder(key, render = true) {
+  artSelected = String(key);
+  try { localStorage.setItem('art_folder', artSelected); } catch (_) {}
+  if (render) { renderArtFolders(); renderArtifacts(); }
+}
+
+function folderName(id) {
+  const f = artFolders.find(f => String(f.id) === String(id));
+  return f ? f.name : null;
+}
+
+function renderArtFolders() {
+  const count = key => key === 'all' ? artList.length
+    : key === 'none' ? artList.filter(a => a.folderId == null).length
+    : artList.filter(a => String(a.folderId) === String(key)).length;
+  const item = (key, icon, name, actions) =>
+    `<div class="art-folder${artSelected === String(key) ? ' active' : ''}" data-folder="${key}">
+       <span>${icon}</span><span class="f-name" title="${esc(name)}">${esc(name)}</span>
+       <span class="f-count">${count(key)}</span>${actions || ''}</div>`;
+  const box = document.getElementById('art-folders');
+  box.innerHTML = item('all', '📚', '전체') + item('none', '📥', '미분류') + '<hr>'
+    + artFolders.map(f => item(f.id, '📁', f.name,
+        `<button class="f-act" data-f-rename="${f.id}" title="이름 변경">✏️</button>`
+        + (meIsAdmin ? `<button class="f-act" data-f-del="${f.id}" title="삭제 (관리자)">🗑</button>` : ''))).join('')
+    + '<button id="art-folder-add" class="btn art-folder-add">+ 새 폴더</button>';
+
+  box.querySelectorAll('.art-folder').forEach(el => {
+    el.onclick = () => selectArtFolder(el.dataset.folder);
+    // 카드 드롭 대상 — '전체'는 위치가 아니므로 제외
+    if (el.dataset.folder === 'all') return;
+    el.ondragover = e => { e.preventDefault(); el.classList.add('drop-target'); };
+    el.ondragleave = () => el.classList.remove('drop-target');
+    el.ondrop = e => {
+      e.preventDefault(); el.classList.remove('drop-target');
+      const id = e.dataTransfer.getData('text/plain');
+      if (id) moveArtifact(id, el.dataset.folder === 'none' ? null : Number(el.dataset.folder));
+    };
+  });
+  box.querySelectorAll('[data-f-rename]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    const name = prompt('새 폴더 이름', folderName(b.dataset.fRename) || '');
+    if (!name || !name.trim()) return;
+    await folderRequest('/api/artifact-folders/' + b.dataset.fRename, 'PATCH', { name });
+  });
+  box.querySelectorAll('[data-f-del]').forEach(b => b.onclick = async e => {
+    e.stopPropagation();
+    const n = artList.filter(a => String(a.folderId) === b.dataset.fDel).length;
+    if (!confirm(`"${folderName(b.dataset.fDel)}" 폴더를 삭제할까요?\n안의 아티팩트 ${n}개는 미분류로 옮겨집니다.`)) return;
+    await folderRequest('/api/artifact-folders/' + b.dataset.fDel, 'DELETE');
+  });
+  document.getElementById('art-folder-add').onclick = async () => {
+    const name = prompt('새 폴더 이름 (예: 설계, 온보딩)');
+    if (!name || !name.trim()) return;
+    const created = await folderRequest('/api/artifact-folders', 'POST', { name });
+    if (created && created.id) selectArtFolder(created.id);
+  };
+
+  // 업로드 대상 안내 — 특정 폴더를 보고 있으면 그 폴더로 올라간다
+  const target = document.getElementById('art-target');
+  const fname = folderName(artSelected);
+  target.textContent = fname ? `→ 📁 ${fname} 에 올라갑니다` : '';
+}
+
+// 폴더 API 공통 — 실패하면 서버의 한글 메시지를 보여준다
+async function folderRequest(url, method, body) {
+  const res = await apiFetch(url, body ? {
+    method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  } : { method });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) { alert(d.error || (res.status === 403 ? '폴더 삭제는 관리자만 할 수 있습니다.' : '실패 (HTTP ' + res.status + ')')); return null; }
+  await loadArtifacts();
+  return d;
+}
+
+async function moveArtifact(id, folderId) {
+  const res = await apiFetch(`/api/artifacts/${id}/folder`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ folderId })
+  });
+  if (!res.ok) { alert('옮기기 실패 (HTTP ' + res.status + ')'); return; }
+  await loadArtifacts();
+}
+
+function renderArtifacts() {
   const grid = document.getElementById('art-grid');
+  const list = artSelected === 'all' ? artList
+    : artSelected === 'none' ? artList.filter(a => a.folderId == null)
+    : artList.filter(a => String(a.folderId) === artSelected);
   if (!list.length) {
-    grid.innerHTML = '<p class="muted">아직 아티팩트가 없습니다. 위에서 첫 HTML을 올려보세요.</p>';
+    grid.innerHTML = artList.length
+      ? '<p class="muted">이 폴더는 비어 있습니다. 다른 폴더의 카드를 왼쪽 폴더로 끌어다 놓거나 [📁 이동]으로 옮겨보세요.</p>'
+      : '<p class="muted">아직 아티팩트가 없습니다. 위에서 첫 HTML을 올려보세요.</p>';
     return;
   }
+  const moveOptions = a => `<option value="">📥 미분류</option>` + artFolders.map(f =>
+    `<option value="${f.id}"${String(a.folderId) === String(f.id) ? ' selected' : ''}>📁 ${esc(f.name)}</option>`).join('');
   grid.innerHTML = list.map(a => `
-    <div class="art-card" data-id="${a.id}">
+    <div class="art-card" data-id="${a.id}" draggable="true">
       <div class="art-preview">
         <iframe src="/artifacts/view/${a.id}/" sandbox="allow-scripts" loading="lazy" scrolling="no" tabindex="-1"></iframe>
       </div>
@@ -518,6 +623,7 @@ async function loadArtifacts() {
           <button class="btn art-review" data-review="${a.id}">💬${a.openCommentCount ? ' ' + a.openCommentCount : ''}</button>
           <button class="btn art-edit" data-edit="${a.id}" data-title="${esc(a.title)}">✏️</button>
           <button class="btn art-del" data-del="${a.id}">🗑</button>
+          <select class="art-move" data-move="${a.id}" title="폴더 이동">${moveOptions(a)}</select>
         </div>
       </div>
     </div>`).join('');
@@ -544,6 +650,16 @@ async function loadArtifacts() {
   grid.querySelectorAll('.art-review').forEach(b => b.onclick = (e) => {
     e.stopPropagation();
     window.open('/artifacts/review/' + b.dataset.review, '_blank');
+  });
+  // 폴더 이동 (v0.0.86) — 드롭다운
+  grid.querySelectorAll('.art-move').forEach(sel => {
+    sel.onclick = e => e.stopPropagation();
+    sel.onchange = () => moveArtifact(sel.dataset.move, sel.value ? Number(sel.value) : null).catch(reportErr);
+  });
+  // 폴더 이동 — 카드를 왼쪽 폴더로 드래그 앤 드롭
+  grid.querySelectorAll('.art-card').forEach(card => {
+    card.ondragstart = e => { e.dataTransfer.setData('text/plain', card.dataset.id); card.classList.add('dragging'); };
+    card.ondragend = () => card.classList.remove('dragging');
   });
 }
 
@@ -607,17 +723,21 @@ async function uploadArtifact() {
     // 수정 모드면 같은 id 에 PUT (링크 유지), 아니면 POST 신규
     const url = editingArtifactId ? '/api/artifacts/' + editingArtifactId : '/api/artifacts';
     const method = editingArtifactId ? 'PUT' : 'POST';
+    // 특정 폴더를 보고 있으면 그 폴더로 올린다 (v0.0.86). 수정(PUT)은 폴더를 바꾸지 않는다.
+    const uploadFolderId = /^\d+$/.test(artSelected) ? artSelected : null;
     let res;
     if (dirFiles.length) {
       // 경로는 part filename 이 아니라 assetPaths 텍스트 필드로 — 인덱스 정렬 (서버와 계약)
       const fd = new FormData();
       fd.append('title', title); fd.append('filename', filename); fd.append('html', html);
+      if (uploadFolderId && !editingArtifactId) fd.append('folderId', uploadFolderId);
       dirFiles.forEach(d => { fd.append('assets', d.file, d.file.name); fd.append('assetPaths', d.relPath); });
       res = await apiFetch(url, { method, body: fd }); // Content-Type 은 브라우저가 boundary 포함 설정
     } else {
       res = await apiFetch(url, {
         method, headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, html, filename })
+        body: JSON.stringify(uploadFolderId && !editingArtifactId
+          ? { title, html, filename, folderId: uploadFolderId } : { title, html, filename })
       });
     }
     const body = await res.json();
@@ -781,6 +901,8 @@ async function loadMe() {
   // 관리자 전용 탭 (서버도 ROLE_ADMIN 으로 막는다 — 숨김은 UX)
   document.getElementById('tab-members').hidden = !me.admin;
   document.getElementById('tab-users').hidden = !me.admin;
+  meIsAdmin = me.admin;
+  if (artList.length || artFolders.length) renderArtFolders();   // 아티팩트 탭이 먼저 그려졌다면 🗑 반영
 }
 
 async function loadMembers() {

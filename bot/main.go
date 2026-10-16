@@ -60,6 +60,7 @@ func main() {
 			"/api/feature-requests", "/api/feature-requests/", // 기능요청 게시판
 			"/api/github-mappings", "/api/github-mappings/", // GitHub↔Jira 매핑
 			"/api/artifacts", "/api/artifacts/", // 아티팩트 목록/업로드/삭제
+			"/api/artifact-folders", "/api/artifact-folders/", // 아티팩트 주제 폴더 (v0.0.86)
 			"/api/admin/",        // 회원 관리 (관리자 전용 — Spring 이 ROLE_ADMIN 검사, v0.0.79)
 			"/artifacts/view/",   // 아티팩트 뷰어 — v0.0.73 부터 로그인 필수 (무인증 공유 중단)
 			"/artifacts/review/", // 인라인 댓글 리뷰 페이지 (v0.0.75)

@@ -91,6 +91,29 @@ footer { text-align: center; padding: 16px; border-top: 1px solid var(--border);
   padding: 16px 20px; margin-bottom: 20px; }
 .art-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .art-form input[type="text"] { flex: 1; min-width: 220px; }
+/* ===== 아티팩트 주제 폴더 (v0.0.86) — 왼쪽 목록 + 오른쪽 업로드/그리드 ===== */
+.art-layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.art-folders { width: 220px; flex-shrink: 0; position: sticky; top: 12px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+.art-main { flex: 1; min-width: 320px; }
+.art-folder { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-radius: 6px;
+  cursor: pointer; font-size: 14px; user-select: none; }
+.art-folder:hover { background: var(--bg); }
+.art-folder.active { background: rgba(68, 147, 248, .18); color: var(--accent); font-weight: 600; }
+.art-folder.drop-target { outline: 2px dashed var(--accent); background: rgba(68, 147, 248, .1); }
+.art-folder .f-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-folder .f-count { margin-left: auto; color: var(--muted); font-size: 12px; }
+/* ✏️🗑 는 항상 자리를 차지하고(visibility) 줄 맨 오른쪽에 둔다 — display:none→inline 으로 hover 시
+   튀어나오면 레이아웃이 밀려 "폴더 클릭"이 🗑 에 맞는 오클릭이 생긴다(v0.0.86 브라우저 검증에서 발견).
+   선택된 폴더에서는 항상 보이게 해 터치 기기(hover 없음)에서도 쓸 수 있다. */
+.art-folder .f-act { visibility: hidden; background: none; border: 0; cursor: pointer; font-size: 12px; padding: 0 2px; }
+.art-folder:hover .f-act, .art-folder.active .f-act { visibility: visible; }
+.art-folders hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
+.art-folder-add { width: 100%; margin-top: 6px; font-size: 13px; }
+.art-move { font-size: 12px; padding: 3px 4px; max-width: 110px; }
+.art-card[draggable="true"] { cursor: grab; }
+.art-card.dragging { opacity: .4; }
+@media (max-width: 760px) { .art-folders { width: 100%; position: static; } }
 .art-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 .art-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
   overflow: hidden; transition: border-color .15s, transform .15s; }

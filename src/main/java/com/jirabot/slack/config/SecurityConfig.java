@@ -7,6 +7,7 @@ import java.time.Duration;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -75,6 +76,8 @@ public class SecurityConfig {
                         // 관리자 전용 API (일반 사용자는 403). 아래 authenticated 목록보다 먼저 와야 한다
                         // (첫 매칭 규칙이 적용됨). 회원 관리(v0.0.79) + 사용자 관리 탭의
                         // Slack↔Jira·GitHub↔Jira 매핑(v0.0.82).
+                        // 아티팩트 폴더 삭제는 관리자만 (v0.0.86) — 만들기·이름 변경·옮기기는 아래 authenticated.
+                        .requestMatchers(HttpMethod.DELETE, "/api/artifact-folders/**").hasRole("ADMIN")
                         .requestMatchers("/api/admin/**",
                                 "/api/user-mappings", "/api/user-mappings/**",
                                 "/api/github-mappings", "/api/github-mappings/**").hasRole("ADMIN")
@@ -86,6 +89,7 @@ public class SecurityConfig {
                                 "/api/feature-requests/**",
                                 // v0.0.75: 아티팩트 인라인 댓글 리뷰 페이지(정적 SPA) — 로그인 필수.
                                 "/api/artifacts/**", "/artifacts/view/**",
+                                "/api/artifact-folders", "/api/artifact-folders/**",
                                 "/artifacts/review/**").authenticated()
                         // STUDY: /api/slack/** 는 SlackSignatureFilter 에서 HMAC 검증으로 이미 신원을 확인했으므로
                         // Spring Security 의 authorization 단계에서는 permitAll. 실패 시 필터에서 403 으로 이미 차단됨.

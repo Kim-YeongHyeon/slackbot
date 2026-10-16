@@ -87,6 +87,10 @@ class SecurityConfigIntegrationTest {
     @MockitoBean
     private com.jirabot.slack.repository.DashboardUserRepository dashboardUserRepository;
 
+    // L11 (v0.0.86 artifact folders)
+    @MockitoBean
+    private com.jirabot.slack.repository.ArtifactFolderRepository artifactFolderRepository;
+
     @MockitoBean
     private JiraSyncService jiraSyncService;
 
@@ -206,6 +210,28 @@ class SecurityConfigIntegrationTest {
                 .andExpect(status().isOk());
         // 무인증은 여전히 401
         mockMvc.perform(get("/api/user-mappings")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void artifactFolders_anyoneManages_onlyAdminDeletes() throws Exception {
+        // v0.0.86: 폴더 만들기·이름 변경은 로그인한 누구나, 삭제는 관리자만.
+        givenDbUser("kim", "pw1234", true);
+        String kim = basic("kim", "pw1234");
+        org.mockito.Mockito.when(artifactFolderRepository.save(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(inv -> inv.getArgument(0));
+        org.mockito.Mockito.when(artifactFolderRepository.existsById(3L)).thenReturn(true);
+
+        mockMvc.perform(get("/api/artifact-folders").header("Authorization", kim)).andExpect(status().isOk());
+        mockMvc.perform(post("/api/artifact-folders").header("Authorization", kim)
+                        .contentType("application/json").content("{\"name\":\"설계\"}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/artifact-folders/3").header("Authorization", kim))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/artifact-folders/3").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/artifact-folders")).andExpect(status().isUnauthorized());
     }
 
     @Test
