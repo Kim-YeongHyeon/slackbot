@@ -608,53 +608,27 @@ function renderArtifacts() {
       : '<p class="muted">아직 아티팩트가 없습니다. 위에서 첫 HTML을 올려보세요.</p>';
     return;
   }
-  const moveOptions = a => `<option value="">📥 미분류</option>` + artFolders.map(f =>
-    `<option value="${f.id}"${String(a.folderId) === String(f.id) ? ' selected' : ''}>📁 ${esc(f.name)}</option>`).join('');
+  // 카드는 미리보기·제목·정보만 — 나머지 동작은 ⋯ 메뉴로 (v0.0.87). 댓글은 카드 클릭 → 리뷰 페이지.
   grid.innerHTML = list.map(a => `
     <div class="art-card" data-id="${a.id}" draggable="true">
       <div class="art-preview">
         <iframe src="/artifacts/view/${a.id}/" sandbox="allow-scripts" loading="lazy" scrolling="no" tabindex="-1"></iframe>
       </div>
       <div class="art-meta">
-        <div class="art-title" title="${esc(a.title)}">${esc(a.title)}</div>
-        <div class="art-sub muted">${fmtDate(a.createdAt)}${a.author ? ' · ' + esc(a.author) : ''} · ${(a.sizeBytes/1024).toFixed(0)}KB${a.assetCount ? ' · 파일 ' + a.assetCount + '개' : ''}</div>
-        <div class="art-actions">
-          <button class="btn art-copy" data-copy="${a.id}">🔗 링크 복사</button>
-          <button class="btn art-review" data-review="${a.id}">💬${a.openCommentCount ? ' ' + a.openCommentCount : ''}</button>
-          <button class="btn art-edit" data-edit="${a.id}" data-title="${esc(a.title)}">✏️</button>
-          <button class="btn art-del" data-del="${a.id}">🗑</button>
-          <select class="art-move" data-move="${a.id}" title="폴더 이동">${moveOptions(a)}</select>
+        <div class="art-title-row">
+          <div class="art-title" title="${esc(a.title)}">${esc(a.title)}</div>
+          <button class="art-more" data-more="${a.id}" title="더보기">⋯</button>
         </div>
+        <div class="art-sub muted">${fmtDate(a.createdAt)}${a.author ? ' · ' + esc(a.author) : ''} · ${(a.sizeBytes/1024).toFixed(0)}KB${a.assetCount ? ' · 파일 ' + a.assetCount + '개' : ''}</div>
       </div>
     </div>`).join('');
   // 리뷰(댓글 포함)가 기본 진입점 (v0.0.76) — 순수 뷰어는 리뷰 페이지 상단 [원본 보기]로.
   grid.querySelectorAll('.art-card .art-preview, .art-card .art-title').forEach(el => {
     el.onclick = () => window.open('/artifacts/review/' + el.closest('.art-card').dataset.id, '_blank');
   });
-  grid.querySelectorAll('.art-copy').forEach(b => b.onclick = async (e) => {
+  grid.querySelectorAll('.art-more').forEach(b => b.onclick = e => {
     e.stopPropagation();
-    await navigator.clipboard.writeText(location.origin + '/artifacts/review/' + b.dataset.copy);
-    b.textContent = '✅ 복사됨'; setTimeout(() => b.textContent = '🔗 링크 복사', 1500);
-  });
-  grid.querySelectorAll('.art-del').forEach(b => b.onclick = async (e) => {
-    e.stopPropagation();
-    if (!confirm('이 아티팩트를 삭제할까요? 공유된 링크도 함께 무효화됩니다.')) return;
-    await apiFetch('/api/artifacts/' + b.dataset.del, { method: 'DELETE' });
-    loadArtifacts().catch(reportErr);
-  });
-  grid.querySelectorAll('.art-edit').forEach(b => b.onclick = (e) => {
-    e.stopPropagation();
-    startArtifactEdit(b.dataset.edit, b.dataset.title);
-  });
-  // 인라인 댓글 리뷰 (v0.0.75) — 새 탭에서 리뷰 페이지 열기 (💬 N = 미해결 루트 댓글 수)
-  grid.querySelectorAll('.art-review').forEach(b => b.onclick = (e) => {
-    e.stopPropagation();
-    window.open('/artifacts/review/' + b.dataset.review, '_blank');
-  });
-  // 폴더 이동 (v0.0.86) — 드롭다운
-  grid.querySelectorAll('.art-move').forEach(sel => {
-    sel.onclick = e => e.stopPropagation();
-    sel.onchange = () => moveArtifact(sel.dataset.move, sel.value ? Number(sel.value) : null).catch(reportErr);
+    openArtMenu(b, artList.find(a => String(a.id) === b.dataset.more));
   });
   // 폴더 이동 — 카드를 왼쪽 폴더로 드래그 앤 드롭
   grid.querySelectorAll('.art-card').forEach(card => {
@@ -662,6 +636,61 @@ function renderArtifacts() {
     card.ondragend = () => card.classList.remove('dragging');
   });
 }
+
+// ⋯ 메뉴 (v0.0.87) — 링크 복사 / 내용 수정 / 폴더 이동 / 삭제. 화면에 하나만 띄우고, 바깥 클릭·Esc 로 닫힌다.
+function closeArtMenu() {
+  const m = document.getElementById('art-menu');
+  if (m) m.remove();
+}
+function openArtMenu(btn, a) {
+  const wasOpenForSame = document.getElementById('art-menu')?.dataset.for === String(a.id);
+  closeArtMenu();
+  if (wasOpenForSame) return;   // 같은 ⋯ 를 다시 누르면 닫기만
+  const folderItems = [{ id: null, name: '미분류', icon: '📥' }]
+    .concat(artFolders.map(f => ({ id: f.id, name: f.name, icon: '📁' })))
+    .map(f => {
+      const here = (a.folderId == null && f.id == null) || String(a.folderId) === String(f.id);
+      return `<button class="art-menu-item sub" data-move-to="${f.id ?? ''}"${here ? ' disabled' : ''}>`
+        + `${f.icon} ${esc(f.name)}${here ? ' ✓' : ''}</button>`;
+    }).join('');
+  const m = document.createElement('div');
+  m.id = 'art-menu'; m.className = 'art-menu'; m.dataset.for = a.id;
+  m.innerHTML = `<button class="art-menu-item" data-act="copy">🔗 링크 복사</button>`
+    + `<button class="art-menu-item" data-act="edit">✏️ 내용 수정</button>`
+    + `<div class="art-menu-label">📁 폴더 이동</div>${folderItems}`
+    + `<button class="art-menu-item danger" data-act="del">🗑 삭제</button>`;
+  document.body.appendChild(m);
+  // 버튼 아래(화면 아래로 넘치면 위)에 띄운다
+  const r = btn.getBoundingClientRect();
+  const top = (r.bottom + m.offsetHeight + 8 > window.innerHeight) ? r.top - m.offsetHeight - 4 : r.bottom + 4;
+  m.style.top = Math.max(8, top) + 'px';
+  m.style.left = Math.max(8, Math.min(r.right - m.offsetWidth, window.innerWidth - m.offsetWidth - 8)) + 'px';
+
+  m.onclick = async e => {
+    e.stopPropagation();
+    const item = e.target.closest('.art-menu-item');
+    if (!item || item.disabled) return;
+    if (item.dataset.act === 'copy') {
+      await navigator.clipboard.writeText(location.origin + '/artifacts/review/' + a.id);
+      item.textContent = '✅ 복사됨';
+      setTimeout(closeArtMenu, 700);
+    } else if (item.dataset.act === 'edit') {
+      closeArtMenu();
+      startArtifactEdit(a.id, a.title);
+    } else if (item.dataset.act === 'del') {
+      closeArtMenu();
+      if (!confirm('이 아티팩트를 삭제할까요? 공유된 링크도 함께 무효화됩니다.')) return;
+      await apiFetch('/api/artifacts/' + a.id, { method: 'DELETE' });
+      loadArtifacts().catch(reportErr);
+    } else if ('moveTo' in item.dataset) {
+      closeArtMenu();
+      moveArtifact(a.id, item.dataset.moveTo ? Number(item.dataset.moveTo) : null).catch(reportErr);
+    }
+  };
+}
+document.addEventListener('click', closeArtMenu);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeArtMenu(); });
+window.addEventListener('scroll', closeArtMenu, true);
 
 // 제자리 수정 모드 (v0.0.74) — 같은 링크(id)를 유지한 채 내용 교체. PUT = 전체 교체라
 // 자산이 있는 아티팩트는 수정 시에도 폴더를 다시 선택해야 한다 (안 하면 자산 삭제).

@@ -110,7 +110,22 @@ footer { text-align: center; padding: 16px; border-top: 1px solid var(--border);
 .art-folder:hover .f-act, .art-folder.active .f-act { visibility: visible; }
 .art-folders hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; }
 .art-folder-add { width: 100%; margin-top: 6px; font-size: 13px; }
-.art-move { font-size: 12px; padding: 3px 4px; max-width: 110px; }
+/* 카드 ⋯ 메뉴 (v0.0.87) — 버튼 줄 대신 제목 옆 ⋯ 하나 */
+.art-title-row { display: flex; align-items: center; gap: 6px; }
+.art-title-row .art-title { flex: 1; min-width: 0; }
+.art-more { background: none; border: 1px solid transparent; color: var(--muted); border-radius: 6px;
+  cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 8px; flex-shrink: 0; }
+.art-more:hover { border-color: var(--border); color: var(--text); background: var(--bg); }
+.art-menu { position: fixed; z-index: 1000; min-width: 190px; max-height: 70vh; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45); }
+.art-menu-item { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--text);
+  padding: 7px 10px; border-radius: 5px; cursor: pointer; font-size: 13px; }
+.art-menu-item:hover:not(:disabled) { background: var(--bg); }
+.art-menu-item:disabled { color: var(--muted); cursor: default; }
+.art-menu-item.sub { padding-left: 22px; }
+.art-menu-item.danger { color: var(--red); border-top: 1px solid var(--border); border-radius: 0 0 5px 5px; margin-top: 2px; }
+.art-menu-label { color: var(--muted); font-size: 11px; padding: 6px 10px 2px; }
 .art-card[draggable="true"] { cursor: grab; }
 .art-card.dragging { opacity: .4; }
 @media (max-width: 760px) { .art-folders { width: 100%; position: static; } }
