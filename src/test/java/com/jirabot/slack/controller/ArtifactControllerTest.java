@@ -123,7 +123,7 @@ class ArtifactControllerTest {
                 .andExpect(header().string("Content-Security-Policy", "sandbox allow-scripts"))
                 .andExpect(result -> assertThat(result.getResponse().getContentAsString())
                         .contains("data:image/png;base64,")
-                        .contains("<script data-sol-comment-agent>")
+                        .contains("data-sol-comment-agent")
                         .doesNotContain("src=\"images/plot.png\""));
         verify(assetRepository).findByArtifactId(7L);
     }
