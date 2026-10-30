@@ -234,6 +234,22 @@ public class ArtifactController {
         return ResponseEntity.ok(Map.of("deleted", id));
     }
 
+    // The parent page fetches this document with the ngrok bypass header before placing it in
+    // a sandboxed srcdoc frame. Stored assets must be embedded too: Safari may omit the
+    // ngrok warning cookie from opaque-origin iframe subresource requests.
+    @GetMapping("/api/artifacts/{id}/embedded")
+    public ResponseEntity<Object> embedded(@PathVariable long id) {
+        return repository.findById(id)
+                .<ResponseEntity<Object>>map(artifact -> ResponseEntity.ok()
+                        .header("Content-Security-Policy", "sandbox allow-scripts")
+                        .header("X-Content-Type-Options", "nosniff")
+                        .header("X-Sol-Artifact", "embedded")
+                        .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
+                        .body(ArtifactEmbedder.inline(id, artifact.getHtml(),
+                                assetRepository.findByArtifactId(id))))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
     // 상대 자산 참조(page_files/x.png)가 {id}/ 기준으로 풀리도록 정식 URL 은 trailing slash.
     // 구 공유 링크(/artifacts/view/2)는 여기서 301 — PathPattern 구체성 비교로 캐치올보다 우선.
     @GetMapping("/artifacts/view/{id}")

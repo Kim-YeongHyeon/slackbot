@@ -606,7 +606,25 @@ async function moveArtifact(id, folderId) {
   await loadArtifacts();
 }
 
+let artPreviewObserver = null;
+function loadArtPreview(frame) {
+  if (frame.dataset.loaded) return;
+  frame.dataset.loaded = 'true';
+  apiFetch('/api/artifacts/' + frame.dataset.artId + '/embedded').then(res => {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (res.headers.get('X-Sol-Artifact') !== 'embedded') {
+      throw new Error('접속 확인 페이지가 응답했습니다.');
+    }
+    return res.text();
+  }).then(html => {
+    if (frame.isConnected) frame.srcdoc = html;
+  }).catch(err => {
+    if (frame.isConnected) frame.srcdoc = '<!doctype html><html><body style="font:14px sans-serif;color:#a00;padding:16px">'
+      + '미리보기를 불러오지 못했습니다: ' + esc(err.message) + '</body></html>';
+  });
+}
 function renderArtifacts() {
+  if (artPreviewObserver) artPreviewObserver.disconnect();
   const grid = document.getElementById('art-grid');
   const list = artSelected === 'all' ? artList
     : artSelected === 'none' ? artList.filter(a => a.folderId == null)
@@ -621,7 +639,7 @@ function renderArtifacts() {
   grid.innerHTML = list.map(a => `
     <div class="art-card" data-id="${a.id}" draggable="true">
       <div class="art-preview">
-        <iframe src="/artifacts/view/${a.id}/" sandbox="allow-scripts" loading="lazy" scrolling="no" tabindex="-1"></iframe>
+        <iframe data-art-id="${a.id}" sandbox="allow-scripts" scrolling="no" tabindex="-1"></iframe>
       </div>
       <div class="art-meta">
         <div class="art-title-row">
@@ -631,6 +649,18 @@ function renderArtifacts() {
         <div class="art-sub muted">${fmtDate(a.createdAt)}${a.author ? ' · ' + esc(a.author) : ''} · ${(a.sizeBytes/1024).toFixed(0)}KB${a.assetCount ? ' · 파일 ' + a.assetCount + '개' : ''}</div>
       </div>
     </div>`).join('');
+  // Loading only visible previews avoids fetching full HTML/assets for every gallery card.
+  const frames = grid.querySelectorAll('.art-preview iframe');
+  if ('IntersectionObserver' in window) {
+    artPreviewObserver = new IntersectionObserver(entries => entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      artPreviewObserver.unobserve(entry.target);
+      loadArtPreview(entry.target);
+    }), { rootMargin: '200px' });
+    frames.forEach(frame => artPreviewObserver.observe(frame));
+  } else {
+    frames.forEach(loadArtPreview);
+  }
   // 리뷰(댓글 포함)가 기본 진입점 (v0.0.76) — 순수 뷰어는 리뷰 페이지 상단 [원본 보기]로.
   grid.querySelectorAll('.art-card .art-preview, .art-card .art-title').forEach(el => {
     el.onclick = () => window.open('/artifacts/review/' + el.closest('.art-card').dataset.id, '_blank');

@@ -1,6 +1,7 @@
 package com.jirabot.slack.repository;
 
 import com.jirabot.slack.entity.ArtifactAssetEntity;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -10,6 +11,8 @@ import org.springframework.data.repository.query.Param;
 public interface ArtifactAssetRepository extends JpaRepository<ArtifactAssetEntity, Long> {
 
     Optional<ArtifactAssetEntity> findByArtifactIdAndPath(long artifactId, String path);
+
+    List<ArtifactAssetEntity> findByArtifactId(long artifactId);
 
     // STUDY: 파생 deleteBy 가 아닌 @Modifying 벌크 삭제 — 파생 삭제는 엔티티를 로드해 flush 시점에
     //        지우는데, Hibernate 는 flush 에서 INSERT 를 DELETE 보다 먼저 실행하므로 "삭제 후 같은
