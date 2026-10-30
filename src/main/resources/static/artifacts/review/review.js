@@ -50,7 +50,21 @@
     .catch(function () {});
 
   // ===== iframe → 에이전트 통신 =====
-  frame.src = '/artifacts/view/' + id + '/';
+  // Fetching with the ngrok bypass header avoids an interstitial inside the sandbox.
+  // The embedded endpoint also inlines stored assets to prevent cookie-dependent loads.
+  apiFetch('/api/artifacts/' + id + '/embedded').then(function (r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    if (r.headers.get('X-Sol-Artifact') !== 'embedded') {
+      throw new Error('서버 대신 접속 확인 페이지가 응답했습니다.');
+    }
+    return r.text();
+  }).then(function (html) {
+    frame.srcdoc = html;
+  }).catch(function (err) {
+    frame.style.height = '160px';
+    frame.srcdoc = '<!doctype html><html><body style="font:14px sans-serif;padding:20px;color:#a00">'
+      + '아티팩트를 불러오지 못했습니다: ' + esc(err.message) + '</body></html>';
+  });
   // 상단 "원본 보기" — 댓글 UI 없는 순수 뷰어(새 탭). 리뷰가 기본 진입점 (v0.0.76).
   document.getElementById('btn-raw-view').href = '/artifacts/view/' + id + '/';
 

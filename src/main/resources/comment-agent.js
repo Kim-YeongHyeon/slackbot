@@ -2,7 +2,8 @@
  * 문서 자체는 API/부모 DOM 에 접근 불가 → 선택 캡처·앵커링·하이라이트·히트테스트만 하고
  * 인증된 부모(리뷰 페이지)와 postMessage 로만 통신한다 (Hypothesis 패턴).
  * envelope: {ns:'cmt', type, ...}. 부모→자식 targetOrigin '*'(opaque 라 불가피),
- * 자식→부모 location.origin. 부모의 init 이 오기 전엔 ready 만 보내고 영구 휴면. */
+ * 자식→부모는 첫 init 에서 확인한 부모 origin 으로 전송(초기 ready 만 '*').
+ * 부모의 init 이 오기 전엔 ready 만 보내고 영구 휴면. */
 (function () {
   'use strict';
 
@@ -10,6 +11,7 @@
   if (window.parent === window) return;
 
   var NS = 'cmt';
+  var parentOrigin = null;
   var comments = [];          // 부모가 준 미해결 루트 [{cid, quote, prefix, suffix}]
   var idx = null;             // {text, nodes[], starts[]} 텍스트 인덱스
   var anchored = new Map();   // cid → Range (재앵커 성공한 것만)
@@ -22,12 +24,20 @@
   function post(type, extra) {
     var msg = { ns: NS, type: type };
     if (extra) for (var k in extra) msg[k] = extra[k];
-    window.parent.postMessage(msg, location.origin);
+    window.parent.postMessage(msg, parentOrigin || '*');
   }
   window.addEventListener('message', function (e) {
-    if (e.origin !== location.origin) return;             // 부모와 같은 origin 만
+    if (e.source !== window.parent) return;
     var d = e.data;
     if (!d || d.ns !== NS) return;
+    // about:srcdoc has an opaque origin, so location.origin is "null".
+    // Pin the parent origin on the initial handshake instead of comparing with it.
+    if (parentOrigin === null) {
+      if (d.type !== 'init') return;
+      parentOrigin = e.origin;
+    } else if (e.origin !== parentOrigin) {
+      return;
+    }
     if (d.type === 'init' || d.type === 'set-comments') {
       comments = Array.isArray(d.comments) ? d.comments : [];
       initialized = true;

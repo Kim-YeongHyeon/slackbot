@@ -25,6 +25,7 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-webflux'
+	implementation 'org.jsoup:jsoup:1.23.2'
 	// STUDY: macOS에서 Netty DNS resolver 네이티브 라이브러리. 없으면 시스템 DNS fallback은 되지만 경고 로그 반복.
 	runtimeOnly 'io.netty:netty-resolver-dns-native-macos::osx-aarch_64'
 	// STUDY: spring-retry / spring-aspects 는 Spring Boot BOM이 버전을 관리한다.
