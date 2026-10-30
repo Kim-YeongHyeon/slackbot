@@ -245,7 +245,7 @@ public class ArtifactController {
                         .header("X-Content-Type-Options", "nosniff")
                         .header("X-Sol-Artifact", "embedded")
                         .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
-                        .body(ArtifactEmbedder.inline(id, artifact.getHtml(),
+                        .body(ArtifactEmbedder.inline(id, injectAgent(artifact.getHtml(), agentJs),
                                 assetRepository.findByArtifactId(id))))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
