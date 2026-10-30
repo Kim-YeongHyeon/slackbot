@@ -264,7 +264,7 @@ public class ArtifactController {
                             .header("X-Content-Type-Options", "nosniff")
                             .header("X-Frame-Options", "SAMEORIGIN")
                             .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
-                            .body(injectAgent(a.getHtml(), id)))
+                            .body(injectAgent(a.getHtml(), agentJs)))
                     .orElseGet(() -> ResponseEntity.status(404)
                             .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
                             .body("<html><body style='font-family:sans-serif'>"
@@ -301,11 +301,20 @@ public class ArtifactController {
                 .build();
     }
 
-    // </body> 마지막 매치 앞에 에이전트 <script defer> 를 주입 (없으면 문서 끝에 append).
+    // 에이전트 JS 를 <script> 로 **인라인** 주입 — </body> 마지막 매치 앞 (없으면 문서 끝에 append).
+    // STUDY: 처음(v0.0.75)엔 <script src=".../__comment-agent.js"> 외부 요청이었는데, 보안 격리(opaque origin)
+    //        문서 안의 요청은 브라우저가 "타사 요청"으로 취급한다. 시크릿 창처럼 타사 쿠키가 차단되면 ngrok 무료
+    //        플랜의 경고 통과 쿠키가 빠져 ngrok 이 스크립트 대신 경고 페이지를 돌려주고, 에이전트가 안 떠서
+    //        리뷰 iframe 이 기본 높이(150px)에 멈췄다(v0.0.88 실사고). 인라인이면 요청 자체가 없어 쿠키·인증·
+    //        광고차단과 무관하게 항상 동작한다. CSP 는 sandbox 만 걸려 있어 인라인 스크립트가 허용된다.
     // STUDY: toLowerCase().lastIndexOf 는 터키어 로케일 등에서 'I'/'İ' 매핑이 깨진다(로케일 함정) —
     //        CASE_INSENSITIVE 정규식 Matcher 로 마지막 매치 위치를 안전하게 찾는다.
-    static String injectAgent(String html, long id) {
-        String tag = "<script src=\"/artifacts/view/" + id + "/" + AGENT_PATH + "\" defer></script>";
+    static String injectAgent(String html, String agentJs) {
+        // 스크립트 본문에 "</script" 가 있으면 HTML 파서가 거기서 블록을 닫으므로 방어적으로 이스케이프
+        // STUDY: replaceAll 의 치환 문자열에서 "\" 는 이스케이프 문자라, 결과에 백슬래시 하나를 넣으려면
+        //        Java 리터럴로 "\\\\" 가 필요하다 ("<\\/script" 로 쓰면 "\/"→"/" 가 되어 아무것도 안 바뀐다).
+        String safeJs = agentJs.replaceAll("(?i)<(/script)", "<\\\\$1");   // 대소문자 보존, "/" 앞에 "\" 추가
+        String tag = "<script data-sol-comment-agent>" + safeJs + "</script>";
         Matcher m = Pattern.compile("</body>", Pattern.CASE_INSENSITIVE).matcher(html);
         int last = -1;
         while (m.find()) {

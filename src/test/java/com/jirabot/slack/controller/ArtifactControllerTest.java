@@ -472,7 +472,9 @@ class ArtifactControllerTest {
                 .andExpect(result -> {
                     String out = result.getResponse().getContentAsString();
                     assertThat(out).contains("hi");
-                    assertThat(out).contains("/artifacts/view/7/" + ArtifactController.AGENT_PATH);
+                    // v0.0.88: 외부 src 가 아니라 인라인 — 타사 쿠키 차단 브라우저에서도 동작해야 한다
+                    assertThat(out).contains("<script data-sol-comment-agent>");
+                    assertThat(out).doesNotContain("src=\"/artifacts/view/7/" + ArtifactController.AGENT_PATH);
                 });
         // 주입은 새 문자열 생성일 뿐 — DB(엔티티)를 저장하지 않는다 (원문 불변).
         verify(repository, never()).save(any());
@@ -537,53 +539,39 @@ class ArtifactControllerTest {
     // ===== 인라인 댓글 에이전트 주입 (v0.0.75) =====
 
     @Test
-    void injectAgent_insertsScriptBeforeLastBodyClose() {
-        String out = ArtifactController.injectAgent("<html><body>hi</body></html>", 7L);
-        // 정확히 </body> 앞에 삽입 — 태그는 딱 한 번만 등장
-        assertThat(out).contains("<script src=\"/artifacts/view/7/__comment-agent.js\" defer></script></body>");
-        assertThat(countOccurrences(out, "__comment-agent.js")).isEqualTo(1);
+    void injectAgent_inlinesScriptBeforeLastBodyClose() {
+        String out = ArtifactController.injectAgent("<html><body>hi</body></html>", "AGENT();");
+        assertThat(out).isEqualTo("<html><body>hi<script data-sol-comment-agent>AGENT();</script></body></html>");
+        assertThat(countOccurrences(out, "data-sol-comment-agent")).isEqualTo(1);
     }
 
     @Test
     void injectAgent_lastBodyClose_whenMultiple() {
-        // 문서에 </body> 가 여러 번이면 마지막 앞에 삽입해야 한다
-        String out = ArtifactController.injectAgent("<body>a</body><body>b</body>", 3L);
-        int scriptIdx = out.indexOf("__comment-agent.js");
-        int lastBody = out.lastIndexOf("</body>");
-        assertThat(scriptIdx).isLessThan(lastBody);
-        assertThat(countOccurrences(out, "__comment-agent.js")).isEqualTo(1);
+        // 본문 중간(예: 코드 예시)의 </body> 가 아니라 마지막 </body> 앞에 넣는다
+        String out = ArtifactController.injectAgent("<body>a</body><body>b</body>", "X");
+        int scriptIdx = out.indexOf("data-sol-comment-agent");
+        assertThat(scriptIdx).isGreaterThan(out.indexOf("b"));
+        assertThat(countOccurrences(out, "data-sol-comment-agent")).isEqualTo(1);
     }
 
     @Test
     void injectAgent_uppercaseBodyTag_matchedCaseInsensitively() {
-        String out = ArtifactController.injectAgent("<HTML><BODY>hi</BODY></HTML>", 9L);
-        assertThat(out).contains("<script src=\"/artifacts/view/9/__comment-agent.js\" defer></script></BODY>");
+        String out = ArtifactController.injectAgent("<HTML><BODY>hi</BODY></HTML>", "X");
+        assertThat(out).contains("<script data-sol-comment-agent>X</script></BODY>");
     }
 
     @Test
     void injectAgent_noBodyTag_appendsAtEnd() {
-        String out = ArtifactController.injectAgent("<div>no body tag</div>", 2L);
-        assertThat(out).endsWith("<script src=\"/artifacts/view/2/__comment-agent.js\" defer></script>");
+        String out = ArtifactController.injectAgent("<div>no body tag</div>", "X");
+        assertThat(out).endsWith("<script data-sol-comment-agent>X</script>");
     }
 
     @Test
-    void injectAgent_referencesCorrectId() {
-        assertThat(ArtifactController.injectAgent("<body></body>", 42L))
-                .contains("/artifacts/view/42/__comment-agent.js");
-    }
-
-    @Test
-    void view_servesAgentJs_evenWithEmptyAssetRepo() throws Exception {
-        // 에이전트는 자산 repo 조회 전에 분기 — 자산이 없어도 200 이어야 한다.
-        mockMvc.perform(get("/artifacts/view/7/__comment-agent.js"))
-                .andExpect(status().isOk())
-                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
-                .andExpect(result -> {
-                    assertThat(result.getResponse().getContentType()).startsWith("text/javascript");
-                    assertThat(result.getResponse().getContentAsString()).contains("cmt");
-                });
-        // 자산 repo 는 건드리지 않는다 (분기가 조회보다 먼저)
-        verify(assetRepository, never()).findByArtifactIdAndPath(anyLong(), anyString());
+    void injectAgent_escapesClosingScriptInsideAgent() {
+        // 에이전트 본문의 </script> 가 인라인 블록을 조기 종료시키면 안 된다 (대소문자 무관)
+        String out = ArtifactController.injectAgent("<body></body>", "var s='</SCRIPT>';");
+        assertThat(out).contains("var s='<\\/SCRIPT>';");
+        assertThat(countOccurrences(out.toLowerCase(), "</script>")).isEqualTo(1);
     }
 
     @Test
