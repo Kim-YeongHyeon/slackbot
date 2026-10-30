@@ -39,7 +39,12 @@ const API = '/api/dashboard';
 // "Request cannot be constructed from a URL that includes credentials" 로 거부된다 (v0.0.68 실사고).
 // location.origin 은 자격증명을 포함하지 않으므로 이를 기준으로 절대 URL 을 만들어 우회한다.
 // Basic Auth 는 페이지 로드 때 브라우저가 realm 에 캐시하므로 이후 요청에 자동으로 실린다.
-const apiFetch = (path, opts) => fetch(new URL(path, location.origin), opts);
+// STUDY: ngrok 무료 플랜은 경고 통과 쿠키가 없는 요청에 200 + 경고 페이지 HTML 을 돌려준다(쿠키 만료·
+// Safari 쿠키 정책·시크릿 창 등). 그러면 res.json() 이 Safari 에서 "The string did not match the expected
+// pattern." 으로 터진다(v0.0.89 실사고). 스크립트가 보내는 요청에는 ngrok 공식 우회 헤더를 붙여 쿠키와 무관하게 통과.
+const NGROK_SKIP = { 'ngrok-skip-browser-warning': '1' };
+const apiFetch = (path, opts = {}) => fetch(new URL(path, location.origin),
+  { ...opts, headers: { ...NGROK_SKIP, ...(opts.headers || {}) } });
 const charts = {};   // canvasId → Chart 인스턴스 (탭 재방문 시 destroy 후 재생성)
 const loaded = {};   // 탭별 1회 로드 플래그 (새로고침 버튼/탭 재클릭 시 갱신)
 
@@ -67,6 +72,10 @@ const esc = (s) => (s ?? '').toString().replace(/[&<>"]/g, c => ({'&':'&amp;','<
 async function get(path) {
   const res = await apiFetch(API + path);
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
+  // JSON 이 아닌 응답(중간 프록시의 HTML 페이지 등)이면 Safari 의 알아보기 힘든 오류 대신 원인을 알려준다
+  if (!(res.headers.get('content-type') || '').includes('json')) {
+    throw new Error(`${path} → 데이터 대신 다른 페이지가 응답했습니다. 새로고침해 주세요 (ngrok 경고 페이지일 수 있음)`);
+  }
   return res.json();
 }
 

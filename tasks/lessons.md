@@ -350,3 +350,6 @@ ngrok 이 스크립트 대신 경고 페이지를 돌려줬다 — 우리 서버
   `--test-third-party-cookie-phaseout`(타사 쿠키 차단 = 시크릿 창 기본)으로도 돌린다.
 - "요청이 서버 기록에 없음" = 브라우저나 ngrok 엣지에서 막힌 것. 서버 코드부터 의심하지 말 것.
 - 보안 격리 문서에서 나가는 요청(스크립트·자산)은 쿠키·인증·광고차단에 모두 취약 — 가능하면 인라인.
+- (v0.0.89 추가) 우리 JS 가 보내는 fetch 에는 `ngrok-skip-browser-warning` 헤더를 항상 붙인다 — 쿠키가 없으면
+  ngrok 이 **200 + HTML** 을 줘서 상태코드 검사로는 못 거르고 `res.json()` 에서 터진다(Safari: "The string did not
+  match the expected pattern."). 재현은 "문서·스크립트는 통과, fetch 만 쿠키 없음" 조건으로.

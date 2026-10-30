@@ -10,7 +10,16 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   };
-  var apiFetch = function (path, opts) { return fetch(new URL(path, location.origin), opts); };
+  // ngrok 경고 생략 헤더 — 쿠키 없이도 API 가 경고 페이지 대신 데이터를 받게 (v0.0.89, app.js 와 동일)
+  var apiFetch = function (path, opts) {
+    opts = opts || {};
+    var headers = { 'ngrok-skip-browser-warning': '1' };
+    for (var k in (opts.headers || {})) headers[k] = opts.headers[k];
+    var merged = {};
+    for (var o in opts) merged[o] = opts[o];
+    merged.headers = headers;
+    return fetch(new URL(path, location.origin), merged);
+  };
 
   // ===== id 파싱 =====
   var params = new URLSearchParams(location.search);
