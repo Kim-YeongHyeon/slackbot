@@ -111,6 +111,30 @@ class ArtifactControllerTest {
     }
 
     @Test
+    void embedded_returnsSandboxedSelfContainedHtml() throws Exception {
+        when(repository.findById(7L)).thenReturn(Optional.of(
+                saved("report", "<html><img src='images/plot.png'></html>")));
+        when(assetRepository.findByArtifactId(7L)).thenReturn(List.of(
+                new ArtifactAssetEntity(7, "images/plot.png", "image/png", new byte[]{1, 2, 3})));
+
+        mockMvc.perform(get("/api/artifacts/7/embedded"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("X-Sol-Artifact", "embedded"))
+                .andExpect(header().string("Content-Security-Policy", "sandbox allow-scripts"))
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                        .contains("data:image/png;base64,")
+                        .doesNotContain("src=\"images/plot.png\""));
+        verify(assetRepository).findByArtifactId(7L);
+    }
+
+    @Test
+    void embedded_missingArtifact_returns404() throws Exception {
+        mockMvc.perform(get("/api/artifacts/99/embedded"))
+                .andExpect(status().isNotFound());
+        verify(assetRepository, never()).findByArtifactId(99L);
+    }
+
+    @Test
     void create_savesAndReturnsIdTitle() throws Exception {
         mockSavedWithId(1L);
 
