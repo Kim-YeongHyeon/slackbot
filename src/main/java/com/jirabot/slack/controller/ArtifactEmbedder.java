@@ -8,6 +8,8 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Function;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -25,41 +27,44 @@ final class ArtifactEmbedder {
 
     private ArtifactEmbedder() {}
 
-    static String inline(long id, String html, List<ArtifactAssetEntity> assets) {
-        Map<String, ArtifactAssetEntity> byPath = new HashMap<>();
-        for (ArtifactAssetEntity asset : assets) {
-            byPath.put(asset.getPath(), asset);
-        }
+    static String inline(long id, String html, Function<String, Optional<ArtifactAssetEntity>> lookup) {
+        AssetResolver assets = new AssetResolver(lookup);
         Document doc = Jsoup.parse(html);
         doc.outputSettings().prettyPrint(false);
         if (doc.selectFirst("base[href]") == null) {
             doc.head().prependElement("base").attr("href", "/artifacts/view/" + id + "/");
         }
         for (Element element : doc.getAllElements()) {
+            // srcdoc has its own URL: keep fragment-only links within this document.
+            if (("a".equals(element.normalName()) || "area".equals(element.normalName()))
+                    && element.hasAttr("href") && element.attr("href").startsWith("#")) {
+                element.attr("href", "about:srcdoc" + element.attr("href"));
+            }
             for (String attribute : List.of("src", "href", "poster", "data")) {
                 if (!element.hasAttr(attribute) || ("href".equals(attribute)
-                        && ("a".equals(element.normalName()) || "base".equals(element.normalName())))) {
+                        && ("a".equals(element.normalName()) || "area".equals(element.normalName())
+                        || "base".equals(element.normalName())))) {
                     continue;
                 }
-                String uri = dataUri(element.attr(attribute), "", byPath, new HashSet<>());
+                String uri = dataUri(element.attr(attribute), "", assets, new HashSet<>());
                 if (uri != null) {
                     element.attr(attribute, uri);
                 }
             }
             if (element.hasAttr("srcset") && !element.attr("srcset").contains("data:")) {
-                element.attr("srcset", inlineSrcset(element.attr("srcset"), byPath));
+                element.attr("srcset", inlineSrcset(element.attr("srcset"), assets));
             }
             if (element.hasAttr("style")) {
-                element.attr("style", inlineCss(element.attr("style"), "", byPath, new HashSet<>()));
+                element.attr("style", inlineCss(element.attr("style"), "", assets, new HashSet<>()));
             }
             if ("style".equals(element.normalName())) {
-                element.html(inlineCss(element.data(), "", byPath, new HashSet<>()));
+                element.html(inlineCss(element.data(), "", assets, new HashSet<>()));
             }
         }
         return doc.outerHtml();
     }
 
-    private static String inlineSrcset(String srcset, Map<String, ArtifactAssetEntity> assets) {
+    private static String inlineSrcset(String srcset, AssetResolver assets) {
         String[] candidates = srcset.split(",", -1);
         for (int i = 0; i < candidates.length; i++) {
             String value = candidates[i].trim();
@@ -73,7 +78,7 @@ final class ArtifactEmbedder {
         return String.join(", ", candidates);
     }
 
-    private static String inlineCss(String css, String base, Map<String, ArtifactAssetEntity> assets,
+    private static String inlineCss(String css, String base, AssetResolver assets,
                                     Set<String> visited) {
         Matcher urls = CSS_URL.matcher(css);
         StringBuffer out = new StringBuffer();
@@ -95,7 +100,7 @@ final class ArtifactEmbedder {
         return withImports.toString();
     }
 
-    private static String dataUri(String value, String base, Map<String, ArtifactAssetEntity> assets,
+    private static String dataUri(String value, String base, AssetResolver assets,
                                   Set<String> visited) {
         if (value.isBlank() || value.startsWith("/") || value.startsWith("#")
                 || value.startsWith("//") || value.matches("(?i)^[a-z][a-z0-9+.-]*:.*")) {
@@ -120,8 +125,11 @@ final class ArtifactEmbedder {
             }
         }
         String path = String.join("/", parts);
-        ArtifactAssetEntity asset = assets.get(path);
-        if (asset == null || visited.contains(path)) return null;
+        if (visited.contains(path)) return null;
+        if (assets.encoded.containsKey(path)) return assets.encoded.get(path);
+        // Load only a referenced asset, at most once per embedded-document request.
+        ArtifactAssetEntity asset = assets.loaded.computeIfAbsent(path, assets.lookup).orElse(null);
+        if (asset == null) return null;
 
         byte[] bytes = asset.getData();
         if (asset.getContentType().startsWith("text/css")) {
@@ -131,6 +139,18 @@ final class ArtifactEmbedder {
             String css = inlineCss(new String(bytes, StandardCharsets.UTF_8), parent, assets, nested);
             bytes = css.getBytes(StandardCharsets.UTF_8);
         }
-        return "data:" + asset.getContentType() + ";base64," + Base64.getEncoder().encodeToString(bytes);
+        String uri = "data:" + asset.getContentType() + ";base64," + Base64.getEncoder().encodeToString(bytes);
+        assets.encoded.put(path, uri);
+        return uri;
+    }
+
+    private static final class AssetResolver {
+        private final Function<String, Optional<ArtifactAssetEntity>> lookup;
+        private final Map<String, Optional<ArtifactAssetEntity>> loaded = new HashMap<>();
+        private final Map<String, String> encoded = new HashMap<>();
+
+        private AssetResolver(Function<String, Optional<ArtifactAssetEntity>> lookup) {
+            this.lookup = lookup;
+        }
     }
 }

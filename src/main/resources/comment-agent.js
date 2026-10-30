@@ -2,7 +2,8 @@
  * 문서 자체는 API/부모 DOM 에 접근 불가 → 선택 캡처·앵커링·하이라이트·히트테스트만 하고
  * 인증된 부모(리뷰 페이지)와 postMessage 로만 통신한다 (Hypothesis 패턴).
  * envelope: {ns:'cmt', type, ...}. 부모→자식 targetOrigin '*'(opaque 라 불가피),
- * 자식→부모 location.origin. 부모의 init 이 오기 전엔 ready 만 보내고 영구 휴면. */
+ * 자식→부모는 첫 init 에서 확인한 부모 origin 으로 전송(초기 ready 만 '*').
+ * 부모의 init 이 오기 전엔 ready 만 보내고 영구 휴면. */
 (function () {
   'use strict';
 
