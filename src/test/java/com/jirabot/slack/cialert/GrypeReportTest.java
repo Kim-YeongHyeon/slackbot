@@ -137,5 +137,9 @@ class GrypeReportTest {
         assertThat(GrypeReport.imageAndArch("0:envector-compute-main-amd64-gpu-grype.json"))
                 .containsExactly("envector-compute", "amd64-gpu");
         assertThat(GrypeReport.imageAndArch("weird-grype.json")).containsExactly("weird", "?");
+        // heracles scripts/ci/sbom/scan_archives.sh 의 이름 규칙 (배포 tar.gz 기준)
+        assertThat(GrypeReport.imageAndArch("heracles-main-amd64-grype.json")).containsExactly("heracles", "amd64");
+        assertThat(GrypeReport.imageAndArch("heracles-pg-pg18-main-amd64-grype.json"))
+                .containsExactly("heracles-pg-pg18", "amd64");
     }
 }

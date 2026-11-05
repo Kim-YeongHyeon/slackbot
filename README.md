@@ -142,6 +142,8 @@ origin을 확인하여 srcdoc의 고유 origin에서도 작동한다.
 - 재처리 API 에 `{"runUrl": "<run 링크>", "dryRunUser": "<Slack user id>"}` 추가 — 알림 메시지가 없는 run 도
   DM 으로 미리 돌려볼 수 있다.
 - 짝 PR: HE-KMS `main-ci-failure-alert.yaml` 감시 목록에 `HE-KMS release` 추가(그동안 release 실패는 알림이 없었음).
+- heracles 도 같은 경로: 배포 tar.gz 를 `scripts/ci/sbom/scan_archives.sh`(syft+grype, envector 와 같은 옵션)로 검사해
+  `grype-<product>` 아티팩트로 올리고, 실패하면 기존 `heracles main push` 알림 → 봇이 같은 표로 답한다(heracles PR, 봇 변경 없음).
 
 ### SBOM 취약점 상세 답글 (v0.0.92)
 
