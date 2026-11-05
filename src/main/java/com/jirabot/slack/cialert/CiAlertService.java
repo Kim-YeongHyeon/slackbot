@@ -18,6 +18,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import org.slf4j.Logger;
@@ -43,22 +44,28 @@ public class CiAlertService {
     static final int EXCERPT_TOTAL = 40_000;
     private static final int ALERT_TEXT_MAX = 6_000;
     private static final Duration STALE_PROCESSING = Duration.ofMinutes(30);
+    // release.yaml 에서 grype 결과로 실패하는 step. 이 step 이 실패했을 때만 취약점 분석을 한다
+    // (Build images·Push SBOM 실패는 취약점이 아니라 빌드·인프라 문제라 로그 분석으로 간다).
+    static final Set<String> SBOM_SCAN_STEPS =
+            Set.of("Generate SBOM and Grype JSON", "NVD CVSS gate (via Grype JSON)");
 
     private final CiAlertProperties props;
     private final CiAlertRepository repository;
     private final GitHubActionsClient github;
     private final CiFailureAnalyzer analyzer;
     private final SlackNotifier slack;
+    private final SbomArtifactReader sbomReader;
     private final Executor executor;
 
     public CiAlertService(CiAlertProperties props, CiAlertRepository repository, GitHubActionsClient github,
-                          CiFailureAnalyzer analyzer, SlackNotifier slack,
+                          CiFailureAnalyzer analyzer, SlackNotifier slack, SbomArtifactReader sbomReader,
                           @Qualifier(AsyncConfig.CI_ALERT_EXECUTOR) Executor executor) {
         this.props = props;
         this.repository = repository;
         this.github = github;
         this.analyzer = analyzer;
         this.slack = slack;
+        this.sbomReader = sbomReader;
         this.executor = executor;
     }
 
@@ -194,8 +201,17 @@ public class CiAlertService {
     private void analyzeRun(CiAlertEntity row, CiAlert alert, Target target) {
         String repo = alert.repo();
         RunInfo run = github.getRun(repo, alert.runId());
-        List<JobInfo> failed = github.listJobs(repo, alert.runId(), run.runAttempt()).stream()
-                .filter(JobInfo::failed).limit(MAX_FAILED_JOBS).toList();
+        List<JobInfo> allFailed = github.listJobs(repo, alert.runId(), run.runAttempt()).stream()
+                .filter(JobInfo::failed).toList();
+        if (alert.kind() == CiAlert.Kind.SBOM && sbomScanFailed(allFailed)) {
+            Optional<GrypeReport> report = sbomReader.read(repo, run.id());
+            if (report.isPresent() && !report.get().isEmpty()) {
+                replySbom(row, alert, target, run, report.get());
+                return;
+            }
+            log.info("ci-alert SBOM run={} has no grype artifact/findings — falling back to log analysis", run.id());
+        }
+        List<JobInfo> failed = allFailed.stream().limit(MAX_FAILED_JOBS).toList();
 
         List<CiFailureAnalyzer.FailedJob> jobs = new ArrayList<>();
         List<String> steps = new ArrayList<>();
@@ -223,19 +239,7 @@ public class CiAlertService {
         }
         String fingerprint = LogExcerpts.fingerprint(repo, run.name(), steps, errorLines);
 
-        Instant since = Instant.now().minus(Duration.ofHours(props.repeatWindowHours()));
-        Optional<CiAlertEntity> prior = repository
-                .findFirstByChannelAndRepoAndFingerprintAndStatusAndCreatedAtAfterAndIdNotOrderByCreatedAtDesc(
-                        target.rowChannel(), repo, fingerprint, Status.DONE, since, row.getId());
-        if (prior.isPresent()) {
-            CiAlertEntity p = prior.get();
-            String permalink = p.getReplyTs() == null ? null
-                    : slack.getPermalink(p.getChannel(), p.getReplyTs()).orElse(null);
-            Optional<String> ts = reply(target, CiReplyRenderer.repeat(
-                    KST_TIME.format(p.getCreatedAt()), permalink, p.getSummary()));
-            row.finish(Status.REPEAT, fingerprint, p.getCategory(), p.getSummary(), ts.orElse(null));
-            repository.save(row);
-            react(target, "repeat");
+        if (replyIfRepeat(row, target, repo, fingerprint)) {
             return;
         }
 
@@ -257,6 +261,49 @@ public class CiAlertService {
         row.finish(Status.DONE, fingerprint, a.category(), a.summary(), ts.orElse(null));
         repository.save(row);
         react(target, "white_check_mark");
+    }
+
+    // 24시간 안에 같은 지문으로 분석을 끝낸 알림이 있으면 그 분석 링크만 단다. 답글을 달았으면 true.
+    private boolean replyIfRepeat(CiAlertEntity row, Target target, String repo, String fingerprint) {
+        Instant since = Instant.now().minus(Duration.ofHours(props.repeatWindowHours()));
+        Optional<CiAlertEntity> prior = repository
+                .findFirstByChannelAndRepoAndFingerprintAndStatusAndCreatedAtAfterAndIdNotOrderByCreatedAtDesc(
+                        target.rowChannel(), repo, fingerprint, Status.DONE, since, row.getId());
+        if (prior.isEmpty()) {
+            return false;
+        }
+        CiAlertEntity p = prior.get();
+        String permalink = p.getReplyTs() == null ? null
+                : slack.getPermalink(p.getChannel(), p.getReplyTs()).orElse(null);
+        Optional<String> ts = reply(target, CiReplyRenderer.repeat(
+                KST_TIME.format(p.getCreatedAt()), permalink, p.getSummary()));
+        row.finish(Status.REPEAT, fingerprint, p.getCategory(), p.getSummary(), ts.orElse(null));
+        repository.save(row);
+        react(target, "repeat");
+        return true;
+    }
+
+    // STUDY: SBOM 알림은 고칠 때까지 main push 마다 반복된다. 지문을 "취약점 집합"으로 만들어
+    //        같은 취약점이 남아 있는 동안은 첫 분석 링크만 단다 (새 취약점이 추가되면 지문이 바뀌어 다시 분석).
+    private void replySbom(CiAlertEntity row, CiAlert alert, Target target, RunInfo run, GrypeReport report) {
+        String repo = alert.repo();
+        List<String> keys = report.findings().stream().map(GrypeReport.Finding::key).sorted().toList();
+        String fingerprint = LogExcerpts.fingerprint(repo, "sbom", keys, List.of());
+        row.recordVulns(String.join(",", report.findings().stream()
+                .map(GrypeReport.Finding::vulnId).distinct().sorted().toList()));
+        if (replyIfRepeat(row, target, repo, fingerprint)) {
+            return;
+        }
+        String text = SbomReplyRenderer.render(repo, run.name(), report, img -> props.ownerOf(img, repo),
+                run.headSha(), alert.runUrl());
+        Optional<String> ts = reply(target, text);
+        row.finish(Status.DONE, fingerprint, "VULNERABILITY", SbomReplyRenderer.summary(report), ts.orElse(null));
+        repository.save(row);
+        react(target, "white_check_mark");
+    }
+
+    static boolean sbomScanFailed(List<JobInfo> failedJobs) {
+        return failedJobs.stream().anyMatch(j -> j.failedStepNames().stream().anyMatch(SBOM_SCAN_STEPS::contains));
     }
 
     private String downloadLog(String repo, JobInfo job) {

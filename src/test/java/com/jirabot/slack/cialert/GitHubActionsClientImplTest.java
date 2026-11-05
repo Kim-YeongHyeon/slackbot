@@ -145,6 +145,42 @@ class GitHubActionsClientImplTest {
     }
 
     @Test
+    void listArtifacts_parsesNamesAndExpiry() throws Exception {
+        server.enqueue(json(200, """
+                {"artifacts":[{"id":11,"name":"grype-linux","size_in_bytes":2048,"expired":false},
+                              {"id":12,"name":"grype-macos","size_in_bytes":1024,"expired":true}]}"""));
+
+        List<GitHubActionsClient.ArtifactInfo> arts = client.listArtifacts("envector", 7);
+
+        assertThat(arts).extracting(GitHubActionsClient.ArtifactInfo::name).containsExactly("grype-linux", "grype-macos");
+        assertThat(arts.get(1).expired()).isTrue();
+        assertThat(server.takeRequest().getPath()).isEqualTo("/repos/CryptoLabInc/envector/actions/runs/7/artifacts?per_page=100");
+    }
+
+    @Test
+    void downloadArtifactZip_followsRedirectWithoutToken() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(302).setHeader("Location", server.url("/blob/a.zip?sig=x%2Fy")));
+        server.enqueue(new MockResponse().setResponseCode(200).setBody("PKZIPDATA"));
+
+        byte[] zip = client.downloadArtifactZip("envector", 11, 1024);
+
+        assertThat(new String(zip)).isEqualTo("PKZIPDATA");
+        assertThat(server.takeRequest().getPath()).isEqualTo("/repos/CryptoLabInc/envector/actions/artifacts/11/zip");
+        RecordedRequest blob = server.takeRequest();
+        assertThat(blob.getPath()).isEqualTo("/blob/a.zip?sig=x%2Fy");
+        assertThat(blob.getHeader("Authorization")).isNull();
+    }
+
+    @Test
+    void downloadArtifactZip_overLimit_failsInsteadOfTruncating() {
+        server.enqueue(new MockResponse().setResponseCode(200).setBody("x".repeat(5000)));
+
+        assertThatThrownBy(() -> client.downloadArtifactZip("envector", 11, 1000))
+                .isInstanceOf(GitHubActionsException.class)
+                .satisfies(e -> assertThat(((GitHubActionsException) e).status()).isEqualTo(413));
+    }
+
+    @Test
     void recentRuns_parsesConclusions() throws Exception {
         server.enqueue(json(200, """
                 {"workflow_runs":[{"id":9,"conclusion":"failure","head_sha":"s9"},

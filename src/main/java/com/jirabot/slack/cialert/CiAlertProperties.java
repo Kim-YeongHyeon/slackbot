@@ -18,7 +18,10 @@ public record CiAlertProperties(
         String apiBaseUrl,
         int repeatWindowHours,
         int analysisTimeoutSeconds,
-        int maxAlertAgeMinutes
+        int maxAlertAgeMinutes,
+        // SBOM 취약점이 나온 이미지 → 고칠 레포 ("image=repo"). 목록에 없는 이미지는 알림이 온 레포가 고친다.
+        // KMS 이미지는 envector 의 external/HE-KMS 서브모듈(HE-KMS 레포)에서 만들어진다.
+        List<String> sbomImageOwners
 ) {
     public CiAlertProperties {
         if (enabled == null) {
@@ -47,6 +50,18 @@ public record CiAlertProperties(
         if (maxAlertAgeMinutes <= 0) {
             maxAlertAgeMinutes = 60;
         }
+        sbomImageOwners = sbomImageOwners == null ? List.of() : List.copyOf(sbomImageOwners);
+    }
+
+    // 이미지 이름으로 고칠 레포를 찾는다. 매핑이 없으면 fallbackRepo(알림이 온 레포).
+    public String ownerOf(String image, String fallbackRepo) {
+        for (String pair : sbomImageOwners) {
+            int eq = pair.indexOf('=');
+            if (eq > 0 && pair.substring(0, eq).strip().equals(image)) {
+                return pair.substring(eq + 1).strip();
+            }
+        }
+        return fallbackRepo;
     }
 
     // 토큰·채널·발신 앱이 모두 있어야 동작한다. 하나라도 비면 서버는 정상 기동하고 이 기능만 꺼진다.

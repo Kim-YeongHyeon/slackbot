@@ -19,6 +19,11 @@ public interface GitHubActionsClient {
     // 같은 워크플로의 최근 run (최신순). 이번 run 도 포함될 수 있다.
     List<RunSummary> recentRuns(String repo, long workflowId, String branch, int count);
 
+    List<ArtifactInfo> listArtifacts(String repo, long runId);
+
+    // 아티팩트 zip 전체. maxBytes 를 넘으면 GitHubActionsException (부분 zip 은 풀 수 없으므로 자르지 않는다).
+    byte[] downloadArtifactZip(String repo, long artifactId, int maxBytes);
+
     record RunInfo(long id, String name, long workflowId, String headSha, String headBranch,
                    String event, String conclusion, int runAttempt, String htmlUrl,
                    String commitMessage, String commitAuthor) {}
@@ -38,4 +43,6 @@ public interface GitHubActionsClient {
     record CommitInfo(String sha, String message, String author, List<String> files) {}
 
     record RunSummary(long id, String conclusion, String headSha) {}
+
+    record ArtifactInfo(long id, String name, long sizeInBytes, boolean expired) {}
 }

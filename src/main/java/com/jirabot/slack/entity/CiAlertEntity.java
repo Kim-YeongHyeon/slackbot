@@ -104,6 +104,12 @@ public class CiAlertEntity {
         touch();
     }
 
+    // SBOM 알림에서 찾은 취약점 ID (콤마 구분) — 3단계 수정 PR 중복 확인에 쓴다.
+    public void recordVulns(String vulnIds) {
+        this.vulnIds = vulnIds;
+        touch();
+    }
+
     public void fail(Status status, String error) {
         this.status = status;
         this.error = error;

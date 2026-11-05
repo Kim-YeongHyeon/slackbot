@@ -159,6 +159,43 @@ public class GitHubActionsClientImpl implements GitHubActionsClient {
         return out;
     }
 
+    @Override
+    public List<ArtifactInfo> listArtifacts(String repo, long runId) {
+        JsonNode arts = getJson("/repos/{org}/{repo}/actions/runs/{id}/artifacts?per_page=100", org, repo, runId)
+                .path("artifacts");
+        List<ArtifactInfo> out = new ArrayList<>();
+        for (JsonNode a : arts) {
+            out.add(new ArtifactInfo(a.path("id").asLong(), a.path("name").asText(""),
+                    a.path("size_in_bytes").asLong(), a.path("expired").asBoolean(false)));
+        }
+        return out;
+    }
+
+    @Override
+    public byte[] downloadArtifactZip(String repo, long artifactId, int maxBytes) {
+        try {
+            byte[] bytes = api.get().uri("/repos/{org}/{repo}/actions/artifacts/{id}/zip", org, repo, artifactId)
+                    .exchangeToMono(resp -> {
+                        if (resp.statusCode().is3xxRedirection()) {
+                            String location = resp.headers().asHttpHeaders().getFirst(HttpHeaders.LOCATION);
+                            if (location == null || location.isBlank()) {
+                                return resp.releaseBody().then(Mono.error(
+                                        new GitHubActionsException(resp.statusCode().value(), "아티팩트 위치 없음")));
+                            }
+                            return resp.releaseBody().then(blob.get().uri(URI.create(location))
+                                    .exchangeToMono(b -> wholeOrError(b, maxBytes)));
+                        }
+                        return wholeOrError(resp, maxBytes);
+                    })
+                    .block(LOG_TIMEOUT);
+            return bytes == null ? new byte[0] : bytes;
+        } catch (GitHubActionsException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new GitHubActionsException("아티팩트 다운로드 실패: " + e.getMessage(), e);
+        }
+    }
+
     private JsonNode getJson(String uriTemplate, Object... vars) {
         try {
             String body = api.get().uri(uriTemplate, vars)
@@ -186,6 +223,25 @@ public class GitHubActionsClientImpl implements GitHubActionsClient {
         return resp.bodyToMono(String.class).defaultIfEmpty("")
                 .flatMap(body -> Mono.error(new GitHubActionsException(status, "HTTP " + status + " "
                         + (body.length() > 200 ? body.substring(0, 200) : body))));
+    }
+
+    private static Mono<byte[]> wholeOrError(ClientResponse resp, int maxBytes) {
+        if (!resp.statusCode().is2xxSuccessful()) {
+            return errorFrom(resp);
+        }
+        return resp.bodyToFlux(DataBuffer.class).reduce(new ByteArrayOutputStream(), (acc, buf) -> {
+            try {
+                byte[] chunk = new byte[buf.readableByteCount()];
+                buf.read(chunk);
+                if (acc.size() + chunk.length > maxBytes) {
+                    throw new GitHubActionsException(413, "아티팩트가 " + (maxBytes / (1024 * 1024)) + "MB 를 넘어요");
+                }
+                acc.write(chunk, 0, chunk.length);
+                return acc;
+            } finally {
+                DataBufferUtils.release(buf);
+            }
+        }).map(ByteArrayOutputStream::toByteArray).defaultIfEmpty(new byte[0]);
     }
 
     // STUDY: 로그는 수십 MB 일 수 있어 전체를 메모리에 올리지 않고, 흘려보내면서 마지막 maxBytes 만 남긴다.

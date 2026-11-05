@@ -175,6 +175,9 @@ ci-alert:
   analysis-timeout-seconds: ${CI_ALERT_ANALYSIS_TIMEOUT_SECONDS:180}
   # 서버가 꺼져 있다 켜지며 Slack 이 밀린 이벤트를 다시 보내도, 이보다 오래된 알림은 처리하지 않는다.
   max-alert-age-minutes: ${CI_ALERT_MAX_AGE_MINUTES:60}
+  # SBOM 취약점이 나온 이미지 → 고칠 레포 (v0.0.92, "image=repo" 콤마 구분). 목록에 없는 이미지는 알림이 온 레포.
+  # KMS 이미지는 envector 의 external/HE-KMS 서브모듈로 빌드되므로 HE-KMS 레포에서 고친다.
+  sbom-image-owners: ${CI_ALERT_SBOM_IMAGE_OWNERS:envector-kms-control=HE-KMS,envector-kms-crypto=HE-KMS}
 
 # STUDY: Actuator. /actuator/health = 헬스체크. Phase 1에서는 별도 /health 컨트롤러도 제공.
 management:

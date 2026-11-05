@@ -47,13 +47,15 @@ class CiAlertServiceTest {
     private GitHubActionsClient github;
     private CiFailureAnalyzer analyzer;
     private SlackNotifier slack;
+    private SbomArtifactReader sbomReader;
     private CiAlertService service;
     private final Map<Long, CiAlertEntity> store = new HashMap<>();
     private final AtomicLong seq = new AtomicLong();
 
     private static CiAlertProperties props(String token) {
         return new CiAlertProperties(true, CHANNEL, List.of(ALERT_BOT), "CryptoLabInc",
-                List.of("he-kms", "envector", "evi", "heracles"), token, null, 24, 180, 60);
+                List.of("he-kms", "envector", "evi", "heracles"), token, null, 24, 180, 60,
+                List.of("envector-kms-crypto=HE-KMS"));
     }
 
     @BeforeEach
@@ -62,11 +64,12 @@ class CiAlertServiceTest {
         github = mock(GitHubActionsClient.class);
         analyzer = mock(CiFailureAnalyzer.class);
         slack = mock(SlackNotifier.class);
+        sbomReader = mock(SbomArtifactReader.class);
         when(repository.saveAndFlush(any())).thenAnswer(inv -> persist(inv.getArgument(0)));
         when(repository.save(any())).thenAnswer(inv -> persist(inv.getArgument(0)));
         when(repository.findById(anyLong())).thenAnswer(inv -> Optional.ofNullable(store.get((Long) inv.getArgument(0))));
         when(slack.postThreadReplyTs(anyString(), anyString(), anyString())).thenReturn(Optional.of("reply.1"));
-        service = new CiAlertService(props("tok"), repository, github, analyzer, slack, Runnable::run);
+        service = new CiAlertService(props("tok"), repository, github, analyzer, slack, sbomReader, Runnable::run);
     }
 
     private CiAlertEntity persist(CiAlertEntity e) {
@@ -131,7 +134,7 @@ class CiAlertServiceTest {
         assertThat(service.accepts(new SlackEventInner("app_mention", "U1", "<@B> hi", CHANNEL, ts, null, null, null)))
                 .as("멘션").isFalse();
         assertThat(service.accepts(null)).isFalse();
-        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, Runnable::run);
+        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, Runnable::run);
         assertThat(off.accepts(alertEvent(ts))).as("토큰 없음 → 기능 꺼짐").isFalse();
     }
 
@@ -282,7 +285,7 @@ class CiAlertServiceTest {
 
         assertThatThrownBy(() -> service.replay("2.0", null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.replay("3.0", null)).isInstanceOf(IllegalArgumentException.class);
-        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, Runnable::run);
+        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, Runnable::run);
         assertThatThrownBy(() -> off.replay("2.0", null)).isInstanceOf(IllegalStateException.class);
     }
 
@@ -302,6 +305,106 @@ class CiAlertServiceTest {
         assertThat(old.getStatus()).isEqualTo(Status.DONE);
         assertThat(old.getError()).isNull();
         verify(slack).postThreadReplyTs(eq(CHANNEL), eq("1.5"), anyString());
+    }
+
+    // ── SBOM (v0.0.92) ───────────────────────────────────────
+
+    private static final String SBOM_RUN_URL = "https://github.com/CryptoLabInc/envector/actions/runs/2000";
+    private static final String SBOM_TEXT = ":rotating_light: *SBOM pipeline failed on main*\nrun: <" + SBOM_RUN_URL
+            + ">\n```[0003] ERROR discovered vulnerabilities at or above the severity threshold\n```\n"
+            + "To fix locally: run `/fix-sbom-cve <" + SBOM_RUN_URL + ">` in Claude Code";
+
+    private void stubSbomRun(String failedStep) {
+        when(github.getRun("envector", 2000)).thenReturn(new RunInfo(2000, "Release", 88, "feedbeef99", "main",
+                "push", "failure", 1, SBOM_RUN_URL, "chore", "dev"));
+        when(github.listJobs("envector", 2000, 1)).thenReturn(List.of(new JobInfo(5, "build-docker-image (linux)", "failure",
+                List.of(new StepInfo("Build images", "Build images".equals(failedStep) ? "failure" : "success"),
+                        new StepInfo("Generate SBOM and Grype JSON",
+                                "Generate SBOM and Grype JSON".equals(failedStep) ? "failure" : "skipped")))));
+        when(github.downloadJobLogTail(eq("envector"), eq(5L), anyInt())).thenReturn("##[error]boom\n");
+        when(github.getCommit(anyString(), anyString())).thenReturn(new CommitInfo("feedbeef99", "chore", "dev", List.of()));
+    }
+
+    private static GrypeReport report() {
+        return new GrypeReport(List.of(
+                new GrypeReport.Finding("CVE-2026-0001", "Critical", "github.com/acme/jose", "v4.1.5", "go-module",
+                        List.of("v4.1.6"), "fixed", 9.1, java.util.Set.of(), new java.util.TreeSet<>(List.of("envector-kms-crypto")),
+                        new java.util.TreeSet<>(List.of("amd64"))),
+                new GrypeReport.Finding("CVE-2026-0002", "High", "libfoo", "1.0", "deb",
+                        List.of(), "not-fixed", 5.0, java.util.Set.of(), new java.util.TreeSet<>(List.of("envector-backend")),
+                        new java.util.TreeSet<>(List.of("arm64")))), 2);
+    }
+
+    @Test
+    void sbomScanFailure_withGrypeArtifact_repliesVulnerabilityTableWithoutClaude() {
+        stubSbomRun("Generate SBOM and Grype JSON");
+        when(sbomReader.read("envector", 2000)).thenReturn(Optional.of(report()));
+        String ts = nowTs();
+
+        service.submit(new SlackEventInner("message", null, SBOM_TEXT, CHANNEL, ts, null, ALERT_BOT, null));
+
+        verify(analyzer, never()).analyze(any());
+        ArgumentCaptor<String> reply = ArgumentCaptor.forClass(String.class);
+        verify(slack).postThreadReplyTs(eq(CHANNEL), eq(ts), reply.capture());
+        assertThat(reply.getValue()).startsWith("🛡️ *SBOM 취약점 분석* · envector · Release")
+                .contains("*HE-KMS* — envector-kms-crypto", "`github.com/acme/jose` v4.1.5 → *v4.1.6* · Critical 1 — `CVE-2026-0001`",
+                        "⚠️ *고칠 버전 없음*", "`.grype.yaml` 예외 후보");
+        CiAlertEntity row = store.get(1L);
+        assertThat(row.getStatus()).isEqualTo(Status.DONE);
+        assertThat(row.getKind()).isEqualTo("SBOM");
+        assertThat(row.getCategory()).isEqualTo("VULNERABILITY");
+        assertThat(row.getVulnIds()).isEqualTo("CVE-2026-0001,CVE-2026-0002");
+        assertThat(row.getSummary()).startsWith("High/Critical 취약점 2개: CVE-2026-0001");
+        verify(slack).addReaction(CHANNEL, ts, "white_check_mark");
+    }
+
+    @Test
+    void sbomScanFailure_withoutArtifact_fallsBackToLogAnalysis() {
+        stubSbomRun("Generate SBOM and Grype JSON");
+        when(sbomReader.read("envector", 2000)).thenReturn(Optional.empty());
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+
+        service.submit(new SlackEventInner("message", null, SBOM_TEXT, CHANNEL, nowTs(), null, ALERT_BOT, null));
+
+        verify(analyzer).analyze(any());
+        verify(slack).postThreadReplyTs(eq(CHANNEL), anyString(), org.mockito.ArgumentMatchers.startsWith("🤖 *CI 실패 분석*"));
+    }
+
+    @Test
+    void sbomAlertCausedByBuildFailure_skipsArtifactsAndAnalyzesLogs() {
+        stubSbomRun("Build images");
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+
+        service.submit(new SlackEventInner("message", null, SBOM_TEXT, CHANNEL, nowTs(), null, ALERT_BOT, null));
+
+        verify(sbomReader, never()).read(anyString(), anyLong());
+        verify(analyzer).analyze(any());
+    }
+
+    @Test
+    void sameVulnerabilitySetAgain_repliesRepeatLink() {
+        stubSbomRun("Generate SBOM and Grype JSON");
+        when(sbomReader.read("envector", 2000)).thenReturn(Optional.of(report()));
+        CiAlertEntity prior = new CiAlertEntity(CHANNEL, "1.0");
+        prior.finish(Status.DONE, "fp", "VULNERABILITY", "High/Critical 2건: CVE-2026-0001, CVE-2026-0002", "prior.reply");
+        when(repository.findFirstByChannelAndRepoAndFingerprintAndStatusAndCreatedAtAfterAndIdNotOrderByCreatedAtDesc(
+                eq(CHANNEL), eq("envector"), anyString(), eq(Status.DONE), any(), any())).thenReturn(Optional.of(prior));
+
+        service.submit(new SlackEventInner("message", null, SBOM_TEXT, CHANNEL, nowTs(), null, ALERT_BOT, null));
+
+        verify(slack).postThreadReplyTs(eq(CHANNEL), anyString(), org.mockito.ArgumentMatchers.startsWith("🔁 "));
+        assertThat(store.get(1L).getStatus()).isEqualTo(Status.REPEAT);
+        assertThat(store.get(1L).getVulnIds()).isEqualTo("CVE-2026-0001,CVE-2026-0002");
+    }
+
+    @Test
+    void sbomScanFailed_detectsOnlyScanSteps() {
+        JobInfo scan = new JobInfo(1, "b", "failure", List.of(new StepInfo("NVD CVSS gate (via Grype JSON)", "failure")));
+        JobInfo push = new JobInfo(2, "b", "failure", List.of(new StepInfo("Push SBOM to OCIR", "failure")));
+
+        assertThat(CiAlertService.sbomScanFailed(List.of(push, scan))).isTrue();
+        assertThat(CiAlertService.sbomScanFailed(List.of(push))).isFalse();
+        assertThat(CiAlertService.sbomScanFailed(List.of())).isFalse();
     }
 
     // ── runStatus ────────────────────────────────────────────

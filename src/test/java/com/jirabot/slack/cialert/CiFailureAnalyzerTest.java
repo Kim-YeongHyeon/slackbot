@@ -28,7 +28,7 @@ class CiFailureAnalyzerTest {
     void setUp() {
         runner = mock(ProcessRunner.class);
         CiAlertProperties props = new CiAlertProperties(true, "C1", List.of("B1"), "CryptoLabInc",
-                List.of("evi"), "tok", null, 24, 7, 60);
+                List.of("evi"), "tok", null, 24, 7, 60, List.of());
         ClaudeProperties claude = new ClaudeProperties("claude", "claude-sonnet-4-6", "claude-haiku-4-5",
                 5, "plan", 1, true);
         analyzer = new CiFailureAnalyzer(runner, claude, props, om);

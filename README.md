@@ -20,7 +20,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 인터랙티브 버튼 | 이슈 생성 알림에 "진행 중" / "완료" 버튼 → 클릭으로 Jira 상태 전환 |
 | 브랜치 만들기 | "진행 중" 전환 시 **repo 선택 버튼**을 띄워 클릭하면 봇이 GitHub API로 브랜치 직접 생성(브랜치명은 Claude가 한글 요약→영어 슬러그, `feature/`·`bugfix/`). 브랜치명에 이슈키가 있어 Jira 개발 패널에 자동 연결. `github.token` 미설정 시 Jira 개발 패널 링크 안내로 폴백 |
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
-| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91 |
+| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -132,6 +132,23 @@ origin을 확인하여 srcdoc의 고유 origin에서도 작동한다.
   제거하려면 ngrok 요금제·도메인 설정을 변경해야 한다.
 - 제한: 저장된 정적 자산은 포함하지만, 실행 중 JavaScript가 새로 요청하는
   동적 자산이나 외부 CDN 리소스까지 오프라인으로 변환하지는 않는다.
+
+### SBOM 취약점 상세 답글 (v0.0.92)
+
+SBOM 알림 중 grype 스캔 단계(`Generate SBOM and Grype JSON`, `NVD CVSS gate (via Grype JSON)`)가 실패한 run 이면,
+run 의 `grype-*` 아티팩트(grype JSON)를 받아 **고칠 레포별로 "패키지를 몇 버전으로 올리면 되는지"** 를 답글로 단다.
+
+- 기준: grype `matches`(`.grype.yaml` 로 무시된 항목 제외) 중 High/Critical — CI 게이트와 같은 기준.
+- 묶음: (패키지, 현재 버전)마다 취약점들의 고칠 버전 중 가장 높은 것을 목표로 한 줄. 목표·취약점이 같은 deb
+  패키지(openssl·libssl3t64 등)는 한 줄로 합친다. 고칠 버전은 설치 버전과 메이저.마이너가 같은 것을 우선한다
+  (예: openjdk 17.0.19 → 17.0.20, Go stdlib go1.26.2 → 1.26.x).
+- 고칠 레포: 이미지 → 레포 매핑(`CI_ALERT_SBOM_IMAGE_OWNERS`, 기본 KMS 이미지 → HE-KMS), 없으면 알림이 온 레포.
+- 고칠 버전이 없으면 fix-sbom-cve 스킬의 결정 트리대로 NVD(출처가 NVD 인 점수만) < 7 은 `.grype.yaml` 예외 후보,
+  그 외는 사람 판단 필요로 표시.
+- 반복: 같은 취약점 집합이면 24시간 안에는 첫 분석 링크만 단다(새 취약점이 생기면 다시 분석).
+- 아티팩트가 없거나(워크플로 변경 전 run·만료) 빌드 단계가 실패한 SBOM 알림은 기존 로그 분석으로 처리한다.
+- 아티팩트는 envector `release.yaml` 의 `Upload Grype JSON as artifact` step(별도 PR)이 올린다.
+- 다음 단계: 수정 PR 자동 생성(v0.0.93).
 
 ### CI·SBOM 실패 알림 자동 분석 (v0.0.91)
 
@@ -742,6 +759,7 @@ GITHUB_ALERT_TOKEN=<fine-grained PAT, 알림 대상 repo — Actions: Read (+ Co
 CI_ALERT_CHANNEL=<알림 채널 ID>
 CI_ALERT_BOT_IDS=<알림을 올리는 앱의 bot_id, 콤마 구분>
 CI_ALERT_REPOS=<대상 repo, 콤마 구분>
+CI_ALERT_SBOM_IMAGE_OWNERS=<SBOM 이미지 → 고칠 repo, "image=repo" 콤마 구분 (선택)>
 
 # 터널 경유 대시보드 접근 (선택, v0.0.30) — 둘 다 설정해야 Go봇 프록시가 켜짐
 DASHBOARD_USER=<대시보드 Basic Auth 아이디>
