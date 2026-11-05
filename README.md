@@ -20,6 +20,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 인터랙티브 버튼 | 이슈 생성 알림에 "진행 중" / "완료" 버튼 → 클릭으로 Jira 상태 전환 |
 | 브랜치 만들기 | "진행 중" 전환 시 **repo 선택 버튼**을 띄워 클릭하면 봇이 GitHub API로 브랜치 직접 생성(브랜치명은 Claude가 한글 요약→영어 슬러그, `feature/`·`bugfix/`). 브랜치명에 이슈키가 있어 Jira 개발 패널에 자동 연결. `github.token` 미설정 시 Jira 개발 패널 링크 안내로 폴백 |
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
+| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -131,6 +132,27 @@ origin을 확인하여 srcdoc의 고유 origin에서도 작동한다.
   제거하려면 ngrok 요금제·도메인 설정을 변경해야 한다.
 - 제한: 저장된 정적 자산은 포함하지만, 실행 중 JavaScript가 새로 요청하는
   동적 자산이나 외부 CDN 리소스까지 오프라인으로 변환하지는 않는다.
+
+### CI·SBOM 실패 알림 자동 분석 (v0.0.91)
+
+알림 채널(`CI_ALERT_CHANNEL`)에 알림 앱(`CI_ALERT_BOT_IDS`)이 main CI 실패나 SBOM 실패 알림을 올리면,
+**멘션 없이** 봇이 그 알림의 스레드에 원인 분석 답글을 단다.
+
+- 흐름: 알림 본문의 run 링크 → GitHub Actions API로 실패 job·step·로그(마지막 2MB, `##[error]` 주변 발췌),
+  커밋 변경 파일, 같은 워크플로의 최근 실행 상태(새로 깨짐 / N번 연속 실패) → `claude -p`(도구 없음,
+  `prompts/ci-failure-analysis.md`) → 분류(코드·불안정한 테스트·인프라·설정·외부 의존성·취약점)와 원인·근거·다음 조치.
+- 처리 중 👀, 끝나면 ✅ / 반복 🔁 / 실패 ⚠️ 리액션 (`reactions:write` 권한이 없으면 리액션만 건너뜀).
+- **반복 알림**: 24시간 안에 같은 원인(레포+워크플로+실패 step+정규화한 에러 줄의 지문)으로 분석한 알림이 있으면
+  Claude를 다시 부르지 않고 이전 분석 링크만 단다.
+- 중복 방지: `ci_alerts`(Flyway V10)의 `(channel, message_ts)` 유니크 — Slack 재전송·재시작에도 한 번만 처리.
+  1시간보다 오래된 알림은 처리하지 않는다. 처리는 전용 단일 스레드(`ciAlertExecutor`)에서 돌아 일반 봇 명령을 막지 않는다.
+- 보안: 로그·커밋 메시지는 신뢰할 수 없는 입력으로 `<data>`에 감싸 넘기고, Claude는 도구 없이 한 번만 응답한다.
+  답글 형식과 Slack 이스케이프는 Java가 처리한다. 로그 다운로드의 302 대상(서명된 저장소 URL)에는 GitHub 토큰을 보내지 않는다.
+- 재처리(관리자): `POST /api/admin/ci-alerts/replay {"ts":"<알림 ts>","dryRunUser":"<Slack user id>"}` —
+  `dryRunUser` 를 주면 팀 채널 대신 그 사람 DM으로만 결과를 보낸다(과거 알림으로 분석 품질 확인용).
+- 설정: `GITHUB_ALERT_TOKEN`(대상 레포 전용 fine-grained PAT — Actions: Read, 이후 단계용 Contents·Pull requests: Read and write).
+  비어 있으면 이 기능만 꺼진다. Slack 앱에는 `message.channels` 이벤트와 `channels:history` 권한이 필요하다.
+- 다음 단계: SBOM 취약점 상세(grype 아티팩트) 분석(v0.0.92), 수정 PR 자동 생성(v0.0.93).
 
 ### 리뷰 페이지가 시크릿 창에서 잘리던 문제 (v0.0.88)
 
@@ -714,6 +736,12 @@ POSTGRES_PASSWORD=<임의 비밀번호>
 GITHUB_BRANCH_TOKEN=<fine-grained PAT, 대상 repo Contents: Read & Write>
 GITHUB_ORG=<조직 (기본 CryptoLabInc)>
 GITHUB_BRANCH_REPOS=<버튼에 띄울 repo, 콤마 구분 (기본 envector-msa,evi)>
+
+# CI·SBOM 실패 알림 자동 분석 (선택, v0.0.91) — 비우면 기능만 꺼짐
+GITHUB_ALERT_TOKEN=<fine-grained PAT, 알림 대상 repo — Actions: Read (+ Contents/Pull requests: Read and write)>
+CI_ALERT_CHANNEL=<알림 채널 ID>
+CI_ALERT_BOT_IDS=<알림을 올리는 앱의 bot_id, 콤마 구분>
+CI_ALERT_REPOS=<대상 repo, 콤마 구분>
 
 # 터널 경유 대시보드 접근 (선택, v0.0.30) — 둘 다 설정해야 Go봇 프록시가 켜짐
 DASHBOARD_USER=<대시보드 Basic Auth 아이디>

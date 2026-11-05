@@ -353,3 +353,14 @@ ngrok 이 스크립트 대신 경고 페이지를 돌려줬다 — 우리 서버
 - (v0.0.89 추가) 우리 JS 가 보내는 fetch 에는 `ngrok-skip-browser-warning` 헤더를 항상 붙인다 — 쿠키가 없으면
   ngrok 이 **200 + HTML** 을 줘서 상태코드 검사로는 못 거르고 `res.json()` 에서 터진다(Safari: "The string did not
   match the expected pattern."). 재현은 "문서·스크립트는 통과, fetch 만 쿠키 없음" 조건으로.
+
+## L21. `pgrep -f <jar이름>` 으로 kill 하면 내 셸까지 죽는다
+
+v0.0.91 배포: `PID=$(pgrep -f "slackbot-server-0.0.90-SNAPSHOT.jar"); kill $PID` 를 한 셸 명령으로 실행했더니
+pgrep 이 java 와 **그 명령을 실행 중인 bash 자신**(명령줄에 같은 문자열 포함)을 둘 다 잡아 셸이 먼저 죽었다.
+새 서버 기동 단계가 실행되지 않았고, 다행히 이전 서버는 살아 있어 서비스 중단은 없었다.
+
+**규칙**:
+- 서버 종료는 포트 기준으로 PID 를 찾는다: `ss -ltnp | grep :8080` 에서 `pid=` 를 읽어 **정확한 PID 하나만** kill.
+- `pgrep -f` 를 쓸 땐 결과가 1개인지 확인하고, 같은 명령 안에서 바로 kill 하지 않는다.
+- 종료 → 기동은 한 명령에 묶지 말고, 종료 확인(`kill -0`) 후 다음 명령에서 기동한다.

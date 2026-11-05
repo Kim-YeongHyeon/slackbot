@@ -73,7 +73,7 @@ ngrok http 3000
 2. **Event Subscriptions** > Enable Events > ON
 3. **Request URL**: `https://<ngrok-url>/slack/events`
 4. Slack이 Verified 확인
-5. **Subscribe to bot events**: `app_mention` 만 추가
+5. **Subscribe to bot events**: `app_mention` 추가 (CI·SBOM 알림 자동 분석(v0.0.91)을 쓰려면 `message.channels` 도 추가)
 6. Save Changes
 
 ## 4. 사용법

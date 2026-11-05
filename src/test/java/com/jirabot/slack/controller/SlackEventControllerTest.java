@@ -59,6 +59,7 @@ class SlackEventControllerTest {
     private com.jirabot.slack.service.ReminderSubscriptionService reminderSubscriptionService;
     private com.jirabot.slack.service.BugNotionService bugNotionService;
     private com.jirabot.slack.service.PrImportService prImportService;
+    private com.jirabot.slack.cialert.CiAlertService ciAlertService;
     private SlackEventController controller;
     private MockMvc mockMvc;
 
@@ -81,6 +82,7 @@ class SlackEventControllerTest {
         reminderSubscriptionService = mock(com.jirabot.slack.service.ReminderSubscriptionService.class);
         bugNotionService = mock(com.jirabot.slack.service.BugNotionService.class);
         prImportService = mock(com.jirabot.slack.service.PrImportService.class);
+        ciAlertService = mock(com.jirabot.slack.cialert.CiAlertService.class);
         Executor directExecutor = Runnable::run;
         SlackEventDeduplicator deduplicator = new SlackEventDeduplicator();
         controller = new SlackEventController(
@@ -89,7 +91,7 @@ class SlackEventControllerTest {
                 threadActionClassifier, intentFailureRepository,
                 userMappingRepository, slackNotifier,
                 directExecutor, deduplicator, reminderSubscriptionService, bugNotionService,
-                prImportService, "C1,C2");
+                prImportService, ciAlertService, "C1,C2");
         mockMvc = standaloneSetup(controller).build();
     }
 
@@ -134,6 +136,40 @@ class SlackEventControllerTest {
                 .andExpect(status().isOk());
 
         verify(reminderSubscriptionService).enable("U1");
+    }
+
+    // STUDY: v0.0.91 — #sol-sbom-ci 알림(알림 앱의 일반 message 이벤트)은 app_mention 필터 앞에서 CiAlertService 로 간다.
+    @Test
+    void ciAlertMessage_routesToCiAlertService_beforeMentionFilter() throws Exception {
+        when(ciAlertService.accepts(any())).thenReturn(true);
+        String body = """
+                {"type":"event_callback","event":{
+                    "type":"message","bot_id":"B0ALARM","text":"run: <https://github.com/CryptoLabInc/evi/actions/runs/1>",
+                    "channel":"C0ALERT","ts":"%s"}}
+                """.formatted(freshTs());
+
+        mockMvc.perform(post("/api/slack/event").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<com.jirabot.slack.dto.SlackEventInner> captor =
+                ArgumentCaptor.forClass(com.jirabot.slack.dto.SlackEventInner.class);
+        verify(ciAlertService).submit(captor.capture());
+        assertThat(captor.getValue().bot_id()).isEqualTo("B0ALARM");
+        verify(intentClassifier, never()).classify(anyString());
+    }
+
+    @Test
+    void ordinaryChannelMessage_isNotSubmittedAsAlert() throws Exception {
+        String body = """
+                {"type":"event_callback","event":{
+                    "type":"message","user":"U1","text":"그냥 대화","channel":"C1","ts":"%s"}}
+                """.formatted(freshTs());
+
+        mockMvc.perform(post("/api/slack/event").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        verify(ciAlertService, never()).submit(any());
+        verify(intentClassifier, never()).classify(anyString());
     }
 
     @Test

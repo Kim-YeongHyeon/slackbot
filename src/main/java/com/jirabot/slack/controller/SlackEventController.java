@@ -1,5 +1,6 @@
 package com.jirabot.slack.controller;
 
+import com.jirabot.slack.cialert.CiAlertService;
 import com.jirabot.slack.client.IntentClassifier;
 import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
@@ -145,6 +146,7 @@ public class SlackEventController {
     private final ReminderSubscriptionService reminderSubscriptionService;
     private final BugNotionService bugNotionService;
     private final PrImportService prImportService;
+    private final CiAlertService ciAlertService;
     private final Set<String> allowedChannels;
 
     public SlackEventController(IssueCreateService issueCreateService,
@@ -166,6 +168,7 @@ public class SlackEventController {
                                 ReminderSubscriptionService reminderSubscriptionService,
                                 BugNotionService bugNotionService,
                                 PrImportService prImportService,
+                                CiAlertService ciAlertService,
                                 @Value("${slack.allowed-channels:}") String allowedChannelsConfig) {
         this.issueCreateService = issueCreateService;
         this.issueSearchService = issueSearchService;
@@ -186,6 +189,7 @@ public class SlackEventController {
         this.reminderSubscriptionService = reminderSubscriptionService;
         this.bugNotionService = bugNotionService;
         this.prImportService = prImportService;
+        this.ciAlertService = ciAlertService;
         // STUDY: 허용 채널이 비어있으면 모든 채널 허용. 쉼표 구분으로 파싱.
         if (allowedChannelsConfig == null || allowedChannelsConfig.isBlank()) {
             this.allowedChannels = Set.of();
@@ -1565,6 +1569,12 @@ public class SlackEventController {
 
         if (SlackEventEnvelope.EVENT_CALLBACK.equals(envelope.type()) && envelope.event() != null) {
             SlackEventInner event = envelope.event();
+            // STUDY: #sol-sbom-ci 의 CI·SBOM 알림(알림 앱이 올린 일반 message 이벤트)은 멘션 없이 처리한다 (v0.0.91).
+            //        app_mention 필터·허용 채널·사람 여부 검사보다 먼저 봐야 한다 — 알림은 봇 글이라 뒤에서 모두 걸러진다.
+            if (ciAlertService.accepts(event)) {
+                ciAlertService.submit(event);
+                return ResponseEntity.ok(Map.of("ok", true));
+            }
             // STUDY: app_mention 이벤트만 처리 — 일반 message 이벤트는 무시하여
             //        @봇멘션 없는 일반 대화가 Jira 이슈로 생성되지 않도록 한다.
             if (!"app_mention".equals(event.type())) {

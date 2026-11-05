@@ -1,10 +1,14 @@
 package com.jirabot.slack.client;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.jirabot.slack.client.dto.SlackHistoryMessage;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +26,8 @@ public class SlackNotifierImpl implements SlackNotifier {
     //        구조적으로 안전하게 JSON을 조립한다.
     private final ObjectMapper objectMapper;
     private final WebClient slackWebClient;
+    // reactions:write 권한이 없을 때 경고를 한 번만 남긴다 (리액션은 부가 기능이라 실패해도 진행).
+    private final AtomicBoolean reactionScopeWarned = new AtomicBoolean(false);
 
     public SlackNotifierImpl(@Value("${slack.bot-token:}") String botToken) {
         this.objectMapper = new ObjectMapper();
@@ -227,5 +233,105 @@ public class SlackNotifierImpl implements SlackNotifier {
             log.warn("conversations.open errored for userId={}: {} — will fall back", userId, e.toString());
             return null;
         }
+    }
+
+    @Override
+    public Optional<String> postThreadReplyTs(String channel, String threadTs, String text) {
+        try {
+            // STUDY: unfurl_links=false — 답글 속 GitHub run 링크가 큰 미리보기 카드로 펼쳐지지 않게 한다.
+            JsonNode node = callApi("/chat.postMessage", Map.of(
+                    "channel", channel, "thread_ts", threadTs, "text", text,
+                    "unfurl_links", false, "unfurl_media", false));
+            if (!node.path("ok").asBoolean(false)) {
+                log.warn("Slack thread reply rejected channel={} error={}", channel, node.path("error").asText());
+                return Optional.empty();
+            }
+            return Optional.ofNullable(node.path("ts").asText(null));
+        } catch (Exception e) {
+            log.warn("Failed to send Slack thread reply: {}", e.toString());
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public boolean addReaction(String channel, String ts, String emoji) {
+        return react("/reactions.add", channel, ts, emoji, "already_reacted");
+    }
+
+    @Override
+    public void removeReaction(String channel, String ts, String emoji) {
+        react("/reactions.remove", channel, ts, emoji, "no_reaction");
+    }
+
+    private boolean react(String path, String channel, String ts, String emoji, String okError) {
+        try {
+            JsonNode node = callApi(path, Map.of("channel", channel, "timestamp", ts, "name", emoji));
+            if (node.path("ok").asBoolean(false) || okError.equals(node.path("error").asText())) {
+                return true;
+            }
+            String error = node.path("error").asText();
+            if ("missing_scope".equals(error)) {
+                if (reactionScopeWarned.compareAndSet(false, true)) {
+                    log.warn("Slack {} needs reactions:write scope — reactions are skipped", path);
+                }
+            } else {
+                log.warn("Slack {} failed channel={} ts={} error={}", path, channel, ts, error);
+            }
+            return false;
+        } catch (Exception e) {
+            log.warn("Slack {} errored: {}", path, e.toString());
+            return false;
+        }
+    }
+
+    @Override
+    public Optional<String> getPermalink(String channel, String ts) {
+        try {
+            String response = slackWebClient.get()
+                    .uri(uri -> uri.path("/chat.getPermalink")
+                            .queryParam("channel", channel).queryParam("message_ts", ts).build())
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode node = objectMapper.readTree(response);
+            return node.path("ok").asBoolean(false)
+                    ? Optional.ofNullable(node.path("permalink").asText(null)) : Optional.empty();
+        } catch (Exception e) {
+            log.warn("Slack chat.getPermalink errored: {}", e.toString());
+            return Optional.empty();
+        }
+    }
+
+    @Override
+    public Optional<SlackHistoryMessage> getMessage(String channel, String ts) {
+        try {
+            // STUDY: latest=ts + inclusive=true + limit=1 → 정확히 그 ts 의 메시지 한 건 (채널 최상위 글만 해당).
+            String response = slackWebClient.get()
+                    .uri(uri -> uri.path("/conversations.history")
+                            .queryParam("channel", channel).queryParam("latest", ts)
+                            .queryParam("inclusive", true).queryParam("limit", 1).build())
+                    .retrieve().bodyToMono(String.class).block();
+            JsonNode node = objectMapper.readTree(response);
+            if (!node.path("ok").asBoolean(false)) {
+                log.warn("Slack conversations.history failed: {}", node.path("error").asText());
+                return Optional.empty();
+            }
+            for (JsonNode m : node.path("messages")) {
+                if (ts.equals(m.path("ts").asText())) {
+                    return Optional.of(new SlackHistoryMessage(m.path("ts").asText(), m.path("text").asText(""),
+                            m.path("user").asText(null), m.path("bot_id").asText(null),
+                            m.path("subtype").asText(null), m.path("thread_ts").asText(null)));
+                }
+            }
+            return Optional.empty();
+        } catch (Exception e) {
+            log.warn("Slack conversations.history errored: {}", e.toString());
+            return Optional.empty();
+        }
+    }
+
+    private JsonNode callApi(String path, Map<String, Object> body) throws Exception {
+        String response = slackWebClient.post().uri(path)
+                .bodyValue(objectMapper.writeValueAsString(body))
+                .retrieve().bodyToMono(String.class).block();
+        return objectMapper.readTree(response == null ? "{}" : response);
     }
 }

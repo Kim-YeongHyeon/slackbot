@@ -31,6 +31,7 @@ SLACK_BOT_TOKEN=xoxb-...
   - `chat:write` — (Phase 2 이후 응답 전송 시 필요. 지금 넣어두면 편함)
   - `channels:history` — (옵션) 채널 메시지 읽기
   - `im:history` — (옵션) DM 메시지 읽기
+  - `reactions:write` — (옵션, v0.0.91) CI 알림 처리 상태 리액션(👀 ✅ ⚠️)
 
 ### 4) 워크스페이스에 설치 & Bot Token 복사
 
@@ -49,7 +50,7 @@ SLACK_BOT_TOKEN=xoxb-...
   - Spring + Go bot 이 모두 켜진 상태여야 검증 통과.
 - **Subscribe to bot events** → Add:
   - `app_mention` — 채널에서 봇 멘션 시 이벤트 수신
-  - (Phase 2: `message.im` 추가 예정)
+  - `message.channels` — (옵션, v0.0.91) 알림 채널의 CI·SBOM 실패 알림을 멘션 없이 받기 (`channels:history` 필요)
 - **Save Changes**
 
 ### 6) 테스트 채널에 봇 초대

@@ -1,6 +1,8 @@
 package com.jirabot.slack.client;
 
+import com.jirabot.slack.client.dto.SlackHistoryMessage;
 import java.util.List;
+import java.util.Optional;
 
 public interface SlackNotifier {
 
@@ -61,4 +63,26 @@ public interface SlackNotifier {
      * @param blocksJson Block Kit JSON 배열 문자열 (null이면 blocks 제거)
      */
     void updateMessage(String channel, String messageTs, String text, String blocksJson);
+
+    /**
+     * 스레드 답글을 남기고 새 메시지의 ts 를 돌려준다 (이후 permalink·수정에 사용). 실패 시 empty.
+     */
+    Optional<String> postThreadReplyTs(String channel, String threadTs, String text);
+
+    /**
+     * 메시지에 이모지 리액션을 단다 (reactions:write). 이미 달려 있으면 성공으로 본다.
+     *
+     * @param emoji 콜론 없는 이름 (예: "eyes")
+     * @return 성공 여부 — 권한이 없거나 실패하면 false (호출부는 무시하고 진행)
+     */
+    boolean addReaction(String channel, String ts, String emoji);
+
+    void removeReaction(String channel, String ts, String emoji);
+
+    Optional<String> getPermalink(String channel, String ts);
+
+    /**
+     * 채널 최상위 메시지 한 건을 ts 로 읽는다 (conversations.history, channels:history).
+     */
+    Optional<SlackHistoryMessage> getMessage(String channel, String ts);
 }
