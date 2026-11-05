@@ -398,6 +398,46 @@ class CiAlertServiceTest {
     }
 
     @Test
+    void ciTitledAlert_failedInGrypeStep_stillGetsVulnerabilityTable() {
+        // HE-KMS release 처럼 SBOM 표시 없는 일반 CI 알림 제목이어도, 실패한 step 이 grype 단계면 취약점 표
+        when(github.getRun("evi", 1000)).thenReturn(new RunInfo(1000, "evi release", 77, "abcdef1234", "main",
+                "workflow_run", "failure", 1, RUN_URL, "x", "dev"));
+        when(github.listJobs("evi", 1000, 1)).thenReturn(List.of(new JobInfo(9, "verify", "failure",
+                List.of(new StepInfo("Generate SBOM and Grype JSON", "failure")))));
+        when(sbomReader.read("evi", 1000)).thenReturn(Optional.of(report()));
+        String ts = nowTs();
+
+        service.submit(alertEvent(ts));   // 제목: "*evi main failed on main*" — SBOM 문구 없음
+
+        verify(analyzer, never()).analyze(any());
+        verify(slack).postThreadReplyTs(eq(CHANNEL), eq(ts), org.mockito.ArgumentMatchers.startsWith("🛡️ *SBOM 취약점 분석* · evi"));
+        assertThat(store.get(1L).getKind()).isEqualTo("SBOM");
+    }
+
+    @Test
+    void replayRun_dryRunByRunLink_sendsDmWithoutAlertMessage() {
+        stubRun("##[error]boom\n");
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+
+        service.replayRun(RUN_URL, "U_ME");
+
+        ArgumentCaptor<String> dm = ArgumentCaptor.forClass(String.class);
+        verify(slack).sendDirectMessage(eq("U_ME"), dm.capture());
+        assertThat(dm.getValue()).startsWith("🧪 *재처리 테스트* · run 링크로 직접 실행\n").contains("CI 실패 분석");
+        verify(slack, never()).getPermalink(anyString(), any());
+        assertThat(store.get(1L).getChannel()).isEqualTo("DM:U_ME");
+        assertThat(store.get(1L).getMessageTs()).startsWith("run:1000#");
+    }
+
+    @Test
+    void replayRun_requiresDryRunUserAndTargetRepoLink() {
+        assertThatThrownBy(() -> service.replayRun(RUN_URL, null)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> service.replayRun("https://github.com/other/repo/actions/runs/1", "U"))
+                .isInstanceOf(IllegalArgumentException.class);
+        verify(repository, never()).saveAndFlush(any());
+    }
+
+    @Test
     void sbomScanFailed_detectsOnlyScanSteps() {
         JobInfo scan = new JobInfo(1, "b", "failure", List.of(new StepInfo("NVD CVSS gate (via Grype JSON)", "failure")));
         JobInfo push = new JobInfo(2, "b", "failure", List.of(new StepInfo("Push SBOM to OCIR", "failure")));

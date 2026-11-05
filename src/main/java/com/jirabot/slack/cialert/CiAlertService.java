@@ -151,6 +151,25 @@ public class CiAlertService {
         return id;
     }
 
+    // 알림 메시지 없이 run 링크로 바로 돌려보는 테스트 (관리자 API, 결과는 DM 으로만).
+    // 알림이 오지 않는 워크플로의 실패 run 으로 분석·취약점 표를 미리 확인할 때 쓴다.
+    public long replayRun(String runUrl, String dryRunUser) {
+        if (!props.effectivelyEnabled()) {
+            throw new IllegalStateException("ci-alert 기능이 꺼져 있어요 (GITHUB_ALERT_TOKEN 확인)");
+        }
+        if (dryRunUser == null || dryRunUser.isBlank()) {
+            throw new IllegalArgumentException("run 링크로 돌릴 때는 dryRunUser 가 필요해요 (답글을 달 알림 스레드가 없어서)");
+        }
+        String text = "run: <" + runUrl + ">";
+        CiAlert alert = CiAlertParser.parse(text, props.org(), props.repos())
+                .orElseThrow(() -> new IllegalArgumentException("대상 레포의 GitHub Actions run 링크가 아니에요: " + runUrl));
+        Target target = new Target(props.channel(), null, dryRunUser);
+        long id = repository.saveAndFlush(new CiAlertEntity(target.rowChannel(),
+                "run:" + alert.runId() + "#" + System.currentTimeMillis())).getId();
+        dispatch(id, text, target);
+        return id;
+    }
+
     private Long register(String channel, String ts) {
         try {
             return repository.saveAndFlush(new CiAlertEntity(channel, ts)).getId();
@@ -203,7 +222,9 @@ public class CiAlertService {
         RunInfo run = github.getRun(repo, alert.runId());
         List<JobInfo> allFailed = github.listJobs(repo, alert.runId(), run.runAttempt()).stream()
                 .filter(JobInfo::failed).toList();
-        if (alert.kind() == CiAlert.Kind.SBOM && sbomScanFailed(allFailed)) {
+        // STUDY: 알림 제목이 아니라 GitHub 가 알려준 "실패한 step 이름"으로 판단한다 (v0.0.93).
+        //        HE-KMS release 처럼 일반 CI 알림 제목으로 오는 grype 실패도 취약점 표로 답하기 위해서.
+        if (sbomScanFailed(allFailed)) {
             Optional<GrypeReport> report = sbomReader.read(repo, run.id());
             if (report.isPresent() && !report.get().isEmpty()) {
                 replySbom(row, alert, target, run, report.get());
@@ -287,6 +308,7 @@ public class CiAlertService {
     //        같은 취약점이 남아 있는 동안은 첫 분석 링크만 단다 (새 취약점이 추가되면 지문이 바뀌어 다시 분석).
     private void replySbom(CiAlertEntity row, CiAlert alert, Target target, RunInfo run, GrypeReport report) {
         String repo = alert.repo();
+        row.identify(repo, alert.runId(), CiAlert.Kind.SBOM.name());   // 제목이 일반 CI 알림이어도 취약점 건으로 기록
         List<String> keys = report.findings().stream().map(GrypeReport.Finding::key).sorted().toList();
         String fingerprint = LogExcerpts.fingerprint(repo, "sbom", keys, List.of());
         row.recordVulns(String.join(",", report.findings().stream()
@@ -375,8 +397,9 @@ public class CiAlertService {
 
     private Optional<String> reply(Target t, String text) {
         if (t.dryRun()) {
-            String origin = slack.getPermalink(t.channel(), t.alertTs()).map(p -> "<" + p + "|원본 알림>")
-                    .orElse("원본 알림 " + t.alertTs());
+            String origin = t.alertTs() == null ? "run 링크로 직접 실행"
+                    : slack.getPermalink(t.channel(), t.alertTs()).map(p -> "<" + p + "|원본 알림>")
+                            .orElse("원본 알림 " + t.alertTs());
             slack.sendDirectMessage(t.dryRunUser(), "🧪 *재처리 테스트* · " + origin + "\n" + text);
             return Optional.empty();
         }

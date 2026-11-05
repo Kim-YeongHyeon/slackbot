@@ -133,6 +133,16 @@ origin을 확인하여 srcdoc의 고유 origin에서도 작동한다.
 - 제한: 저장된 정적 자산은 포함하지만, 실행 중 JavaScript가 새로 요청하는
   동적 자산이나 외부 CDN 리소스까지 오프라인으로 변환하지는 않는다.
 
+### grype 실패는 알림 제목과 관계없이 취약점 표로 (v0.0.93)
+
+- 취약점 표를 낼지는 알림 제목("SBOM pipeline failed")이 아니라 **GitHub 가 알려준 실패 step 이름**으로 정한다.
+  grype 단계(`Generate SBOM and Grype JSON`, `NVD CVSS gate (via Grype JSON)`)가 실패했으면 일반 CI 알림 제목
+  (예: HE-KMS 의 `HE-KMS release failed on main`)으로 와도 아티팩트를 읽어 표로 답한다.
+- 아티팩트 이름 `sbom`(HE-KMS release.yaml, grype JSON 과 SBOM 이 함께 들어 있음)도 읽는다.
+- 재처리 API 에 `{"runUrl": "<run 링크>", "dryRunUser": "<Slack user id>"}` 추가 — 알림 메시지가 없는 run 도
+  DM 으로 미리 돌려볼 수 있다.
+- 짝 PR: HE-KMS `main-ci-failure-alert.yaml` 감시 목록에 `HE-KMS release` 추가(그동안 release 실패는 알림이 없었음).
+
 ### SBOM 취약점 상세 답글 (v0.0.92)
 
 SBOM 알림 중 grype 스캔 단계(`Generate SBOM and Grype JSON`, `NVD CVSS gate (via Grype JSON)`)가 실패한 run 이면,

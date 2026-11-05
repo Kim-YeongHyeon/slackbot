@@ -47,6 +47,20 @@ class CiAlertAdminControllerTest {
         replay("{\"ts\":\"abc\"}").andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").exists());
         replay("{}").andExpect(status().isBadRequest());
         verify(service, never()).replay(anyString(), any());
+        verify(service, never()).replayRun(anyString(), any());
+    }
+
+    @Test
+    void replay_byRunUrl_usesRunReplay() throws Exception {
+        String url = "https://github.com/CryptoLabInc/HE-KMS/actions/runs/41989433173";
+        when(service.replayRun(url, "U1")).thenReturn(7L);
+        when(service.replayRun(url, null)).thenThrow(new IllegalArgumentException("dryRunUser 가 필요해요"));
+
+        replay("{\"runUrl\":\"" + url + "\",\"dryRunUser\":\"U1\"}")
+                .andExpect(status().isAccepted()).andExpect(jsonPath("$.alertId").value(7));
+        replay("{\"runUrl\":\"" + url + "\"}")
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("dryRunUser 가 필요해요"));
+        verify(service, never()).replay(anyString(), any());
     }
 
     @Test

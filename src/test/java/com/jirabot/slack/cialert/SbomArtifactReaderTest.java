@@ -56,6 +56,18 @@ class SbomArtifactReaderTest {
     }
 
     @Test
+    void heKmsSbomArtifact_isRead() throws Exception {
+        // HE-KMS release.yaml 은 grype JSON 을 SBOM 과 함께 "sbom" 아티팩트로 올린다
+        when(github.listArtifacts("HE-KMS", 5)).thenReturn(List.of(new ArtifactInfo(8, "sbom", 100, false)));
+        when(github.downloadArtifactZip("HE-KMS", 8, SbomArtifactReader.MAX_ZIP_BYTES)).thenReturn(zipWith(
+                "he-kms-crypto-main-amd64-grype.json",
+                GrypeReportTest.grype(GrypeReportTest.match("GO-1", "Critical", "stdlib", "go1.26.2", "go-module", "fixed", "\"1.26.9\"", "", ""))));
+
+        assertThat(reader.read("HE-KMS", 5)).get().satisfies(r ->
+                assertThat(r.findings()).singleElement().satisfies(f -> assertThat(f.images()).containsExactly("he-kms-crypto")));
+    }
+
+    @Test
     void noGrypeArtifact_isEmpty() {
         when(github.listArtifacts("envector", 9)).thenReturn(List.of(new ArtifactInfo(3, "wheels", 1, false)));
 
