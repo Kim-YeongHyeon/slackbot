@@ -55,22 +55,29 @@ public class CiAlertService {
     private final CiFailureAnalyzer analyzer;
     private final SlackNotifier slack;
     private final SbomArtifactReader sbomReader;
+    private final SbomFixService sbomFix;
     private final Executor executor;
 
     public CiAlertService(CiAlertProperties props, CiAlertRepository repository, GitHubActionsClient github,
                           CiFailureAnalyzer analyzer, SlackNotifier slack, SbomArtifactReader sbomReader,
-                          @Qualifier(AsyncConfig.CI_ALERT_EXECUTOR) Executor executor) {
+                          SbomFixService sbomFix, @Qualifier(AsyncConfig.CI_ALERT_EXECUTOR) Executor executor) {
         this.props = props;
         this.repository = repository;
         this.github = github;
         this.analyzer = analyzer;
         this.slack = slack;
         this.sbomReader = sbomReader;
+        this.sbomFix = sbomFix;
         this.executor = executor;
     }
 
     // 답글 대상: 알림 스레드, 또는 재처리 테스트(dry-run)면 지정한 사용자의 DM.
-    record Target(String channel, String alertTs, String dryRunUser) {
+    // fix: 재처리에서 자동 수정까지 돌릴지 (dry-run 이면 push 없이 diff 만 DM 으로).
+    record Target(String channel, String alertTs, String dryRunUser, boolean fix) {
+        Target(String channel, String alertTs, String dryRunUser) {
+            this(channel, alertTs, dryRunUser, false);
+        }
+
         boolean dryRun() {
             return dryRunUser != null;
         }
@@ -125,6 +132,10 @@ public class CiAlertService {
 
     // 재처리 (관리자 API). dryRunUser 가 있으면 결과를 그 사용자 DM 으로만 보낸다.
     public long replay(String ts, String dryRunUser) {
+        return replay(ts, dryRunUser, false);
+    }
+
+    public long replay(String ts, String dryRunUser, boolean fix) {
         if (!props.effectivelyEnabled()) {
             throw new IllegalStateException("ci-alert 기능이 꺼져 있어요 (GITHUB_ALERT_TOKEN 확인)");
         }
@@ -134,7 +145,7 @@ public class CiAlertService {
             throw new IllegalArgumentException("알림 앱이 올린 메시지가 아니에요: " + ts);
         }
         boolean dryRun = dryRunUser != null && !dryRunUser.isBlank();
-        Target target = new Target(props.channel(), ts, dryRun ? dryRunUser : null);
+        Target target = new Target(props.channel(), ts, dryRun ? dryRunUser : null, fix);
         CiAlertEntity row;
         if (dryRun) {
             row = new CiAlertEntity(target.rowChannel(), ts + "#" + System.currentTimeMillis());
@@ -154,6 +165,10 @@ public class CiAlertService {
     // 알림 메시지 없이 run 링크로 바로 돌려보는 테스트 (관리자 API, 결과는 DM 으로만).
     // 알림이 오지 않는 워크플로의 실패 run 으로 분석·취약점 표를 미리 확인할 때 쓴다.
     public long replayRun(String runUrl, String dryRunUser) {
+        return replayRun(runUrl, dryRunUser, false);
+    }
+
+    public long replayRun(String runUrl, String dryRunUser, boolean fix) {
         if (!props.effectivelyEnabled()) {
             throw new IllegalStateException("ci-alert 기능이 꺼져 있어요 (GITHUB_ALERT_TOKEN 확인)");
         }
@@ -163,7 +178,7 @@ public class CiAlertService {
         String text = "run: <" + runUrl + ">";
         CiAlert alert = CiAlertParser.parse(text, props.org(), props.repos())
                 .orElseThrow(() -> new IllegalArgumentException("대상 레포의 GitHub Actions run 링크가 아니에요: " + runUrl));
-        Target target = new Target(props.channel(), null, dryRunUser);
+        Target target = new Target(props.channel(), null, dryRunUser, fix);
         long id = repository.saveAndFlush(new CiAlertEntity(target.rowChannel(),
                 "run:" + alert.runId() + "#" + System.currentTimeMillis())).getId();
         dispatch(id, text, target);
@@ -313,15 +328,42 @@ public class CiAlertService {
         String fingerprint = LogExcerpts.fingerprint(repo, "sbom", keys, List.of());
         row.recordVulns(String.join(",", report.findings().stream()
                 .map(GrypeReport.Finding::vulnId).distinct().sorted().toList()));
-        if (replyIfRepeat(row, target, repo, fingerprint)) {
+        // 재처리에서 수정까지 요청했으면(fix) 반복 판단을 건너뛴다 — 앞선 분석이 있어도 수정은 돌아야 하므로.
+        if (!target.fix() && replyIfRepeat(row, target, repo, fingerprint)) {
             return;
         }
+        boolean fix = sbomFix.enabled() && (!target.dryRun() || target.fix())
+                && report.findings().stream().anyMatch(GrypeReport.Finding::fixable);
         String text = SbomReplyRenderer.render(repo, run.name(), report, img -> props.ownerOf(img, repo),
-                run.headSha(), alert.runUrl());
+                run.headSha(), alert.runUrl(), sbomFix.enabled());
         Optional<String> ts = reply(target, text);
         row.finish(Status.DONE, fingerprint, "VULNERABILITY", SbomReplyRenderer.summary(report), ts.orElse(null));
         repository.save(row);
+        if (fix) {
+            runFix(row, alert, report, target);
+        }
         react(target, "white_check_mark");
+    }
+
+    // STUDY: 자동 수정 (v0.0.94) — 수 분 걸리므로 "만드는 중" 답글을 먼저 달고 끝나면 그 답글을 결과로 바꾼다.
+    private void runFix(CiAlertEntity row, CiAlert alert, GrypeReport report, Target target) {
+        Optional<String> placeholder = reply(target, "🔧 수정 PR 만드는 중이에요… (Claude 에이전트가 고치고 봇이 grype 로 다시 검사해요)");
+        List<SbomFixService.RepoResult> results;
+        try {
+            results = sbomFix.fix(row.getId(), alert, report, img -> props.ownerOf(img, alert.repo()), target.dryRun());
+        } catch (RuntimeException e) {
+            log.warn("ci-alert fix failed id={}: {}", row.getId(), e.toString());
+            results = List.of(new SbomFixService.RepoResult(alert.repo(), SbomFixService.Status.FAILED, "",
+                    e.getMessage() == null ? e.toString() : e.getMessage()));
+        }
+        String text = SbomFixService.render(results);
+        if (placeholder.isPresent() && !target.dryRun()) {
+            slack.updateMessage(target.channel(), placeholder.get(), text, null);
+        } else {
+            reply(target, text);
+        }
+        row.recordPrs(String.join(",", results.stream().map(SbomFixService.RepoResult::url).filter(u -> !u.isBlank()).toList()));
+        repository.save(row);
     }
 
     static boolean sbomScanFailed(List<JobInfo> failedJobs) {

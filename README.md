@@ -20,7 +20,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 인터랙티브 버튼 | 이슈 생성 알림에 "진행 중" / "완료" 버튼 → 클릭으로 Jira 상태 전환 |
 | 브랜치 만들기 | "진행 중" 전환 시 **repo 선택 버튼**을 띄워 클릭하면 봇이 GitHub API로 브랜치 직접 생성(브랜치명은 Claude가 한글 요약→영어 슬러그, `feature/`·`bugfix/`). 브랜치명에 이슈키가 있어 Jira 개발 패널에 자동 연결. `github.token` 미설정 시 Jira 개발 패널 링크 안내로 폴백 |
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
-| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92 |
+| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -132,6 +132,27 @@ origin을 확인하여 srcdoc의 고유 origin에서도 작동한다.
   제거하려면 ngrok 요금제·도메인 설정을 변경해야 한다.
 - 제한: 저장된 정적 자산은 포함하지만, 실행 중 JavaScript가 새로 요청하는
   동적 자산이나 외부 CDN 리소스까지 오프라인으로 변환하지는 않는다.
+
+### SBOM 취약점 자동 수정 PR (v0.0.94)
+
+SBOM 취약점 표를 답한 뒤, 고칠 수 있는 항목이 있으면 **고칠 레포마다 수정 PR 을 자동으로 만들고** 스레드에 링크를 단다
+(처음엔 "🔧 수정 PR 만드는 중" 답글을 달고, 끝나면 그 답글을 결과로 바꾼다).
+
+1. **중복 확인**: 그 레포의 열린 PR(사람이 만든 것 포함) 제목·본문에 같은 취약점 ID 가 있으면 새로 만들지 않고 링크만 단다.
+2. **작업 사본** (`FixWorkspace`): `clone --depth 1` → go.mod `replace` 가 가리키는 서브모듈은 토큰으로 받을 수 있으면 고정 커밋으로,
+   비공개라 못 받으면 빈 go.mod 로 대신 → `.git` 을 뺀 작업 트리만 에이전트용으로 복사.
+3. **에이전트** (`FixAgentRunner`, `docker/fix-agent`): 격리된 컨테이너에서 `claude -p`(Claude Code) 가 정해진 취약점만 최소 변경으로 고친다
+   (`prompts/sbom-fix-agent.md` — Go 모듈 `go get`, Go 버전은 Dockerfile 고정값과 go.dev sha256, deb 는 레포의 fix-sbom-cve 스킬).
+   컨테이너에는 작업 트리와 `CLAUDE_CODE_OAUTH_TOKEN` 만 들어간다 — GitHub 토큰·`.env`·`.git` 없음.
+4. **봇 검증** (결정적): `DiffGuard`(go.mod·go.sum·Dockerfile 만 허용, 삭제·심볼릭 링크·권한 변경·400줄 초과 거부),
+   `FixVerifier`(grype `dir:` 재검사로 대상 Go 모듈 취약점이 사라졌는지, Go 고정값 sha256 이 go.dev 와 같은지).
+   남으면 남은 항목을 알려주고 에이전트를 한 번 더 돌린다(다른 버전 계열 문제 — 예: grpc 1.83.1 → 1.83.2).
+5. **PR**: 봇이 커밋·push(`GITHUB_ALERT_TOKEN`)하고 팀 형식(문제/채택한 해결 방안/검증 방법) 본문으로 PR 을 연다. 자동 머지는 없다.
+- KMS 이미지 취약점은 HE-KMS 에서 고치고, 그 PR 이 머지된 뒤에도 envector 알림에 남으면 envector 의 `external/HE-KMS` 서브모듈만
+  올리는 PR 을 에이전트 없이(Git Data API) 만든다.
+- 설정: `CLAUDE_CODE_OAUTH_TOKEN`(`claude setup-token` 으로 만든 CI 용 토큰 — 서버의 claude 로그인과 별개. 같은 로그인을 컨테이너가
+  갱신하면 봇의 분류기가 끊길 수 있어 분리), 비면 자동 수정만 꺼진다. `CI_ALERT_FIX_*` 로 모델·시간·재시도 횟수 조정.
+- 재처리: `POST /api/admin/ci-alerts/replay {"runUrl"|"ts", "dryRunUser", "fix": true}` — dry-run 이면 push 없이 diff 만 DM.
 
 ### grype 실패는 알림 제목과 관계없이 취약점 표로 (v0.0.93)
 
@@ -772,6 +793,7 @@ CI_ALERT_CHANNEL=<알림 채널 ID>
 CI_ALERT_BOT_IDS=<알림을 올리는 앱의 bot_id, 콤마 구분>
 CI_ALERT_REPOS=<대상 repo, 콤마 구분>
 CI_ALERT_SBOM_IMAGE_OWNERS=<SBOM 이미지 → 고칠 repo, "image=repo" 콤마 구분 (선택)>
+CLAUDE_CODE_OAUTH_TOKEN=<SBOM 자동 수정 에이전트용, 별도 터미널에서 `claude setup-token` (선택, v0.0.94)>
 
 # 터널 경유 대시보드 접근 (선택, v0.0.30) — 둘 다 설정해야 Go봇 프록시가 켜짐
 DASHBOARD_USER=<대시보드 Basic Auth 아이디>

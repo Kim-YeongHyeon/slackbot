@@ -45,7 +45,7 @@ class SbomReplyRendererTest {
                 .contains("*envector* — envector-backend\n")
                 .contains("• `stdlib` go1.26.8 → *1.26.9* · High 1 — `CVE-2026-2` · go-module")
                 .doesNotContain("고칠 버전 없음*")
-                .contains("다음 버전에서")
+                .contains("자동 수정이 꺼져 있어요")
                 .endsWith("_커밋 feedbeef · <" + RUN + "|run 보기>_");
         // 두 레포 이미지에 걸친 취약점은 두 레포 아래에 모두 나온다
         assertThat(text.split("GHSA-x", -1)).hasSize(3);

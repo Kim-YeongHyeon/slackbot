@@ -27,6 +27,12 @@ public final class SbomReplyRenderer {
     // ownerOf: 이미지 → 고칠 레포
     public static String render(String repo, String workflow, GrypeReport report, Function<String, String> ownerOf,
                                 String headSha, String runUrl) {
+        return render(repo, workflow, report, ownerOf, headSha, runUrl, false);
+    }
+
+    // fixEnabled: 자동 수정(v0.0.94)이 켜져 있으면 "아래 답글에 PR 링크", 꺼져 있으면 직접 고치라는 안내.
+    public static String render(String repo, String workflow, GrypeReport report, Function<String, String> ownerOf,
+                                String headSha, String runUrl, boolean fixEnabled) {
         List<Finding> fixable = report.findings().stream().filter(Finding::fixable).toList();
         List<Finding> unfixable = report.findings().stream().filter(f -> !f.fixable()).toList();
 
@@ -48,7 +54,11 @@ public final class SbomReplyRenderer {
             sb.append("⚠️ *고칠 버전 없음*\n");
             appendUnfixable(sb, unfixable, MAX_UNFIXABLE_LINES);
         }
-        sb.append("_수정 PR 자동 생성은 다음 버전에서 붙어요. 지금은 위 표대로 직접 고치거나 `/fix-sbom-cve`를 써주세요._\n");
+        if (!fixable.isEmpty() && fixEnabled) {
+            sb.append("_고칠 수 있는 항목은 수정 PR 을 자동으로 만들어요 — 아래 답글에 링크가 달려요._\n");
+        } else if (!fixable.isEmpty()) {
+            sb.append("_자동 수정이 꺼져 있어요. 위 표대로 직접 고치거나 `/fix-sbom-cve`를 써주세요._\n");
+        }
         sb.append("_커밋 ").append(escape(CiFailureAnalyzer.shortSha(headSha))).append(" · <").append(runUrl)
                 .append("|run 보기>_");
         return sb.toString();

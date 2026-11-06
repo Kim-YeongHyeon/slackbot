@@ -48,6 +48,7 @@ class CiAlertServiceTest {
     private CiFailureAnalyzer analyzer;
     private SlackNotifier slack;
     private SbomArtifactReader sbomReader;
+    private SbomFixService sbomFix;
     private CiAlertService service;
     private final Map<Long, CiAlertEntity> store = new HashMap<>();
     private final AtomicLong seq = new AtomicLong();
@@ -65,11 +66,12 @@ class CiAlertServiceTest {
         analyzer = mock(CiFailureAnalyzer.class);
         slack = mock(SlackNotifier.class);
         sbomReader = mock(SbomArtifactReader.class);
+        sbomFix = mock(SbomFixService.class);
         when(repository.saveAndFlush(any())).thenAnswer(inv -> persist(inv.getArgument(0)));
         when(repository.save(any())).thenAnswer(inv -> persist(inv.getArgument(0)));
         when(repository.findById(anyLong())).thenAnswer(inv -> Optional.ofNullable(store.get((Long) inv.getArgument(0))));
         when(slack.postThreadReplyTs(anyString(), anyString(), anyString())).thenReturn(Optional.of("reply.1"));
-        service = new CiAlertService(props("tok"), repository, github, analyzer, slack, sbomReader, Runnable::run);
+        service = new CiAlertService(props("tok"), repository, github, analyzer, slack, sbomReader, sbomFix, Runnable::run);
     }
 
     private CiAlertEntity persist(CiAlertEntity e) {
@@ -134,7 +136,7 @@ class CiAlertServiceTest {
         assertThat(service.accepts(new SlackEventInner("app_mention", "U1", "<@B> hi", CHANNEL, ts, null, null, null)))
                 .as("멘션").isFalse();
         assertThat(service.accepts(null)).isFalse();
-        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, Runnable::run);
+        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, sbomFix, Runnable::run);
         assertThat(off.accepts(alertEvent(ts))).as("토큰 없음 → 기능 꺼짐").isFalse();
     }
 
@@ -285,7 +287,7 @@ class CiAlertServiceTest {
 
         assertThatThrownBy(() -> service.replay("2.0", null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.replay("3.0", null)).isInstanceOf(IllegalArgumentException.class);
-        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, Runnable::run);
+        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, sbomFix, Runnable::run);
         assertThatThrownBy(() -> off.replay("2.0", null)).isInstanceOf(IllegalStateException.class);
     }
 
@@ -445,6 +447,61 @@ class CiAlertServiceTest {
         assertThat(CiAlertService.sbomScanFailed(List.of(push, scan))).isTrue();
         assertThat(CiAlertService.sbomScanFailed(List.of(push))).isFalse();
         assertThat(CiAlertService.sbomScanFailed(List.of())).isFalse();
+    }
+
+    // ── 자동 수정 (v0.0.94) ─────────────────────────────────
+
+    @Test
+    void sbomTable_thenFixRuns_andPlaceholderIsReplacedWithResults() {
+        stubSbomRun("Generate SBOM and Grype JSON");
+        when(sbomReader.read("envector", 2000)).thenReturn(Optional.of(report()));
+        when(sbomFix.enabled()).thenReturn(true);
+        when(slack.postThreadReplyTs(anyString(), anyString(), anyString()))
+                .thenReturn(Optional.of("table.ts"), Optional.of("placeholder.ts"));
+        when(sbomFix.fix(anyLong(), any(), any(), any(), eq(false))).thenReturn(List.of(
+                new SbomFixService.RepoResult("HE-KMS", SbomFixService.Status.CREATED, "https://gh/pr/9", "#9 fix(deps): bump")));
+        String ts = nowTs();
+
+        service.submit(new SlackEventInner("message", null, SBOM_TEXT, CHANNEL, ts, null, ALERT_BOT, null));
+
+        ArgumentCaptor<String> replies = ArgumentCaptor.forClass(String.class);
+        verify(slack, org.mockito.Mockito.times(2)).postThreadReplyTs(eq(CHANNEL), eq(ts), replies.capture());
+        assertThat(replies.getAllValues().get(0)).contains("수정 PR 을 자동으로 만들어요");
+        assertThat(replies.getAllValues().get(1)).startsWith("🔧 수정 PR 만드는 중");
+        ArgumentCaptor<String> updated = ArgumentCaptor.forClass(String.class);
+        verify(slack).updateMessage(eq(CHANNEL), eq("placeholder.ts"), updated.capture(), org.mockito.ArgumentMatchers.isNull());
+        assertThat(updated.getValue()).contains("<https://gh/pr/9|#9 fix(deps): bump>");
+        assertThat(store.get(1L).getPrUrls()).isEqualTo("https://gh/pr/9");
+    }
+
+    @Test
+    void fixDisabled_tableSaysSo_andNoFixRuns() {
+        stubSbomRun("Generate SBOM and Grype JSON");
+        when(sbomReader.read("envector", 2000)).thenReturn(Optional.of(report()));
+        when(sbomFix.enabled()).thenReturn(false);
+
+        service.submit(new SlackEventInner("message", null, SBOM_TEXT, CHANNEL, nowTs(), null, ALERT_BOT, null));
+
+        verify(slack).postThreadReplyTs(eq(CHANNEL), anyString(), org.mockito.ArgumentMatchers.contains("자동 수정이 꺼져 있어요"));
+        verify(sbomFix, never()).fix(anyLong(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    @Test
+    void dryRunReplay_fixesOnlyWhenAsked_andWithoutPush() {
+        stubSbomRun("Generate SBOM and Grype JSON");
+        when(sbomReader.read("envector", 2000)).thenReturn(Optional.of(report()));
+        when(sbomFix.enabled()).thenReturn(true);
+        when(sbomFix.fix(anyLong(), any(), any(), any(), eq(true))).thenReturn(List.of(
+                new SbomFixService.RepoResult("HE-KMS", SbomFixService.Status.DRY_RUN, "", "diff")));
+        String runUrl = "https://github.com/CryptoLabInc/envector/actions/runs/2000";
+
+        service.replayRun(runUrl, "U_ME");                // fix 없이
+        verify(sbomFix, never()).fix(anyLong(), any(), any(), any(), org.mockito.ArgumentMatchers.anyBoolean());
+
+        service.replayRun(runUrl, "U_ME", true);          // fix 요청
+        verify(sbomFix).fix(anyLong(), any(), any(), any(), eq(true));
+        verify(slack, org.mockito.Mockito.atLeastOnce()).sendDirectMessage(eq("U_ME"), org.mockito.ArgumentMatchers.contains("🧪 dry-run"));
+        verify(slack, never()).updateMessage(anyString(), anyString(), anyString(), any());
     }
 
     // ── runStatus ────────────────────────────────────────────

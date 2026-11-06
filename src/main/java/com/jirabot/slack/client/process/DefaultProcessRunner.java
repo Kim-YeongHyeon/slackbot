@@ -4,8 +4,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -29,11 +31,22 @@ public class DefaultProcessRunner implements ProcessRunner {
 
     @Override
     public Result run(List<String> command, String stdin, Duration timeout) {
-        // STUDY: 사용자 입력이 stdin 에 실릴 수 있으므로 command 만 로깅 (stdin 절대 금지).
-        log.debug("Launching subprocess command={}", command);
+        return run(command, stdin, timeout, null, null);
+    }
+
+    @Override
+    public Result run(List<String> command, String stdin, Duration timeout, Path workDir, Map<String, String> env) {
+        // STUDY: 사용자 입력이 stdin 에 실릴 수 있으므로 command 만 로깅 (stdin 절대 금지). env 도 비밀값이 있어 로깅하지 않는다.
+        log.debug("Launching subprocess command={} workDir={}", command, workDir);
 
         // STUDY: redirectErrorStream(false) — stdout/stderr 분리. stderr 는 진단용.
         ProcessBuilder pb = new ProcessBuilder(command).redirectErrorStream(false);
+        if (workDir != null) {
+            pb.directory(workDir.toFile());
+        }
+        if (env != null) {
+            pb.environment().putAll(env);
+        }
         // STUDY: MAX_THINKING_TOKENS=0 — 분류 호출의 thinking 토큰 차단(실측 지연 60~70% 절감).
         //        CLAUDE_DISABLE_THINKING=false 로 언제든 복원(ClaudeProperties.disableThinking).
         if (disableThinking) {

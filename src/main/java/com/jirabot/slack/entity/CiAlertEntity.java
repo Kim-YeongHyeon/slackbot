@@ -110,6 +110,12 @@ public class CiAlertEntity {
         touch();
     }
 
+    // 자동 수정 PR 링크 (콤마 구분, v0.0.94)
+    public void recordPrs(String prUrls) {
+        this.prUrls = prUrls;
+        touch();
+    }
+
     public void fail(Status status, String error) {
         this.status = status;
         this.error = error;
