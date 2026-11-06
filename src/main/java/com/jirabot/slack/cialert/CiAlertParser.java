@@ -18,7 +18,20 @@ public final class CiAlertParser {
     private static final Pattern SBOM_MARKER = Pattern.compile(
             "SBOM pipeline failed|possible SBOM failure|/fix-sbom-cve");
 
+    // STUDY: 채널이 nightly·벤치마크 채널과 합쳐져서(v0.0.95) 같은 알림 앱이 성공 결과·러너 대기 알림도 올린다.
+    //        그 글에도 run 링크가 있으니, 실패 알림 워크플로 두 개의 제목 형식으로만 받는다.
+    //          main-ci-failure-alert.yaml → ":rotating_light: *<workflow> failed on <branch>* (<org>/<repo>)"
+    //          sbom-failure-alert.yaml    → ":rotating_light: *SBOM pipeline failed on <ref>*" 또는 "…possible SBOM failure)*"
+    //        nightly 실패("*Nightly … failed on main*")는 뒤에 "(org/repo)" 가 없어서 걸러진다.
+    private static final Pattern FAILURE_HEADLINE = Pattern.compile(
+            "\\A\\s*:rotating_light: \\*(?:[^*\\n]+ failed on [^*\\n]+\\* \\([\\w.-]+/[\\w.-]+\\)"
+                    + "|SBOM pipeline failed on |[^*\\n]*possible SBOM failure)");
+
     private CiAlertParser() {}
+
+    public static boolean isFailureAlert(String text) {
+        return text != null && FAILURE_HEADLINE.matcher(text).find();
+    }
 
     public static Optional<CiAlert> parse(String text, String org, Collection<String> repos) {
         if (text == null || text.isBlank()) {

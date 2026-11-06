@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-// STUDY: #sol-sbom-ci 알림 재처리 (v0.0.91, 관리자 전용 — SecurityConfig 의 /api/admin/** 규칙).
+// STUDY: #sol-dev-alarm 알림 재처리 (v0.0.91, 관리자 전용 — SecurityConfig 의 /api/admin/** 규칙).
 //        {"ts": "<알림 ts>", "dryRunUser": "<Slack user id>"} — dryRunUser 를 주면 팀 채널 대신 그 사람 DM 으로만
 //        결과를 보낸다. 과거 알림으로 분석 품질을 검증하거나, 실패한 알림을 다시 돌릴 때 쓴다.
 //        {"runUrl": "<GitHub Actions run 링크>", "dryRunUser": "..."} (v0.0.93) — 알림 메시지 없이 run 으로 바로 (DM 전용).

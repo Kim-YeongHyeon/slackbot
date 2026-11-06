@@ -138,7 +138,7 @@ class SlackEventControllerTest {
         verify(reminderSubscriptionService).enable("U1");
     }
 
-    // STUDY: v0.0.91 — #sol-sbom-ci 알림(알림 앱의 일반 message 이벤트)은 app_mention 필터 앞에서 CiAlertService 로 간다.
+    // STUDY: v0.0.91 — #sol-dev-alarm 알림(알림 앱의 일반 message 이벤트)은 app_mention 필터 앞에서 CiAlertService 로 간다.
     @Test
     void ciAlertMessage_routesToCiAlertService_beforeMentionFilter() throws Exception {
         when(ciAlertService.accepts(any())).thenReturn(true);

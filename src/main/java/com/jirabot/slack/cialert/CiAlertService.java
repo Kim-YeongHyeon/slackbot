@@ -29,7 +29,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
-// STUDY: #sol-sbom-ci 알림 자동 대응의 중심 (v0.0.91).
+// STUDY: #sol-dev-alarm 알림 자동 대응의 중심 (v0.0.91).
 //        SlackEventController 는 accepts() 로 알림인지만 보고 submit() 에 넘긴 뒤 바로 200 을 준다 (Slack 3초 제한).
 //        실제 처리(로그 다운로드 → 반복 판단 → Claude 분석 → 답글)는 ciAlertExecutor 단일 스레드에서 돈다.
 @Service
@@ -48,6 +48,8 @@ public class CiAlertService {
     // (Build images·Push SBOM 실패는 취약점이 아니라 빌드·인프라 문제라 로그 분석으로 간다).
     static final Set<String> SBOM_SCAN_STEPS =
             Set.of("Generate SBOM and Grype JSON", "NVD CVSS gate (via Grype JSON)");
+    // run 이 실패로 끝난 conclusion. 진행 중이면 null 이다.
+    static final Set<String> FAILED_RUN_CONCLUSIONS = Set.of("failure", "timed_out", "startup_failure");
 
     private final CiAlertProperties props;
     private final CiAlertRepository repository;
@@ -114,7 +116,8 @@ public class CiAlertService {
         boolean topLevel = e.thread_ts() == null || e.thread_ts().equals(e.ts());
         boolean plainBotPost = e.subtype() == null || "bot_message".equals(e.subtype());
         return props.channel().equals(e.channel()) && topLevel && plainBotPost
-                && e.bot_id() != null && props.alertBotIds().contains(e.bot_id());
+                && e.bot_id() != null && props.alertBotIds().contains(e.bot_id())
+                && CiAlertParser.isFailureAlert(e.text());
     }
 
     public void submit(SlackEventInner e) {
@@ -237,6 +240,15 @@ public class CiAlertService {
         RunInfo run = github.getRun(repo, alert.runId());
         List<JobInfo> allFailed = github.listJobs(repo, alert.runId(), run.runAttempt()).stream()
                 .filter(JobInfo::failed).toList();
+        // STUDY: 제목 필터를 지나도 GitHub 기준으로 한 번 더 본다 — 실패한 job 이 없고 run 도 실패로 끝나지 않았으면
+        //        (성공·진행 중·재실행으로 통과) 분석할 게 없으니 답글 없이 건너뛴다. 실패 run 인데 job 이 없는 경우
+        //        (startup_failure 등)는 예전처럼 알림 본문으로 분석한다.
+        if (allFailed.isEmpty() && (run.conclusion() == null || !FAILED_RUN_CONCLUSIONS.contains(run.conclusion()))) {
+            log.info("ci-alert run={} has no failed jobs (conclusion={}) — skipped", run.id(), run.conclusion());
+            row.fail(Status.SKIPPED, "실패한 job 이 없는 run (conclusion=" + run.conclusion() + ")");
+            repository.save(row);
+            return;
+        }
         // STUDY: 알림 제목이 아니라 GitHub 가 알려준 "실패한 step 이름"으로 판단한다 (v0.0.93).
         //        HE-KMS release 처럼 일반 CI 알림 제목으로 오는 grype 실패도 취약점 표로 답하기 위해서.
         if (sbomScanFailed(allFailed)) {

@@ -158,7 +158,7 @@ daily-prompt:
   zone: ${DAILY_PROMPT_ZONE:Asia/Seoul}
   message-file: ${DAILY_PROMPT_MESSAGE_FILE:}
 
-# #sol-sbom-ci 알림 자동 대응 (v0.0.91) — 알림 앱(Sol Dev Alarm)이 올린 CI·SBOM 실패 알림에
+# #sol-dev-alarm 알림 자동 대응 (v0.0.91) — 알림 앱(Sol Dev Alarm)이 올린 CI·SBOM 실패 알림에
 # 멘션 없이 스레드 답글(원인 분석)을 단다. GITHUB_ALERT_TOKEN 이 비어 있으면 기능만 꺼진다(기동 영향 없음).
 # Slack 앱에 message.channels 이벤트 + channels:history, (선택) reactions:write 권한이 필요하다.
 ci-alert:

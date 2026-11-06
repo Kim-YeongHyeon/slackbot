@@ -3,7 +3,7 @@ package com.jirabot.slack.cialert;
 import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-// STUDY: #sol-sbom-ci 알림 자동 대응(v0.0.91) 설정. record + compact constructor 로 기본값을 채운다
+// STUDY: #sol-dev-alarm 알림 자동 대응(v0.0.91) 설정. record + compact constructor 로 기본값을 채운다
 //        (DailyPromptProperties 와 같은 패턴). List<String> 은 yml 의 콤마 구분 문자열에서 바로 바인딩된다.
 @ConfigurationProperties(prefix = "ci-alert")
 public record CiAlertProperties(

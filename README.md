@@ -20,7 +20,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 인터랙티브 버튼 | 이슈 생성 알림에 "진행 중" / "완료" 버튼 → 클릭으로 Jira 상태 전환 |
 | 브랜치 만들기 | "진행 중" 전환 시 **repo 선택 버튼**을 띄워 클릭하면 봇이 GitHub API로 브랜치 직접 생성(브랜치명은 Claude가 한글 요약→영어 슬러그, `feature/`·`bugfix/`). 브랜치명에 이슈키가 있어 Jira 개발 패널에 자동 연결. `github.token` 미설정 시 Jira 개발 패널 링크 안내로 폴백 |
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
-| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94 |
+| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94, nightly·벤치마크 글은 무시 — v0.0.95 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -132,6 +132,17 @@ origin을 확인하여 srcdoc의 고유 origin에서도 작동한다.
   제거하려면 ngrok 요금제·도메인 설정을 변경해야 한다.
 - 제한: 저장된 정적 자산은 포함하지만, 실행 중 JavaScript가 새로 요청하는
   동적 자산이나 외부 CDN 리소스까지 오프라인으로 변환하지는 않는다.
+
+### 알림 채널을 nightly·벤치마크 채널과 합침 (v0.0.95)
+
+- 배경: 벤치마크 채널을 CI 알림 채널로 합쳤다. 각 레포의 `SLACK_CHANNEL_ID` 시크릿을 CI 알림 채널 ID로 바꿨고, 토큰은 그대로 쓴다.
+  그래서 같은 알림 앱이 nightly 결과·러너 대기 알림도 이 채널에 올리고, 그 글에도 run 링크가 있다.
+- 실패 알림 워크플로 두 개의 제목만 처리한다.
+  - `main-ci-failure-alert.yaml`: `:rotating_light: *<workflow> failed on <branch>* (<org>/<repo>)`
+  - `sbom-failure-alert.yaml`: `*SBOM pipeline failed on …*`, `…possible SBOM failure)*`
+  - nightly 실패·성공, 러너 대기 알림은 무시한다(DB에도 남기지 않음).
+- 제목이 맞아도 GitHub에 실패한 job이 없고 run이 실패로 끝나지 않았으면(성공·진행 중) 답글 없이 `SKIPPED` 처리한다.
+  실패한 run인데 job 정보가 없는 경우(`startup_failure` 등)는 예전처럼 분석한다.
 
 ### SBOM 취약점 자동 수정 PR (v0.0.94)
 

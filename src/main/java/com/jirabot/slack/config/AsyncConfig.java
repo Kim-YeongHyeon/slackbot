@@ -50,7 +50,7 @@ public class AsyncConfig implements AsyncConfigurer {
 
     public static final String CI_ALERT_EXECUTOR = "ciAlertExecutor";
 
-    // STUDY: #sol-sbom-ci 알림 처리 전용 단일 스레드 (v0.0.91). 알림 1건이 로그 다운로드 + Claude 분석으로
+    // STUDY: #sol-dev-alarm 알림 처리 전용 단일 스레드 (v0.0.91). 알림 1건이 로그 다운로드 + Claude 분석으로
     //        수십 초~수 분 걸린다. slackTaskExecutor 를 같이 쓰면 일반 봇 명령이 밀리므로 분리하고,
     //        한 번에 하나씩만 처리해 Claude 사용량이 몰리지 않게 한다 (같은 원인 반복 알림도 앞 건 결과를 본다).
     @Bean(name = CI_ALERT_EXECUTOR)

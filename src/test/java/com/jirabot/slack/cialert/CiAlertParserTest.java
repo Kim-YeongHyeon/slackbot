@@ -95,4 +95,34 @@ class CiAlertParserTest {
         assertThat(CiAlertParser.parse(null, "CryptoLabInc", REPOS)).isEmpty();
         assertThat(CiAlertParser.parse("https://github.com/CryptoLabInc/evi/pull/3", "CryptoLabInc", REPOS)).isEmpty();
     }
+
+    // ── isFailureAlert (v0.0.95: nightly·벤치마크 채널과 합쳐진 뒤) ──
+
+    @Test
+    void isFailureAlert_acceptsTheTwoAlertWorkflowHeadlines() {
+        assertThat(CiAlertParser.isFailureAlert(CI_ALERT)).isTrue();
+        assertThat(CiAlertParser.isFailureAlert(":rotating_light: *SBOM pipeline failed on main*\nrun: <u>")).isTrue();
+        assertThat(CiAlertParser.isFailureAlert(
+                ":rotating_light: *release run failed on main (step list unavailable — possible SBOM failure)*\nrun: <u>"))
+                .isTrue();
+        assertThat(CiAlertParser.isFailureAlert(":rotating_light: *HE-KMS release failed on v1.2.3* (CryptoLabInc/HE-KMS)"))
+                .as("태그 ref").isTrue();
+    }
+
+    @Test
+    void isFailureAlert_rejectsNightlyBenchmarkAndQueueMessages() {
+        String run = "\nrun: <https://github.com/CryptoLabInc/evi/actions/runs/1>";
+        assertThat(CiAlertParser.isFailureAlert(":white_check_mark: evi nightly green — 5 dims swept" + run)).isFalse();
+        assertThat(CiAlertParser.isFailureAlert(":hourglass_flowing_sand: evi CI — 3 job(s) waiting over 30 min for a runner" + run))
+                .isFalse();
+        assertThat(CiAlertParser.isFailureAlert(":x: heracles nightly FAIL (main@abc1234)" + run)).isFalse();
+        assertThat(CiAlertParser.isFailureAlert(":rotating_light: *Nightly shuffled Go tests failed on main*" + run))
+                .as("nightly 실패 — 제목 뒤에 (org/repo) 가 없음").isFalse();
+        assertThat(CiAlertParser.isFailureAlert(":rotating_light: *Nightly k3s export/import test failed at deploy (dataset: x)*" + run))
+                .isFalse();
+        assertThat(CiAlertParser.isFailureAlert("see :rotating_light: *evi main failed on main* (CryptoLabInc/evi)"))
+                .as("제목은 글 맨 앞에 있어야 함").isFalse();
+        assertThat(CiAlertParser.isFailureAlert(null)).isFalse();
+        assertThat(CiAlertParser.isFailureAlert("")).isFalse();
+    }
 }

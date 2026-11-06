@@ -174,7 +174,7 @@ public class SbomFixService {
                 + "), 이 레포의 `" + path + "` 서브모듈이 아직 이전 커밋(`" + pin.get().substring(0, 7) + "`)을 가리켜 이미지에 남아 있습니다.\n\n"
                 + "## 채택한 해결 방안\n`" + path + "` 를 " + owner + " main(`" + head.substring(0, 7) + "`)으로 올립니다.\n\n"
                 + "## 검증 방법\n이 PR 의 CI 와 머지 후 SBOM 검사가 확인합니다.\n\n"
-                + "---\n🤖 #sol-sbom-ci 알림 봇이 자동으로 만든 PR 입니다. 자동 머지는 하지 않습니다.\n"
+                + "---\n🤖 #sol-dev-alarm 알림 봇이 자동으로 만든 PR 입니다. 자동 머지는 하지 않습니다.\n"
                 + "<!-- " + MARKER + " vulns=" + String.join(",", ids) + " -->\n";
         PullInfo pr = repos.createPull(alertRepo, branch, alertBase, title, body);
         return Optional.of(new RepoResult(alertRepo, Status.SUBMODULE_PR, pr.htmlUrl(), "#" + pr.number() + " " + title));
@@ -222,7 +222,7 @@ public class SbomFixService {
     static String body(CiAlert alert, String repo, List<Finding> targets, DiffGuard.Verdict verdict, FixVerifier.Check check,
                        FixAgentRunner.AgentResult result) {
         StringBuilder sb = new StringBuilder("## 문제\n");
-        sb.append("#sol-sbom-ci SBOM 알림([run](").append(alert.runUrl()).append("))의 Grype 검사에서 이 레포가 고칠 High/Critical 취약점이 나왔습니다.\n\n");
+        sb.append("#sol-dev-alarm SBOM 알림([run](").append(alert.runUrl()).append("))의 Grype 검사에서 이 레포가 고칠 High/Critical 취약점이 나왔습니다.\n\n");
         sb.append("| 취약점 | 심각도 | 패키지 | 현재 | 고칠 버전 | 이미지 |\n|---|---|---|---|---|---|\n");
         for (Finding f : targets) {
             sb.append("| ").append(f.vulnId()).append(" | ").append(f.severity()).append(" | `").append(f.pkg()).append("` | ")
@@ -241,7 +241,7 @@ public class SbomFixService {
         if (!result.notes().isBlank()) {
             sb.append("\n## 참고\n").append(result.notes()).append('\n');
         }
-        sb.append("\n---\n🤖 #sol-sbom-ci 알림 봇이 자동으로 만든 PR 입니다 (Claude 에이전트가 수정, 봇이 변경 범위·grype 재검사로 확인). 자동 머지는 하지 않습니다.\n");
+        sb.append("\n---\n🤖 #sol-dev-alarm 알림 봇이 자동으로 만든 PR 입니다 (Claude 에이전트가 수정, 봇이 변경 범위·grype 재검사로 확인). 자동 머지는 하지 않습니다.\n");
         sb.append("<!-- ").append(MARKER).append(" vulns=").append(String.join(",", ids(targets))).append(" -->\n");
         return sb.toString();
     }

@@ -136,6 +136,12 @@ class CiAlertServiceTest {
         assertThat(service.accepts(new SlackEventInner("app_mention", "U1", "<@B> hi", CHANNEL, ts, null, null, null)))
                 .as("멘션").isFalse();
         assertThat(service.accepts(null)).isFalse();
+        assertThat(service.accepts(new SlackEventInner("message", null,
+                ":white_check_mark: evi nightly green\nrun: <" + RUN_URL + ">", CHANNEL, ts, null, ALERT_BOT, null)))
+                .as("알림 앱의 nightly 성공 글 (run 링크 있음)").isFalse();
+        assertThat(service.accepts(new SlackEventInner("message", null,
+                ":hourglass_flowing_sand: evi CI — 2 job(s) waiting over 30 min for a runner\nrun: <" + RUN_URL + ">",
+                CHANNEL, ts, null, ALERT_BOT, null))).as("러너 대기 알림").isFalse();
         CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, sbomFix, Runnable::run);
         assertThat(off.accepts(alertEvent(ts))).as("토큰 없음 → 기능 꺼짐").isFalse();
     }
@@ -258,6 +264,36 @@ class CiAlertServiceTest {
         assertThat(store.get(1L).getStatus()).isEqualTo(Status.SKIPPED);
         verify(slack, never()).postThreadReplyTs(anyString(), anyString(), anyString());
         verify(slack, never()).addReaction(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void runWithoutFailedJobs_successOrInProgress_isSkippedWithoutReply() {
+        for (String conclusion : new String[] {"success", null}) {
+            when(github.getRun("evi", 1000)).thenReturn(new RunInfo(1000, "evi main", 77, "abcdef1234", "main",
+                    "push", conclusion, 1, RUN_URL, "Fix it", "dev"));
+            when(github.listJobs("evi", 1000, 1)).thenReturn(List.of(new JobInfo(1, "build", "success", List.of()),
+                    new JobInfo(2, "test", null, List.of())));
+
+            service.submit(alertEvent(nowTs()));
+        }
+
+        assertThat(store.values()).extracting(CiAlertEntity::getStatus).containsOnly(Status.SKIPPED);
+        verify(analyzer, never()).analyze(any());
+        verify(slack, never()).postThreadReplyTs(anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void failedRunWithoutFailedJobs_isStillAnalyzedFromTheAlertText() {
+        stubRun("");
+        when(github.getRun("evi", 1000)).thenReturn(new RunInfo(1000, "evi main", 77, "abcdef1234", "main",
+                "push", "startup_failure", 1, RUN_URL, "Fix it", "dev"));
+        when(github.listJobs("evi", 1000, 1)).thenReturn(List.of());
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+
+        service.submit(alertEvent(nowTs()));
+
+        verify(analyzer).analyze(any());
+        assertThat(store.get(1L).getStatus()).isEqualTo(Status.DONE);
     }
 
     // ── replay ───────────────────────────────────────────────

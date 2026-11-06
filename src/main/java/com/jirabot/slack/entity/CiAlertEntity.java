@@ -11,7 +11,7 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 
-// #sol-sbom-ci 알림 처리 기록 (v0.0.91, V10). 처리 상태·분석 요약·답글 ts 를 남겨
+// #sol-dev-alarm 알림 처리 기록 (v0.0.91, V10). 처리 상태·분석 요약·답글 ts 를 남겨
 // 반복 알림 판단(fingerprint)과 이전 분석 링크(reply_ts)에 쓴다.
 @Entity
 // STUDY: uniqueConstraints 는 운영(Flyway V10)과 같은 제약을 테스트(H2 create-drop)에도 만들기 위해 엔티티에도 적는다.

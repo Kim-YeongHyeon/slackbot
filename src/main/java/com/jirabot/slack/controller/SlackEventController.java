@@ -1569,7 +1569,7 @@ public class SlackEventController {
 
         if (SlackEventEnvelope.EVENT_CALLBACK.equals(envelope.type()) && envelope.event() != null) {
             SlackEventInner event = envelope.event();
-            // STUDY: #sol-sbom-ci 의 CI·SBOM 알림(알림 앱이 올린 일반 message 이벤트)은 멘션 없이 처리한다 (v0.0.91).
+            // STUDY: #sol-dev-alarm 의 CI·SBOM 알림(알림 앱이 올린 일반 message 이벤트)은 멘션 없이 처리한다 (v0.0.91).
             //        app_mention 필터·허용 채널·사람 여부 검사보다 먼저 봐야 한다 — 알림은 봇 글이라 뒤에서 모두 걸러진다.
             if (ciAlertService.accepts(event)) {
                 ciAlertService.submit(event);
