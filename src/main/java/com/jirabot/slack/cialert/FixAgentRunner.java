@@ -2,6 +2,7 @@ package com.jirabot.slack.cialert;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.jirabot.slack.client.process.ClaudeCliFlags;
 import com.jirabot.slack.client.process.ClaudeJson;
 import com.jirabot.slack.client.process.ProcessRunner;
 import com.jirabot.slack.config.ClaudeProperties;
@@ -72,6 +73,8 @@ public class FixAgentRunner {
                 fixProps.agentImage(),
                 "claude", "-p", "--output-format", "json", "--permission-mode", "bypassPermissions",
                 "--max-turns", String.valueOf(fixProps.maxTurns()), "--model", model,
+                // 대상 레포의 .mcp.json 같은 MCP 설정도 무시한다 — bypassPermissions 라 도구는 내장 도구로만 (v0.0.96).
+                "--strict-mcp-config", "--mcp-config", ClaudeCliFlags.NO_MCP_SERVERS,
                 "--append-system-prompt-file", "/prompts/" + promptFile.getFileName()));
         ProcessRunner.Result r = runner.run(cmd, task, Duration.ofMinutes(fixProps.timeoutMinutes()), null,
                 Map.of(TOKEN_ENV, fixProps.oauthToken()));

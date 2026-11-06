@@ -389,3 +389,15 @@ v0.0.94 배포: 사용자가 붙여 넣은 `CLAUDE_CODE_OAUTH_TOKEN` 이 터미�
   `awk '{k=($0~/^[A-Z_]+=/)?substr($0,1,index($0,"=")):"(키 없음)"; print NR": "k" len="length($0)}' .env`
 - 결과가 대화에 남는 명령에서는 `source .env 2>/dev/null` 로 오류 줄을 버린다.
 - 토큰을 넣은 뒤에는 실제 호출로 유효성을 확인한다(예: 컨테이너에서 `claude -p` → is_error=false).
+
+## L24. `--tools ""` 는 MCP 도구를 빼지 않는다 — "도구 없는" claude -p 호출에는 `--strict-mcp-config` 까지
+
+v0.0.96 에서 CI 분석 모델을 Sonnet 5 로 바꾸자 첫 시도가 exit 1(stderr 비어 있음)로 실패했다. 확인해 보니 `--tools ""`
+로 "도구 없음"이라 믿었던 봇의 모든 claude -p 호출에 서버 계정의 claude.ai 커넥터(Jira·Slack 쓰기 등)와 플러그인 MCP
+도구 88개가 그대로 노출돼 있었다(프롬프트 54,141 토큰, 빼면 8,182). 새 모델이 그 도구를 부르려다 `--max-turns 1` 에 걸린 것으로 보인다.
+
+**규칙**:
+- 도구가 없어야 하는 호출은 `--strict-mcp-config --mcp-config '{"mcpServers":{}}'` 까지 붙이고,
+  `--output-format stream-json --verbose` 의 init 이벤트(`tools`, `mcp_servers`)로 실제로 0개인지 확인한다.
+- 서버 계정에 커넥터·플러그인을 추가하면 봇 호출에도 따라 들어간다고 가정한다 — 플래그로 막아 두면 무관하다.
+- CLI 실패 로그에는 stderr 뿐 아니라 stdout JSON 의 `subtype`·`result` 를 남긴다 (claude -p 는 오류를 stdout 으로 낸다).

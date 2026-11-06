@@ -1,0 +1,44 @@
+package com.jirabot.slack.cialert;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.Map;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.env.YamlPropertySourceLoader;
+import org.springframework.core.env.MapPropertySource;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.io.ClassPathResource;
+
+// STUDY: application.yml 의 placeholder 기본값 연쇄를 실제 파일로 확인한다 (v0.0.96).
+//        ci-alert.fix.model → ${CI_ALERT_FIX_MODEL:${ci-alert.model}} → ${CI_ALERT_MODEL:claude-sonnet-5}.
+//        서버 환경변수가 결과를 바꾸지 않게 시스템 환경·속성 소스는 빼고 본다.
+class CiAlertModelConfigTest {
+
+    private static StandardEnvironment env(Map<String, Object> overrides) throws Exception {
+        StandardEnvironment env = new StandardEnvironment();
+        env.getPropertySources().remove(StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME);
+        env.getPropertySources().remove(StandardEnvironment.SYSTEM_PROPERTIES_PROPERTY_SOURCE_NAME);
+        new YamlPropertySourceLoader().load("application", new ClassPathResource("application.yml"))
+                .forEach(env.getPropertySources()::addLast);
+        env.getPropertySources().addFirst(new MapPropertySource("overrides", overrides));
+        return env;
+    }
+
+    @Test
+    void alertAndFixDefaultToSonnet5_whileTheRestOfTheBotKeepsItsModel() throws Exception {
+        StandardEnvironment env = env(Map.of());
+
+        assertThat(env.getProperty("ci-alert.model")).isEqualTo("claude-sonnet-5");
+        assertThat(env.getProperty("ci-alert.fix.model")).isEqualTo("claude-sonnet-5");
+        assertThat(env.getProperty("claude.model")).isEqualTo("claude-sonnet-4-6");
+    }
+
+    @Test
+    void envOverrides_alertModelFlowsToFix_unlessFixHasItsOwn() throws Exception {
+        assertThat(env(Map.of("CI_ALERT_MODEL", "m-alert")).getProperty("ci-alert.fix.model")).isEqualTo("m-alert");
+
+        StandardEnvironment both = env(Map.of("CI_ALERT_MODEL", "m-alert", "CI_ALERT_FIX_MODEL", "m-fix"));
+        assertThat(both.getProperty("ci-alert.model")).isEqualTo("m-alert");
+        assertThat(both.getProperty("ci-alert.fix.model")).isEqualTo("m-fix");
+    }
+}

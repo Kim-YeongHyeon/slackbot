@@ -101,7 +101,7 @@ class FixWorkspaceTest {
             return new ProcessRunner.Result(0, "", "", false);
         });
         CiAlertProperties props = new CiAlertProperties(true, "C", List.of("B"), "CryptoLabInc", List.of("heracles"),
-                "SECRET-TOKEN", null, 24, 180, 60, List.of());
+                "SECRET-TOKEN", null, 24, 180, 60, List.of(), null);
         CiFixProperties fixProps = new CiFixProperties(true, "t", null, 0, 0, 0, null, null, null, work.toString(),
                 null, null, 0);
 

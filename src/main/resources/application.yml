@@ -178,13 +178,15 @@ ci-alert:
   # SBOM 취약점이 나온 이미지 → 고칠 레포 (v0.0.92, "image=repo" 콤마 구분). 목록에 없는 이미지는 알림이 온 레포.
   # KMS 이미지는 envector 의 external/HE-KMS 서브모듈로 빌드되므로 HE-KMS 레포에서 고친다.
   sbom-image-owners: ${CI_ALERT_SBOM_IMAGE_OWNERS:envector-kms-control=HE-KMS,envector-kms-crypto=HE-KMS}
+  # 알림 원인 분석과 SBOM 수정 에이전트가 쓰는 모델 (v0.0.96). 봇의 다른 기능은 claude.model 그대로. 비면 claude.model.
+  model: ${CI_ALERT_MODEL:claude-sonnet-5}
   # SBOM 자동 수정 PR (v0.0.94). 격리된 docker 컨테이너의 Claude 에이전트가 고치고, 봇이 DiffGuard·grype 재검사 후
   # GITHUB_ALERT_TOKEN 으로 PR 을 만든다. CLAUDE_CODE_OAUTH_TOKEN(`claude setup-token`, 서버 로그인과 별개)이 비면 꺼진다.
   fix:
     enabled: ${CI_ALERT_FIX_ENABLED:true}
     oauth-token: ${CLAUDE_CODE_OAUTH_TOKEN:}
-    # 비면 claude.model
-    model: ${CI_ALERT_FIX_MODEL:}
+    # 따로 주지 않으면 ci-alert.model (그것도 비면 claude.model)
+    model: ${CI_ALERT_FIX_MODEL:${ci-alert.model}}
     timeout-minutes: ${CI_ALERT_FIX_TIMEOUT_MINUTES:20}
     # 에이전트 실행 횟수 상한 (grype 재검사에서 남으면 남은 항목을 알려주고 한 번 더)
     max-attempts: ${CI_ALERT_FIX_MAX_ATTEMPTS:2}

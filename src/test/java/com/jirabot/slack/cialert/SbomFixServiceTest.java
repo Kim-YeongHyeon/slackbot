@@ -44,7 +44,7 @@ class SbomFixServiceTest {
         guard = mock(DiffGuard.class);
         verifier = mock(FixVerifier.class);
         CiAlertProperties props = new CiAlertProperties(true, "C", List.of("B"), "CryptoLabInc",
-                List.of("he-kms", "envector", "evi", "heracles"), "tok", null, 24, 180, 60, List.of());
+                List.of("he-kms", "envector", "evi", "heracles"), "tok", null, 24, 180, 60, List.of(), null);
         CiFixProperties fixProps = new CiFixProperties(true, "oauth", null, 0, 2, 0, null, null, null, null, null, null, 0);
         service = new SbomFixService(props, fixProps, repos, workspace, agent, guard, verifier, new ObjectMapper());
         when(workspace.prepare(anyString(), anyString())).thenReturn(ws);

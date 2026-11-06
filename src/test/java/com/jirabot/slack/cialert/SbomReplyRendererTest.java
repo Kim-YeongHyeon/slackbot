@@ -15,7 +15,7 @@ class SbomReplyRendererTest {
     private static final String RUN = "https://github.com/CryptoLabInc/envector/actions/runs/1";
     private static final CiAlertProperties PROPS = new CiAlertProperties(true, "C", List.of("B"), "CryptoLabInc",
             List.of("envector"), "t", null, 24, 180, 60,
-            List.of("envector-kms-control=HE-KMS", " envector-kms-crypto = HE-KMS "));
+            List.of("envector-kms-control=HE-KMS", " envector-kms-crypto = HE-KMS "), null);
     private static final Function<String, String> OWNER = img -> PROPS.ownerOf(img, "envector");
 
     private static Finding f(String id, String sev, String pkg, String ver, List<String> fix, String state,

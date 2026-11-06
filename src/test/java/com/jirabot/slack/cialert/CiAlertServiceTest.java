@@ -56,7 +56,7 @@ class CiAlertServiceTest {
     private static CiAlertProperties props(String token) {
         return new CiAlertProperties(true, CHANNEL, List.of(ALERT_BOT), "CryptoLabInc",
                 List.of("he-kms", "envector", "evi", "heracles"), token, null, 24, 180, 60,
-                List.of("envector-kms-crypto=HE-KMS"));
+                List.of("envector-kms-crypto=HE-KMS"), null);
     }
 
     @BeforeEach

@@ -56,8 +56,8 @@ public class CiFailureAnalyzer {
             if (parsed.isPresent()) {
                 return parsed;
             }
-            log.warn("CI analysis attempt {} failed repo={} exit={} stderr={}", attempt, input.repo(),
-                    r.exitCode(), r.stderr() == null ? "" : r.stderr().lines().findFirst().orElse(""));
+            log.warn("CI analysis attempt {} failed repo={} exit={} detail={}", attempt, input.repo(),
+                    r.exitCode(), failureDetail(r));
         }
         return Optional.empty();
     }
@@ -68,11 +68,28 @@ public class CiFailureAnalyzer {
                 "--output-format", "json",
                 "--permission-mode", "plan",
                 "--max-turns", "1",
-                "--model", claudeProps.model()));
+                "--model", props.modelOr(claudeProps.model())));
         cmd.addAll(ClaudeCliFlags.LEAN_FLAGS);
         cmd.add("--system-prompt-file");
         cmd.add(PROMPT_FILE);
         return cmd;
+    }
+
+    // claude -p 는 오류도 stdout 의 JSON(subtype·result)로 내고 stderr 는 비우는 경우가 많다 — 원인을 남기려고 둘 다 본다.
+    String failureDetail(ProcessRunner.Result r) {
+        String err = r.stderr() == null ? "" : r.stderr().lines().findFirst().orElse("").strip();
+        if (!err.isEmpty()) {
+            return err;
+        }
+        try {
+            JsonNode envelope = objectMapper.readTree(r.stdout());
+            String result = envelope.path("result").asText("").replaceAll("\\s+", " ");
+            return "subtype=" + envelope.path("subtype").asText("?") + " result="
+                    + result.substring(0, Math.min(200, result.length()));
+        } catch (Exception e) {
+            String out = r.stdout() == null ? "" : r.stdout().strip();
+            return "stdout=" + out.substring(0, Math.min(200, out.length()));
+        }
     }
 
     Optional<CiAnalysis> parse(String stdout) {

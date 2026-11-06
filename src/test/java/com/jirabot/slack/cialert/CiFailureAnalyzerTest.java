@@ -28,7 +28,7 @@ class CiFailureAnalyzerTest {
     void setUp() {
         runner = mock(ProcessRunner.class);
         CiAlertProperties props = new CiAlertProperties(true, "C1", List.of("B1"), "CryptoLabInc",
-                List.of("evi"), "tok", null, 24, 7, 60, List.of());
+                List.of("evi"), "tok", null, 24, 7, 60, List.of(), "claude-sonnet-5");
         ClaudeProperties claude = new ClaudeProperties("claude", "claude-sonnet-4-6", "claude-haiku-4-5",
                 5, "plan", 1, true);
         analyzer = new CiFailureAnalyzer(runner, claude, props, om);
@@ -68,7 +68,8 @@ class CiFailureAnalyzerTest {
         assertThat(cmd.getValue()).containsSequence("--tools", "")
                 .containsSequence("--max-turns", "1")
                 .containsSequence("--system-prompt-file", CiFailureAnalyzer.PROMPT_FILE)
-                .containsSequence("--model", "claude-sonnet-4-6");
+                .containsSequence("--model", "claude-sonnet-5")
+                .containsSequence("--strict-mcp-config", "--mcp-config", "{\"mcpServers\":{}}");
         assertThat(stdin.getValue()).startsWith("아래 <data> 안은")
                 .contains("<data>\n", "레포: evi", "커밋: abcdef12 (dev)", "커밋 메시지 첫 줄: Fix build\n",
                         "- src/a.cpp", "=== 실패 job: test (gpu) ===", "실패 step: Build", "LOG EXCERPT")
@@ -117,5 +118,31 @@ class CiFailureAnalyzerTest {
         String stdin = CiFailureAnalyzer.buildInput(input(List.of()));
 
         assertThat(stdin).contains("(실패 job 로그를 받지 못함 — 아래는 알림 원문)\nALERT TEXT");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void blankAlertModel_fallsBackToTheBotModel() throws Exception {
+        CiAlertProperties noModel = new CiAlertProperties(true, "C1", List.of("B1"), "CryptoLabInc",
+                List.of("evi"), "tok", null, 24, 7, 60, List.of(), " ");
+        CiFailureAnalyzer fallback = new CiFailureAnalyzer(runner,
+                new ClaudeProperties("claude", "claude-sonnet-4-6", "claude-haiku-4-5", 5, "plan", 1, true), noModel, om);
+        when(runner.run(any(), anyString(), any(Duration.class)))
+                .thenReturn(new ProcessRunner.Result(0, envelope(VALID, false), "", false));
+
+        fallback.analyze(input(List.of()));
+
+        ArgumentCaptor<List<String>> cmd = ArgumentCaptor.forClass(List.class);
+        verify(runner).run(cmd.capture(), anyString(), any(Duration.class));
+        assertThat(cmd.getValue()).containsSequence("--model", "claude-sonnet-4-6");
+    }
+
+    @Test
+    void failureDetail_readsTheJsonEnvelopeWhenStderrIsEmpty() {
+        assertThat(analyzer.failureDetail(new ProcessRunner.Result(1,
+                "{\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true,\"result\":\"Reached\\nmax turns\"}",
+                "", false))).isEqualTo("subtype=error_max_turns result=Reached max turns");
+        assertThat(analyzer.failureDetail(new ProcessRunner.Result(1, "", "auth failed\nmore", false))).isEqualTo("auth failed");
+        assertThat(analyzer.failureDetail(new ProcessRunner.Result(1, "not json", null, false))).isEqualTo("stdout=not json");
     }
 }

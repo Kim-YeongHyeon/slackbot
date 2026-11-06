@@ -14,6 +14,10 @@ import java.util.List;
  *   <li>{@code --no-session-persistence} — 매 호출 세션 jsonl 기록 중단
  *       (기존 ~/.claude/projects 에 418개/35MB 누적돼 있었음).</li>
  *   <li>{@code --disable-slash-commands} — 스킬 디렉토리 스캔 생략.</li>
+ *   <li>{@code --strict-mcp-config --mcp-config {"mcpServers":{}}} (v0.0.96) — MCP 서버를 하나도 띄우지 않는다.
+ *       {@code --tools ""} 는 내장 도구만 빼고, 서버 계정의 claude.ai 커넥터(Jira·Slack 쓰기 등)와 플러그인
+ *       MCP 도구 88개는 그대로 노출하고 있었다. 실측: 프롬프트 54,141 → 8,182 토큰. CI 로그 같은 외부 입력이
+ *       도구를 부를 여지도 없앤다. Sonnet 5 는 이 도구를 부르려다 --max-turns 1 에 걸려 실패한 적이 있다.</li>
  * </ul>
  * 시스템 프롬프트는 {@code --system-prompt-file} 로 별도 전달되므로 이 플래그들의 영향을 받지 않는다.
  */
@@ -21,9 +25,13 @@ public final class ClaudeCliFlags {
 
     private ClaudeCliFlags() {}
 
+    public static final String NO_MCP_SERVERS = "{\"mcpServers\":{}}";
+
     public static final List<String> LEAN_FLAGS = List.of(
             "--tools", "",
             "--exclude-dynamic-system-prompt-sections",
             "--no-session-persistence",
-            "--disable-slash-commands");
+            "--disable-slash-commands",
+            "--strict-mcp-config",
+            "--mcp-config", NO_MCP_SERVERS);
 }

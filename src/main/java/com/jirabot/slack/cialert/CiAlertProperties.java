@@ -21,7 +21,9 @@ public record CiAlertProperties(
         int maxAlertAgeMinutes,
         // SBOM 취약점이 나온 이미지 → 고칠 레포 ("image=repo"). 목록에 없는 이미지는 알림이 온 레포가 고친다.
         // KMS 이미지는 envector 의 external/HE-KMS 서브모듈(HE-KMS 레포)에서 만들어진다.
-        List<String> sbomImageOwners
+        List<String> sbomImageOwners,
+        // 알림 원인 분석·SBOM 수정 에이전트가 쓰는 모델 (v0.0.96). 봇의 다른 기능은 claude.model 을 그대로 쓴다.
+        String model
 ) {
     public CiAlertProperties {
         if (enabled == null) {
@@ -51,6 +53,14 @@ public record CiAlertProperties(
             maxAlertAgeMinutes = 60;
         }
         sbomImageOwners = sbomImageOwners == null ? List.of() : List.copyOf(sbomImageOwners);
+        if (model == null) {
+            model = "";
+        }
+    }
+
+    // 알림용 모델이 비어 있으면 봇 기본 모델(claude.model)을 쓴다.
+    public String modelOr(String fallback) {
+        return model.isBlank() ? fallback : model;
     }
 
     // 이미지 이름으로 고칠 레포를 찾는다. 매핑이 없으면 fallbackRepo(알림이 온 레포).

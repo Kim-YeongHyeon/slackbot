@@ -61,7 +61,7 @@ class FixAgentRunnerTest {
         assertThat(String.join(" ", cmd.getValue())).doesNotContain("SECRET-OAUTH")
                 .contains("--preserve-env=CLAUDE_CODE_OAUTH_TOKEN", "-e CLAUDE_CODE_OAUTH_TOKEN ", "--user 1001:1002",
                         "-v /w/agent:/work", ":/prompts:ro", "--permission-mode bypassPermissions", "--model claude-sonnet-4-6",
-                        "--append-system-prompt-file /prompts/sbom-fix-agent.md");
+                        "--append-system-prompt-file /prompts/sbom-fix-agent.md", "--strict-mcp-config --mcp-config {\"mcpServers\":{}}");
         assertThat(cmd.getValue()).doesNotContain("/w/repo:/work");
         assertThat(env.getValue()).containsEntry("CLAUDE_CODE_OAUTH_TOKEN", "SECRET-OAUTH");
     }
