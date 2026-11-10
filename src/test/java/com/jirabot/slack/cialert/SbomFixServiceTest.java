@@ -78,7 +78,7 @@ class SbomFixServiceTest {
         agentFixes();
         when(verifier.verify(eq(ws), anyList())).thenReturn(new FixVerifier.Check(true, List.of(), List.of("grype `services`: 대상 패키지 High/Critical 0건")));
         when(repos.createPull(anyString(), anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(new PullInfo(9, "t", "b", "https://gh/HE-KMS/pull/9", "h", false));
+                .thenReturn(new PullInfo(9, "t", "b", "https://gh/HE-KMS/pull/9", "h", false, ""));
 
         List<SbomFixService.RepoResult> r = service.fix(1, ALERT, report(xnet("envector-kms-crypto")), SbomFixServiceTest::owner, false);
 
@@ -99,7 +99,7 @@ class SbomFixServiceTest {
     @Test
     void openPrWithSameVuln_isReused_withoutRunningTheAgent() {
         when(repos.listPulls("envector", "open")).thenReturn(List.of(
-                new PullInfo(5, "fix(deps): bump x/net", "GO-2026-6860 해결", "https://gh/envector/pull/5", "h", false)));
+                new PullInfo(5, "fix(deps): bump x/net", "GO-2026-6860 해결", "https://gh/envector/pull/5", "h", false, "")));
 
         List<SbomFixService.RepoResult> r = service.fix(1, ALERT, report(xnet("envector-backend")), SbomFixServiceTest::owner, false);
 
@@ -115,7 +115,7 @@ class SbomFixServiceTest {
                 .thenReturn(new FixVerifier.Check(false, List.of("GHSA-1 google.golang.org/grpc v1.83.1 → 1.83.2 (services)"), List.of()))
                 .thenReturn(new FixVerifier.Check(true, List.of(), List.of("ok")));
         when(repos.createPull(anyString(), anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(new PullInfo(3, "t", "b", "u", "h", false));
+                .thenReturn(new PullInfo(3, "t", "b", "u", "h", false, ""));
 
         service.fix(1, ALERT, report(xnet("envector-backend")), SbomFixServiceTest::owner, false);
 
@@ -164,22 +164,107 @@ class SbomFixServiceTest {
         verify(repos, never()).createPull(anyString(), anyString(), anyString(), anyString(), anyString());
     }
 
-    @Test
-    void ownerFixAlreadyMerged_bumpsTheSubmoduleInTheAlertRepoInstead() {
-        when(repos.submodulePin("envector", "external/HE-KMS", "main")).thenReturn(Optional.of("1".repeat(40)));
-        when(repos.listPulls("HE-KMS", "closed")).thenReturn(List.of(
-                new PullInfo(9, "fix(deps)", "...\n<!-- sol-sbom-fix vulns=GO-2026-6860 -->\n", "https://gh/HE-KMS/pull/9", "h", true)));
-        when(repos.branchHead("HE-KMS", "main")).thenReturn(Optional.of("2".repeat(40)));
-        when(repos.createPull(eq("envector"), anyString(), anyString(), anyString(), anyString()))
-                .thenReturn(new PullInfo(11, "t", "b", "https://gh/envector/pull/11", "h", false));
+    // ── 서브모듈 (v0.0.97): 봇은 만들지 않고 팀의 업데이트 PR 을 찾아 알린다 ──
 
-        SbomFixService.RepoResult r = service.fix(1, ALERT, report(xnet("envector-kms-crypto")), SbomFixServiceTest::owner, false).get(0);
+    private static final String BASE_PIN = "1".repeat(40);
+    private static final String FIX_SHA = "f".repeat(40);
+    private static final String TEAM_BRANCH = "update_he_kms_commit_main";
+
+    // HE-KMS 에서 GO-2026-6860 을 고친 PR 이 머지됐고, envector main 의 external/HE-KMS 는 아직 그 전 커밋이다.
+    private void ownerFixMerged(String fixPrBody) {
+        when(repos.submodulePin("envector", "external/HE-KMS", "main")).thenReturn(Optional.of(BASE_PIN));
+        when(repos.listPulls("HE-KMS", "closed")).thenReturn(List.of(
+                new PullInfo(9, "fix(deps): bump x/net", fixPrBody, "https://gh/HE-KMS/pull/9", "h", true, FIX_SHA)));
+    }
+
+    private void openPull(int number, String headRef, String pin, boolean hasFix) {
+        when(repos.submodulePin("envector", "external/HE-KMS", headRef)).thenReturn(Optional.of(pin));
+        when(repos.contains("HE-KMS", FIX_SHA, pin)).thenReturn(hasFix);
+    }
+
+    private SbomFixService.RepoResult fixKms() {
+        return service.fix(1, ALERT, report(xnet("envector-kms-crypto")), SbomFixServiceTest::owner, false).get(0);
+    }
+
+    @Test
+    void teamSubmodulePrWithTheFix_isLinked_andNothingIsCreated() {
+        ownerFixMerged("...\n<!-- sol-sbom-fix vulns=GO-2026-6860 -->\n");
+        when(repos.listPulls("envector", "open")).thenReturn(List.of(
+                new PullInfo(2770, "pin evi and HE-KMS", "", "https://gh/envector/pull/2770", "feature", false, ""),
+                new PullInfo(2744, "[automated] Update HE-KMS Commit", "", "https://gh/envector/pull/2744", TEAM_BRANCH, false, "")));
+        openPull(2744, TEAM_BRANCH, "2".repeat(40), true);
+        openPull(2770, "feature", "3".repeat(40), true);
+
+        SbomFixService.RepoResult r = fixKms();
 
         assertThat(r.status()).isEqualTo(SbomFixService.Status.SUBMODULE_PR);
         assertThat(r.repo()).isEqualTo("envector");
-        verify(repos).commitGitlink(eq("envector"), eq("main"), eq("external/HE-KMS"), eq("2".repeat(40)), anyString(),
-                eq("bot/sbom-pin-he-kms-2222222"));
+        assertThat(r.url()).as("팀 PR 이 먼저").isEqualTo("https://gh/envector/pull/2744");
+        assertThat(r.note()).isEqualTo("HE-KMS #9");
+        verify(repos, never()).createPull(anyString(), anyString(), anyString(), anyString(), anyString());
         verify(agent, never()).run(any(), anyString(), anyString());
+    }
+
+    @Test
+    void teamPrStillOnAnOldPin_fallsBackToAnotherPrThatHasTheFix() {
+        ownerFixMerged("GO-2026-6860 을 고쳤어요");   // 사람이 만든 수정 PR (봇 표식 없음)
+        when(repos.listPulls("envector", "open")).thenReturn(List.of(
+                new PullInfo(2744, "[automated] Update HE-KMS Commit", "", "https://gh/envector/pull/2744", TEAM_BRANCH, false, ""),
+                new PullInfo(2770, "pin evi and HE-KMS", "", "https://gh/envector/pull/2770", "feature", false, ""),
+                new PullInfo(2800, "docs", "", "https://gh/envector/pull/2800", "docs", false, "")));
+        openPull(2744, TEAM_BRANCH, "2".repeat(40), false);
+        openPull(2770, "feature", "3".repeat(40), true);
+        openPull(2800, "docs", BASE_PIN, false);   // 서브모듈을 안 건드리는 PR
+
+        SbomFixService.RepoResult r = fixKms();
+
+        assertThat(r.status()).isEqualTo(SbomFixService.Status.SUBMODULE_PR);
+        assertThat(r.url()).isEqualTo("https://gh/envector/pull/2770");
+    }
+
+    @Test
+    void noPrCarriesTheFix_onlyReportsIt_withTheWorkflowLink() {
+        ownerFixMerged("...\n<!-- sol-sbom-fix vulns=GO-2026-6860 -->\n");
+        when(repos.listPulls("envector", "open")).thenReturn(List.of(
+                new PullInfo(2744, "[automated] Update HE-KMS Commit", "", "https://gh/envector/pull/2744", TEAM_BRANCH, false, "")));
+        openPull(2744, TEAM_BRANCH, "2".repeat(40), false);
+
+        SbomFixService.RepoResult r = fixKms();
+
+        assertThat(r.status()).isEqualTo(SbomFixService.Status.SUBMODULE_MISSING);
+        assertThat(r.url()).isEqualTo("https://github.com/CryptoLabInc/envector/actions/workflows/update_submodule.yaml");
+        assertThat(r.detail()).contains("HE-KMS #9", "external/HE-KMS", "#2744 은 아직 수정 전 커밋 2222222");
+        verify(repos, never()).createPull(anyString(), anyString(), anyString(), anyString(), anyString());
+        verify(agent, never()).run(any(), anyString(), anyString());
+    }
+
+    @Test
+    void basePinAlreadyHasTheFix_isSkipped() {
+        ownerFixMerged("...\n<!-- sol-sbom-fix vulns=GO-2026-6860 -->\n");
+        when(repos.contains("HE-KMS", FIX_SHA, BASE_PIN)).thenReturn(true);
+
+        SbomFixService.RepoResult r = fixKms();
+
+        assertThat(r.status()).isEqualTo(SbomFixService.Status.SKIPPED);
+        assertThat(r.detail()).contains("이미 HE-KMS #9 수정이 들어 있어요");
+        verify(repos, never()).listPulls("envector", "open");
+    }
+
+    @Test
+    void ownerNotFixedYet_goesToTheAgentInTheOwnerRepo() {
+        when(repos.submodulePin("envector", "external/HE-KMS", "main")).thenReturn(Optional.of(BASE_PIN));
+        when(repos.listPulls("HE-KMS", "closed")).thenReturn(List.of(
+                new PullInfo(8, "other", "GO-2026-1111", "https://gh/HE-KMS/pull/8", "h", true, FIX_SHA)));
+        agentFixes();
+        when(verifier.verify(any(), anyList())).thenReturn(new FixVerifier.Check(true, List.of(), List.of("grype ok")));
+        when(repos.createPull(eq("HE-KMS"), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(new PullInfo(10, "t", "b", "https://gh/HE-KMS/pull/10", "h", false, ""));
+
+        SbomFixService.RepoResult r = fixKms();
+
+        assertThat(r.status()).isEqualTo(SbomFixService.Status.CREATED);
+        assertThat(r.repo()).isEqualTo("HE-KMS");
+        verify(repos, never()).contains(anyString(), anyString(), anyString());
     }
 
     @Test
@@ -194,13 +279,17 @@ class SbomFixServiceTest {
         String text = SbomFixService.render(List.of(
                 new SbomFixService.RepoResult("HE-KMS", SbomFixService.Status.CREATED, "https://gh/1", "#1 fix"),
                 new SbomFixService.RepoResult("envector", SbomFixService.Status.EXISTS, "https://gh/2", "#2"),
-                new SbomFixService.RepoResult("heracles", SbomFixService.Status.FAILED, "", "a <b>")));
+                new SbomFixService.RepoResult("heracles", SbomFixService.Status.FAILED, "", "a <b>"),
+                new SbomFixService.RepoResult("envector", SbomFixService.Status.SUBMODULE_PR, "https://gh/2744",
+                        "#2744 [automated] Update HE-KMS Commit", "HE-KMS #430"),
+                new SbomFixService.RepoResult("envector", SbomFixService.Status.SUBMODULE_MISSING, "https://gh/wf", "PR 이 없어요")));
 
         assertThat(text).isEqualTo("🔧 *자동 수정 PR*\n• *HE-KMS* — <https://gh/1|#1 fix>\n"
-                + "• *envector* — 🔁 이미 진행 중인 PR <https://gh/2|#2>\n• *heracles* — ⚠️ 실패: a &lt;b&gt;");
+                + "• *envector* — 🔁 이미 진행 중인 PR <https://gh/2|#2>\n• *heracles* — ⚠️ 실패: a &lt;b&gt;\n"
+                + "• *envector* — 🔁 서브모듈 업데이트 PR <https://gh/2744|#2744 [automated] Update HE-KMS Commit> 에 HE-KMS #430 수정이 들어 있어요 — 머지되면 해결돼요\n"
+                + "• *envector* — ⏳ PR 이 없어요 — <https://gh/wf|update_submodule 실행> 이 필요해요");
         assertThat(SbomFixService.title("", List.of(xnet("a")))).isEqualTo("fix(deps): bump golang.org/x/net to 0.62.0 for GO-2026-6860");
         assertThat(SbomFixService.title("fix: " + "x".repeat(200), List.of(xnet("a")))).hasSize(100);
         assertThat(SbomFixService.slug("google.golang.org/grpc")).isEqualTo("grpc");
-        assertThat(SbomFixService.markerIds("x <!-- sol-sbom-fix vulns=A,B --> y")).containsExactly("A", "B");
     }
 }

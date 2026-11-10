@@ -80,26 +80,20 @@ public class GitHubRepoClientImpl implements GitHubRepoClient {
         }
     }
 
-    // STUDY: Git Data API 로 clone 없이 커밋을 만든다 — base 커밋의 tree 위에 gitlink(mode 160000, type commit)
-    //        한 항목만 바꾼 새 tree → 그 tree 를 가리키는 커밋 → 새 브랜치 ref. 서브모듈 고정값 갱신에만 쓴다.
+    // STUDY: compare API 의 status — head 가 base 를 포함하면 ahead, 같으면 identical, 아니면 behind/diverged.
+    //        "수정 커밋(base)이 서브모듈 핀(head)에 들어 있나"를 커밋 목록을 받지 않고 한 번에 판단한다.
     @Override
-    public String commitGitlink(String repo, String base, String path, String newSha, String message, String newBranch) {
-        String baseSha = branchHead(repo, base).orElseThrow(() -> new GitHubActionsException(404, "브랜치 없음: " + base));
-        String baseTree = call(HttpMethod.GET, "/repos/{org}/{repo}/git/commits/{sha}", null, org, repo, baseSha)
-                .path("tree").path("sha").asText();
-        String tree = call(HttpMethod.POST, "/repos/{org}/{repo}/git/trees", Map.of("base_tree", baseTree,
-                "tree", List.of(Map.of("path", path, "mode", "160000", "type", "commit", "sha", newSha))), org, repo)
-                .path("sha").asText();
-        String commit = call(HttpMethod.POST, "/repos/{org}/{repo}/git/commits",
-                Map.of("message", message, "tree", tree, "parents", List.of(baseSha)), org, repo).path("sha").asText();
-        call(HttpMethod.POST, "/repos/{org}/{repo}/git/refs", Map.of("ref", "refs/heads/" + newBranch, "sha", commit), org, repo);
-        return commit;
+    public boolean contains(String repo, String ancestorSha, String sha) {
+        String status = call(HttpMethod.GET, "/repos/{org}/{repo}/compare/{base}...{head}?per_page=1", null,
+                org, repo, ancestorSha, sha).path("status").asText("");
+        return "ahead".equals(status) || "identical".equals(status);
     }
 
     private static PullInfo pull(JsonNode p) {
         return new PullInfo(p.path("number").asInt(), p.path("title").asText(""), p.path("body").asText(""),
                 p.path("html_url").asText(""), p.path("head").path("ref").asText(""),
-                !p.path("merged_at").isMissingNode() && !p.path("merged_at").isNull());
+                !p.path("merged_at").isMissingNode() && !p.path("merged_at").isNull(),
+                p.path("merge_commit_sha").asText(""));
     }
 
     private JsonNode call(HttpMethod method, String uri, Object body, Object... vars) {

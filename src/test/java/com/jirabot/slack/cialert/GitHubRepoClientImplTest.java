@@ -38,12 +38,13 @@ class GitHubRepoClientImplTest {
     @Test
     void listPulls_parsesMergedFlag() throws Exception {
         server.enqueue(json(200, """
-                [{"number":5,"title":"t","body":"GO-1","html_url":"u5","head":{"ref":"b"},"merged_at":"2026-11-06T00:00:00Z"},
+                [{"number":5,"title":"t","body":"GO-1","html_url":"u5","head":{"ref":"b"},"merged_at":"2026-11-06T00:00:00Z","merge_commit_sha":"m5"},
                  {"number":6,"title":"t","body":null,"html_url":"u6","head":{"ref":"c"},"merged_at":null}]"""));
 
         List<GitHubRepoClient.PullInfo> pulls = client.listPulls("HE-KMS", "closed");
 
         assertThat(pulls).extracting(GitHubRepoClient.PullInfo::merged).containsExactly(true, false);
+        assertThat(pulls).extracting(GitHubRepoClient.PullInfo::mergeCommitSha).containsExactly("m5", "");
         assertThat(pulls.get(1).text()).isEqualTo("t\n");
         assertThat(server.takeRequest().getPath()).isEqualTo("/repos/CryptoLabInc/HE-KMS/pulls?state=closed&sort=updated&direction=desc&per_page=100");
     }
@@ -74,26 +75,16 @@ class GitHubRepoClientImplTest {
     }
 
     @Test
-    void commitGitlink_buildsTreeCommitAndRef() throws Exception {
-        server.enqueue(json(200, "{\"object\":{\"sha\":\"base\"}}"));
-        server.enqueue(json(200, "{\"tree\":{\"sha\":\"basetree\"}}"));
-        server.enqueue(json(201, "{\"sha\":\"newtree\"}"));
-        server.enqueue(json(201, "{\"sha\":\"newcommit\"}"));
-        server.enqueue(json(201, "{\"ref\":\"refs/heads/bot/pin\"}"));
+    void contains_isTrueOnlyWhenTheFixIsInThePinsHistory() throws Exception {
+        server.enqueue(json(200, "{\"status\":\"ahead\",\"ahead_by\":5,\"behind_by\":0}"));
+        server.enqueue(json(200, "{\"status\":\"identical\"}"));
+        server.enqueue(json(200, "{\"status\":\"behind\",\"behind_by\":32}"));
+        server.enqueue(json(200, "{\"status\":\"diverged\"}"));
 
-        String commit = client.commitGitlink("envector", "main", "external/HE-KMS", "f".repeat(40), "msg", "bot/pin");
-
-        assertThat(commit).isEqualTo("newcommit");
-        server.takeRequest();
-        server.takeRequest();
-        JsonNode tree = om.readTree(server.takeRequest().getBody().readUtf8());
-        assertThat(tree.path("base_tree").asText()).isEqualTo("basetree");
-        assertThat(tree.path("tree").get(0).path("mode").asText()).isEqualTo("160000");
-        assertThat(tree.path("tree").get(0).path("type").asText()).isEqualTo("commit");
-        JsonNode c = om.readTree(server.takeRequest().getBody().readUtf8());
-        assertThat(c.path("parents").get(0).asText()).isEqualTo("base");
-        JsonNode ref = om.readTree(server.takeRequest().getBody().readUtf8());
-        assertThat(ref.path("ref").asText()).isEqualTo("refs/heads/bot/pin");
-        assertThat(ref.path("sha").asText()).isEqualTo("newcommit");
+        assertThat(client.contains("HE-KMS", "fix", "pin")).isTrue();
+        assertThat(client.contains("HE-KMS", "fix", "fix")).isTrue();
+        assertThat(client.contains("HE-KMS", "fix", "old")).isFalse();
+        assertThat(client.contains("HE-KMS", "fix", "side")).isFalse();
+        assertThat(server.takeRequest().getPath()).isEqualTo("/repos/CryptoLabInc/HE-KMS/compare/fix...pin?per_page=1");
     }
 }

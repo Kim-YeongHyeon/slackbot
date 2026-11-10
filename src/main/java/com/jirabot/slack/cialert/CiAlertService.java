@@ -374,7 +374,8 @@ public class CiAlertService {
         } else {
             reply(target, text);
         }
-        row.recordPrs(String.join(",", results.stream().map(SbomFixService.RepoResult::url).filter(u -> !u.isBlank()).toList()));
+        // PR 링크만 남긴다 (SUBMODULE_MISSING 의 url 은 워크플로 페이지)
+        row.recordPrs(String.join(",", results.stream().map(SbomFixService.RepoResult::url).filter(u -> u.contains("/pull/")).toList()));
         repository.save(row);
     }
 

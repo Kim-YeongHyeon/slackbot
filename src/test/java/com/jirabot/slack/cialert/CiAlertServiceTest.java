@@ -495,7 +495,9 @@ class CiAlertServiceTest {
         when(slack.postThreadReplyTs(anyString(), anyString(), anyString()))
                 .thenReturn(Optional.of("table.ts"), Optional.of("placeholder.ts"));
         when(sbomFix.fix(anyLong(), any(), any(), any(), eq(false))).thenReturn(List.of(
-                new SbomFixService.RepoResult("HE-KMS", SbomFixService.Status.CREATED, "https://gh/pr/9", "#9 fix(deps): bump")));
+                new SbomFixService.RepoResult("HE-KMS", SbomFixService.Status.CREATED, "https://gh/HE-KMS/pull/9", "#9 fix(deps): bump"),
+                new SbomFixService.RepoResult("envector", SbomFixService.Status.SUBMODULE_MISSING,
+                        "https://gh/envector/actions/workflows/update_submodule.yaml", "업데이트 PR 이 없어요")));
         String ts = nowTs();
 
         service.submit(new SlackEventInner("message", null, SBOM_TEXT, CHANNEL, ts, null, ALERT_BOT, null));
@@ -506,8 +508,8 @@ class CiAlertServiceTest {
         assertThat(replies.getAllValues().get(1)).startsWith("🔧 수정 PR 만드는 중");
         ArgumentCaptor<String> updated = ArgumentCaptor.forClass(String.class);
         verify(slack).updateMessage(eq(CHANNEL), eq("placeholder.ts"), updated.capture(), org.mockito.ArgumentMatchers.isNull());
-        assertThat(updated.getValue()).contains("<https://gh/pr/9|#9 fix(deps): bump>");
-        assertThat(store.get(1L).getPrUrls()).isEqualTo("https://gh/pr/9");
+        assertThat(updated.getValue()).contains("<https://gh/HE-KMS/pull/9|#9 fix(deps): bump>", "update_submodule 실행");
+        assertThat(store.get(1L).getPrUrls()).as("워크플로 링크는 PR 이 아니라 남기지 않는다").isEqualTo("https://gh/HE-KMS/pull/9");
     }
 
     @Test

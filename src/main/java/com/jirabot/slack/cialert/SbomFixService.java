@@ -6,15 +6,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jirabot.slack.cialert.GitHubRepoClient.PullInfo;
 import com.jirabot.slack.cialert.GrypeReport.Finding;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -28,7 +28,9 @@ public class SbomFixService {
 
     private static final Logger log = LoggerFactory.getLogger(SbomFixService.class);
     static final String MARKER = "sol-sbom-fix";
-    private static final Pattern MARKER_IDS = Pattern.compile("<!-- " + MARKER + " vulns=([^ ]+) -->");
+    // 팀의 서브모듈 업데이트 워크플로와 그 PR 브랜치 (envector .github/workflows/update_submodule.yaml)
+    static final String TEAM_SUBMODULE_WORKFLOW = "update_submodule.yaml";
+    static final String TEAM_SUBMODULE_BRANCH = "update_%s_commit_%s";
 
     private final CiAlertProperties props;
     private final CiFixProperties fixProps;
@@ -51,9 +53,15 @@ public class SbomFixService {
         this.objectMapper = objectMapper;
     }
 
-    public enum Status { CREATED, EXISTS, SUBMODULE_PR, DRY_RUN, FAILED, SKIPPED }
+    // SUBMODULE_PR: 수정이 들어간 서브모듈 업데이트 PR 을 찾음, SUBMODULE_MISSING: 그런 PR 이 없음 (봇은 만들지 않는다)
+    public enum Status { CREATED, EXISTS, SUBMODULE_PR, SUBMODULE_MISSING, DRY_RUN, FAILED, SKIPPED }
 
-    public record RepoResult(String repo, Status status, String url, String detail) {}
+    // note: 링크 뒤에 붙는 설명 (SUBMODULE_PR 이면 그 PR 에 들어간 소유 레포 수정)
+    public record RepoResult(String repo, Status status, String url, String detail, String note) {
+        public RepoResult(String repo, Status status, String url, String detail) {
+            this(repo, status, url, detail, "");
+        }
+    }
 
     public boolean enabled() {
         return fixProps.effectivelyEnabled();
@@ -95,11 +103,12 @@ public class SbomFixService {
         }
         List<Finding> targets = findings.stream().filter(f -> !covered.containsKey(f.vulnId())).toList();
 
-        // 2. 다른 레포(서브모듈) 소유인데 그 레포의 봇 수정 PR 이 이미 머지됐다 → 알림 레포의 서브모듈만 올린다
+        // 2. 다른 레포(서브모듈) 소유인데 그 레포에서 이미 고쳐졌다 → 알림 레포의 서브모듈만 올라가면 된다.
+        //    서브모듈은 팀의 업데이트 PR 로 올리므로, 그 PR 을 찾아 알리기만 한다 (v0.0.97).
         if (!repo.equalsIgnoreCase(alert.repo())) {
-            Optional<RepoResult> bump = submoduleBump(alert.repo(), repo, ids(targets), dryRun);
-            if (bump.isPresent()) {
-                return bump.get();
+            Optional<RepoResult> sub = submoduleStatus(alert.repo(), repo, ids(targets));
+            if (sub.isPresent()) {
+                return sub.get();
             }
         }
 
@@ -147,37 +156,53 @@ public class SbomFixService {
         }
     }
 
-    private Optional<RepoResult> submoduleBump(String alertRepo, String owner, Set<String> ids, boolean dryRun) {
+    // STUDY: 서브모듈 핀은 팀 워크플로(envector update_submodule.yaml)가 올린다 — 소유 레포 main 에 push 가 있을 때마다
+    //        고정 브랜치(update_<component>_commit_<base>)의 PR 을 만들거나 갱신하고, proto 코드도 다시 생성한다.
+    //        봇이 gitlink 만 바꾼 PR 을 따로 만들면 그 PR 과 겹친다(envector #2796 ↔ #2744). 그래서 봇은
+    //        수정 커밋이 들어간 핀을 가진 열린 PR(팀 PR 먼저, 사람 PR 도)을 찾아 링크하고, 없으면 알리기만 한다.
+    private Optional<RepoResult> submoduleStatus(String alertRepo, String owner, Set<String> ids) {
         String path = "external/" + owner;
-        String alertBase = repos.defaultBranch(alertRepo);
-        Optional<String> pin = repos.submodulePin(alertRepo, path, alertBase);
-        if (pin.isEmpty()) {
-            return Optional.empty();
+        String base = repos.defaultBranch(alertRepo);
+        Optional<String> basePin = repos.submodulePin(alertRepo, path, base);
+        if (basePin.isEmpty()) {
+            return Optional.empty();   // 서브모듈이 아니면 소유 레포를 직접 고친다
         }
-        Optional<PullInfo> merged = repos.listPulls(owner, "closed").stream()
-                .filter(PullInfo::merged).filter(p -> markerIds(p.body()).stream().anyMatch(ids::contains)).findFirst();
-        if (merged.isEmpty()) {
-            return Optional.empty();
+        // 소유 레포에서 이 취약점을 고친 머지된 PR (봇 표식이든 사람이 쓴 ID 든)
+        Optional<PullInfo> fix = repos.listPulls(owner, "closed").stream()
+                .filter(PullInfo::merged).filter(p -> !p.mergeCommitSha().isBlank())
+                .filter(p -> ids.stream().anyMatch(p.text()::contains)).findFirst();
+        if (fix.isEmpty()) {
+            return Optional.empty();   // 아직 소유 레포에서 안 고쳐졌다 → 에이전트가 소유 레포를 고친다
         }
-        String head = repos.branchHead(owner, repos.defaultBranch(owner)).orElse("");
-        if (head.isEmpty() || head.equals(pin.get())) {
-            return Optional.empty();
+        String fixSha = fix.get().mergeCommitSha();
+        String fixRef = owner + " #" + fix.get().number();
+        if (repos.contains(owner, fixSha, basePin.get())) {
+            return Optional.of(new RepoResult(alertRepo, Status.SKIPPED, "",
+                    base + " 의 " + path + " 에 이미 " + fixRef + " 수정이 들어 있어요 (이 알림은 그 전 커밋의 빌드)"));
         }
-        String title = "fix(deps): pin " + owner + " at " + head.substring(0, 7) + " for " + String.join(", ", ids);
-        if (dryRun) {
-            return Optional.of(new RepoResult(alertRepo, Status.DRY_RUN, "",
-                    path + " " + pin.get().substring(0, 7) + " → " + head.substring(0, 7) + " (" + owner + " " + merged.get().htmlUrl() + " 반영)"));
+        String teamBranch = TEAM_SUBMODULE_BRANCH.formatted(owner.toLowerCase(Locale.ROOT).replace('-', '_'), base);
+        List<PullInfo> open = new ArrayList<>(repos.listPulls(alertRepo, "open"));
+        open.sort(Comparator.comparing(p -> !teamBranch.equals(p.headRef())));   // 팀 PR 먼저
+        PullInfo stale = null;
+        String stalePin = "";
+        for (PullInfo p : open) {
+            Optional<String> pin = repos.submodulePin(alertRepo, path, p.headRef());
+            if (pin.isEmpty() || pin.get().equals(basePin.get())) {
+                continue;   // 이 PR 은 서브모듈을 건드리지 않는다
+            }
+            if (repos.contains(owner, fixSha, pin.get())) {
+                return Optional.of(new RepoResult(alertRepo, Status.SUBMODULE_PR, p.htmlUrl(),
+                        "#" + p.number() + " " + p.title(), fixRef));
+            }
+            if (stale == null) {
+                stale = p;
+                stalePin = pin.get();
+            }
         }
-        String branch = freeBranch(alertRepo, "bot/sbom-pin-" + slug(owner) + "-" + head.substring(0, 7));
-        repos.commitGitlink(alertRepo, alertBase, path, head, title, branch);
-        String body = "## 문제\n" + String.join(", ", ids) + " 는 " + owner + " 에서 고쳐졌지만(" + merged.get().htmlUrl()
-                + "), 이 레포의 `" + path + "` 서브모듈이 아직 이전 커밋(`" + pin.get().substring(0, 7) + "`)을 가리켜 이미지에 남아 있습니다.\n\n"
-                + "## 채택한 해결 방안\n`" + path + "` 를 " + owner + " main(`" + head.substring(0, 7) + "`)으로 올립니다.\n\n"
-                + "## 검증 방법\n이 PR 의 CI 와 머지 후 SBOM 검사가 확인합니다.\n\n"
-                + "---\n🤖 #sol-dev-alarm 알림 봇이 자동으로 만든 PR 입니다. 자동 머지는 하지 않습니다.\n"
-                + "<!-- " + MARKER + " vulns=" + String.join(",", ids) + " -->\n";
-        PullInfo pr = repos.createPull(alertRepo, branch, alertBase, title, body);
-        return Optional.of(new RepoResult(alertRepo, Status.SUBMODULE_PR, pr.htmlUrl(), "#" + pr.number() + " " + title));
+        String why = fixRef + " 수정은 머지됐지만 그 커밋을 담은 " + path + " 업데이트 PR 이 없어요"
+                + (stale == null ? "" : " (#" + stale.number() + " 은 아직 수정 전 커밋 " + stalePin.substring(0, 7) + ")");
+        return Optional.of(new RepoResult(alertRepo, Status.SUBMODULE_MISSING,
+                "https://github.com/" + props.org() + "/" + alertRepo + "/actions/workflows/" + TEAM_SUBMODULE_WORKFLOW, why));
     }
 
     String task(String repo, List<Finding> targets, List<String> feedback, FixWorkspace.Workspace ws) {
@@ -260,7 +285,10 @@ public class SbomFixService {
             sb.append("• *").append(escape(r.repo())).append("* — ");
             switch (r.status()) {
                 case CREATED -> sb.append("<").append(r.url()).append("|").append(escape(r.detail())).append(">");
-                case SUBMODULE_PR -> sb.append("서브모듈 갱신 <").append(r.url()).append("|").append(escape(r.detail())).append(">");
+                case SUBMODULE_PR -> sb.append("🔁 서브모듈 업데이트 PR <").append(r.url()).append("|").append(escape(r.detail()))
+                        .append("> 에 ").append(escape(r.note())).append(" 수정이 들어 있어요 — 머지되면 해결돼요");
+                case SUBMODULE_MISSING -> sb.append("⏳ ").append(escape(r.detail())).append(" — <").append(r.url())
+                        .append("|update_submodule 실행> 이 필요해요");
                 case EXISTS -> sb.append("🔁 이미 진행 중인 PR <").append(r.url()).append("|").append(escape(r.detail())).append(">");
                 case DRY_RUN -> sb.append("🧪 dry-run (push 안 함)\n").append(escape(r.detail()));
                 case SKIPPED -> sb.append("건너뜀: ").append(escape(r.detail()));
@@ -275,11 +303,6 @@ public class SbomFixService {
         Set<String> out = new LinkedHashSet<>();
         fs.forEach(f -> out.add(f.vulnId()));
         return out;
-    }
-
-    static List<String> markerIds(String body) {
-        Matcher m = MARKER_IDS.matcher(body == null ? "" : body);
-        return m.find() ? List.of(m.group(1).split(",")) : List.of();
     }
 
     private String freeBranch(String repo, String base) {
