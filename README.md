@@ -453,6 +453,8 @@ unattended-upgrades 가 openjdk 를 in-place 교체하면 실행 중인 JVM 이 
 - `scripts/jdk-watchdog.sh`: 실행 중 java 프로세스의 `/proc/PID/exe` 가 "(deleted)" 면(=JDK 교체 시그니처)
   최신 jar 로 자동 재시작(기존 배포 패턴 동일: setsid + .env source + health 대기). 정상 시 no-op.
 - crontab `*/10 * * * *` 등록, 로그 `/tmp/jdk-watchdog.log`.
+- 2026-11-10 수정: 재시작한 봇이 cron PATH 를 물려받아 `claude`(`~/.local/bin`)를 못 찾던 문제(lessons L25) —
+  스크립트가 PATH 에 `~/.local/bin` 을 넣고, 가장 최근 jar 가 아니라 실행 중이던 jar 를 다시 띄운다.
 - 대안 B(apt-mark hold)는 보안 패치가 밀려 기각 — A(자동 재시작)로 보안 패치 유지 + 무인 복구.
 
 ### 자격증명 포함 URL에서 대시보드 fetch 실패 수정 (v0.0.68)
