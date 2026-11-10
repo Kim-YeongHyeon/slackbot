@@ -90,6 +90,16 @@ class DiffGuardTest {
     }
 
     @Test
+    void goSumOnlyChange_isRejected_becauseNoVersionMoved() throws Exception {
+        Files.writeString(ws.agentDir().resolve("services/go.sum"), "golang.org/x/net v0.60.0 h1:a\nextra h1:c\n");
+
+        assertThat(guard.check(ws)).satisfies(v -> {
+            assertThat(v.ok()).isFalse();
+            assertThat(v.reason()).contains("go.sum 만 바뀌었어요");
+        });
+    }
+
+    @Test
     void tooLargeChange_includingNewFiles_isRejected() throws Exception {
         Files.writeString(ws.agentDir().resolve("build.Dockerfile"), "RUN x\n".repeat(11));   // 새 파일 11줄 > 상한 10
 

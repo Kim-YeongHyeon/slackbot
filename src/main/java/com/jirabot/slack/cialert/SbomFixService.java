@@ -117,6 +117,12 @@ public class SbomFixService {
         agent.ensureImage();
         FixWorkspace.Workspace ws = workspace.prepare(repo, jobId);
         try {
+            // 알림 뒤에 수정이 이미 머지됐으면 에이전트를 돌리지 않는다 (v0.0.98)
+            FixVerifier.Check before = verifier.alreadyFixed(ws, targets);
+            if (before.ok()) {
+                return new RepoResult(repo, Status.SKIPPED, "",
+                        "기본 브랜치에 이미 반영돼 있어요 (이 알림은 그 전 커밋의 빌드) — " + String.join(" · ", before.lines()));
+            }
             List<String> feedback = List.of();
             FixAgentRunner.AgentResult result = null;
             DiffGuard.Verdict verdict = null;
@@ -126,10 +132,14 @@ public class SbomFixService {
                 if (!result.ok()) {
                     return new RepoResult(repo, Status.FAILED, "", result.error());
                 }
+                // 에이전트가 바꾼 게 없다고 하면 파일이 바뀌어 있어도(go.sum 부산물 등) PR 을 만들지 않는다 (v0.0.98)
+                if (!result.changed()) {
+                    return new RepoResult(repo, Status.FAILED, "", "에이전트가 고치지 못했어요"
+                            + note(result.notes().isBlank() ? result.summary() : result.notes()));
+                }
                 verdict = guard.check(ws);
                 if (!verdict.ok()) {
-                    String why = result.changed() ? verdict.reason() : "에이전트가 고치지 못했어요" + note(result.notes());
-                    return new RepoResult(repo, Status.FAILED, "", why);
+                    return new RepoResult(repo, Status.FAILED, "", verdict.reason());
                 }
                 check = verifier.verify(ws, targets);
                 if (check.ok()) {

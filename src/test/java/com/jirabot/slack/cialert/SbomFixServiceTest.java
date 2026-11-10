@@ -52,6 +52,7 @@ class SbomFixServiceTest {
         when(repos.branchHead(anyString(), anyString())).thenReturn(Optional.empty());
         when(repos.listPulls(anyString(), anyString())).thenReturn(List.of());
         when(repos.submodulePin(anyString(), anyString(), anyString())).thenReturn(Optional.empty());
+        when(verifier.alreadyFixed(any(), anyList())).thenReturn(new FixVerifier.Check(false, List.of(), List.of()));
     }
 
     private static Finding xnet(String image) {
@@ -161,6 +162,35 @@ class SbomFixServiceTest {
         assertThat(r.status()).isEqualTo(SbomFixService.Status.DRY_RUN);
         assertThat(r.detail()).contains("services/go.mod", "x/net 을 올렸어요.", "diff");
         verify(workspace, never()).commitAndPush(any(), anyList(), anyString(), anyString());
+        verify(repos, never()).createPull(anyString(), anyString(), anyString(), anyString(), anyString());
+    }
+
+    // ── 이미 반영됨 / 에이전트 "변경 없음" (v0.0.98) ──
+
+    @Test
+    void alreadyFixedOnTheBaseBranch_skipsWithoutRunningTheAgent() {
+        when(verifier.alreadyFixed(eq(ws), anyList())).thenReturn(
+                new FixVerifier.Check(true, List.of(), List.of("grype `services`: 대상 패키지 High/Critical 0건")));
+
+        SbomFixService.RepoResult r = service.fix(1, ALERT, report(xnet("envector-backend")), SbomFixServiceTest::owner, false).get(0);
+
+        assertThat(r.status()).isEqualTo(SbomFixService.Status.SKIPPED);
+        assertThat(r.detail()).contains("이미 반영돼 있어요", "High/Critical 0건");
+        verify(agent, never()).run(any(), anyString(), anyString());
+        verify(workspace).cleanup(ws);
+    }
+
+    @Test
+    void agentReportsNoChange_neverOpensAPr_evenIfFilesChanged() {
+        when(agent.run(any(), anyString(), anyString())).thenReturn(new FixAgentRunner.AgentResult(true, false,
+                "", "이미 v0.62.0 이에요", "", "변경 사항 없음", ""));
+        when(guard.check(ws)).thenReturn(new DiffGuard.Verdict(true, List.of("services/go.sum"), 0, "", ""));
+
+        SbomFixService.RepoResult r = service.fix(1, ALERT, report(xnet("envector-backend")), SbomFixServiceTest::owner, false).get(0);
+
+        assertThat(r.status()).isEqualTo(SbomFixService.Status.FAILED);
+        assertThat(r.detail()).isEqualTo("에이전트가 고치지 못했어요 (변경 사항 없음)");
+        verify(guard, never()).check(any());
         verify(repos, never()).createPull(anyString(), anyString(), anyString(), anyString(), anyString());
     }
 

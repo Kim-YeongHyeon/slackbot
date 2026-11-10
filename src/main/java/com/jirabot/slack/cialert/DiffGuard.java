@@ -61,6 +61,10 @@ public class DiffGuard {
         if (files.isEmpty()) {
             return Verdict.reject("바뀐 파일이 없어요", files);
         }
+        // go.sum 만 바뀐 건 의존성 버전이 그대로라는 뜻 — 취약점 수정이 아니다 (v0.0.98, go mod download 부산물 등).
+        if (files.stream().allMatch(f -> f.endsWith("go.sum"))) {
+            return Verdict.reject("go.sum 만 바뀌었어요 (의존성 버전은 그대로)", files);
+        }
         String summary = git(ws, "diff", "--summary", "--ignore-submodules=all");
         if (summary.contains("mode change")) {
             return Verdict.reject("실행 권한 변경은 허용하지 않아요", files);

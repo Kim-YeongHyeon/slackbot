@@ -73,6 +73,19 @@ public class FixVerifier {
         return new Check(remaining.isEmpty(), remaining, lines);
     }
 
+    // STUDY: 에이전트를 돌리기 전에 base 브랜치를 그대로 검사한다 (v0.0.98). 알림 뒤에 이미 머지된 수정이 있으면
+    //        에이전트(수 분)를 돌릴 필요가 없다. 단 "검사할 게 없어서 통과"를 "고쳐짐"으로 보면 안 되므로,
+    //        모든 대상을 실제로 검사할 수 있을 때만(go.mod 가 그 패키지를 require, Go 고정값이 있음) verify 결과를 쓴다.
+    public Check alreadyFixed(FixWorkspace.Workspace ws, List<Finding> targets) {
+        Path root = ws.agentDir();
+        boolean checkable = !targets.isEmpty()
+                && targets.stream().allMatch(f -> "go-module".equals(f.type()) || "stdlib".equals(f.type()))
+                && targets.stream().filter(f -> "go-module".equals(f.type()))
+                        .allMatch(f -> !goModDirsRequiring(root, Set.of(f.pkg())).isEmpty())
+                && (targets.stream().noneMatch(f -> "stdlib".equals(f.type())) || hasGoPins(root));
+        return checkable ? verify(ws, targets) : new Check(false, List.of(), List.of());
+    }
+
     // 대상 패키지 이름이 들어 있는 go.mod 의 디렉터리 (서브모듈·vendor 제외).
     static List<Path> goModDirsRequiring(Path root, Set<String> pkgs) {
         try (Stream<Path> s = Files.walk(root)) {
@@ -135,12 +148,9 @@ public class FixVerifier {
     List<String> checkGoPins(Path root, String target) {
         List<String> problems = new ArrayList<>();
         Map<String, Map<String, String>> official = new HashMap<>();
-        try (Stream<Path> s = Files.walk(root)) {
-            for (Path f : s.filter(p -> p.getFileName().toString().matches("Dockerfile.*|.*\\.Dockerfile")).toList()) {
+        try {
+            for (Path f : dockerfiles(root)) {
                 String rel = root.relativize(f).toString();
-                if (rel.matches("(?:.*/)?(?:external|vendor|node_modules)/.*")) {
-                    continue;
-                }
                 String text = Files.readString(f);
                 Matcher pin = GO_PIN.matcher(text);
                 while (pin.find()) {
@@ -169,6 +179,30 @@ public class FixVerifier {
             throw new UncheckedIOException(e);
         }
         return problems;
+    }
+
+    static boolean hasGoPins(Path root) {
+        try {
+            for (Path f : dockerfiles(root)) {
+                if (GO_PIN.matcher(Files.readString(f)).find()) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    // 레포의 Dockerfile (서브모듈·vendor 제외)
+    private static List<Path> dockerfiles(Path root) {
+        try (Stream<Path> s = Files.walk(root)) {
+            return s.filter(p -> p.getFileName().toString().matches("Dockerfile.*|.*\\.Dockerfile"))
+                    .filter(p -> !root.relativize(p).toString().matches("(?:.*/)?(?:external|vendor|node_modules)/.*"))
+                    .toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     // go.dev 의 공식 linux tar.gz sha256 (amd64, arm64)
