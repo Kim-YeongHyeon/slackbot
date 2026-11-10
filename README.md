@@ -21,6 +21,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 브랜치 만들기 | "진행 중" 전환 시 **repo 선택 버튼**을 띄워 클릭하면 봇이 GitHub API로 브랜치 직접 생성(브랜치명은 Claude가 한글 요약→영어 슬러그, `feature/`·`bugfix/`). 브랜치명에 이슈키가 있어 Jira 개발 패널에 자동 연결. `github.token` 미설정 시 Jira 개발 패널 링크 안내로 폴백 |
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
 | CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94, nightly·벤치마크 글은 무시 — v0.0.95, 분석·수정 모델 Sonnet 5 — v0.0.96, 서브모듈은 팀 PR 링크 — v0.0.97, 이미 반영된 수정은 건너뜀 — v0.0.98 |
+| 문서 질문 | `@지라 질문 <소스> <질문>` → 미리 조각내 임베딩해 둔 문서에서 찾아 Claude 가 출처와 함께 답변 — v0.0.99 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -132,6 +133,55 @@ origin을 확인하여 srcdoc의 고유 origin에서도 작동한다.
   제거하려면 ngrok 요금제·도메인 설정을 변경해야 한다.
 - 제한: 저장된 정적 자산은 포함하지만, 실행 중 JavaScript가 새로 요청하는
   동적 자산이나 외부 CDN 리소스까지 오프라인으로 변환하지는 않는다.
+
+### 문서 질문 — `@지라 질문 <소스> <질문>` (v0.0.99)
+
+`@지라 질문 envector 롤백은 어떻게 해?` 처럼 물으면, 미리 조각내 둔 문서에서 관련 조각을 찾아 Claude 가 답하고 출처 링크를 단다.
+
+```
+Slack  @지라 질문 <소스> <질문>
+  └ Spring (com.jirabot.slack.rag)
+      1. POST http://127.0.0.1:8090/search      rag 사이드카에 검색 요청
+      2. claude -p (prompts/doc-qa-answer.md)    찾은 조각만 근거로 답변
+      3. 스레드 답글: 답변 + 출처(문서 › 제목, GitHub 링크 @커밋)
+  └ rag 사이드카 (rag/, Python, docker-compose 의 rag 서비스)
+      임베딩 모델(BAAI/bge-m3)과 조각 원문을 메모리에 올려 두고 검색
+```
+
+- **사이드카를 따로 두는 이유**: 임베딩 모델(메모리 약 2.6GB)을 질문마다 다시 올릴 수 없고, 다음 단계에서 붙일 envector SDK 가 Python 전용이다.
+- **데이터는 repo 밖에 둔다**: `RAG_DATA_DIR`(기본 `/home/ubuntu/jirabot-rag`)에 소스 목록(`sources.yml`), 조각(`corpus/<소스>/chunks.jsonl`), 벡터, 임베딩 캐시, 평가 질문이 있다. repo 에는 코드와 `rag/sources.example.yml` 만 있다.
+- **조각 번호**: 한 번 준 번호는 바뀌지 않는다. 다시 만들 때 내용이 같으면 번호를 유지하고, 새 조각은 다음 번호를 받고, 지워진 번호는 다시 쓰지 않는다.
+- **임베딩 캐시**: 내용이 같은 조각은 다시 임베딩하지 않는다. 이 서버(2코어)에서 bge-m3 는 초당 0.5조각이라 전체를 다시 하면 조각 1,400개에 45분이 걸린다.
+- **비밀값 가림**: 토큰·비밀번호처럼 보이는 값은 조각을 만들 때 `[가림]`으로 바꾼다. 자리 표시(`<token>`, `${VAR}`)와 경로·변수 이름은 그대로 둔다.
+- **답변 규칙**: 조각에 없는 내용은 답하지 않는다. 답변 본문은 `& < >` 를 이스케이프해서 문서나 모델 출력에 섞인 `<!channel>` 같은 문자열이 멘션이 되지 않게 한다.
+- **실패 처리**: 없는 소스면 쓸 수 있는 소스를 안내하고, 사이드카가 꺼져 있으면 연결 실패를 알린다. Claude 가 답을 못 만들면 찾은 문서 링크만 단다. 어느 경우에도 봇의 다른 기능은 그대로 돈다.
+
+운영:
+
+```bash
+# 1) 소스 목록 준비 (한 번)
+mkdir -p /home/ubuntu/jirabot-rag && chmod 700 /home/ubuntu/jirabot-rag
+cp rag/sources.example.yml /home/ubuntu/jirabot-rag/sources.yml   # repo·경로를 고친다
+
+# 2) 문서 받아 조각·임베딩 만들기 (--dry-run 은 조각 수만 센다)
+scripts/rag-build.sh <소스> --dry-run
+scripts/rag-build.sh <소스>
+
+# 3) 검색 서버 띄우기 / 상태 보기
+sudo docker-compose --profile rag up -d --build rag
+curl -s http://127.0.0.1:8090/health
+
+# 검색 품질 재기 (질문 파일: $RAG_DATA_DIR/eval/<소스>.json)
+sudo docker-compose --profile rag run --rm --no-deps rag python -m app.evalcli <소스> --show-misses
+
+# 사이드카 단위 테스트
+sudo docker run --rm -v "$PWD/rag":/rag -w /rag python:3.12-slim \
+  sh -c 'pip install -q -r requirements-dev.txt && python -m pytest -q -p no:cacheprovider'
+```
+
+설정(`application.yml` 의 `rag.*`): `RAG_ENABLED`(기본 true), `RAG_BASE_URL`, `RAG_TOP_K`(6), `RAG_SEARCH_TIMEOUT_SECONDS`(20), `RAG_ANSWER_TIMEOUT_SECONDS`(90), `RAG_MODEL`(비면 `claude.model`).
+
+다음 단계: 검색 백엔드를 envector 로 바꾸고(v0.0.100), hybrid 검색을 붙인다(v0.0.101). 지금은 `backend: local`(이 서버 메모리의 벡터)로 찾는다.
 
 ### 이미 반영된 수정은 에이전트 없이 건너뜀 (v0.0.98)
 

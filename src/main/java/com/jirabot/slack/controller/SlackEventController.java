@@ -72,6 +72,7 @@ public class SlackEventController {
               `@지라 작업 김영현` — 특정 팀원의 작업 조회
               `@지라 등록 <Jira 사용자명>` — 내 Slack ↔ Jira 계정 연결
               `@지라 검색 <키워드>` — 이슈 제목/설명으로 검색 (예: `@지라 검색 preset`)
+              `@지라 질문 <소스> <질문>` — 문서에서 찾아 답변 (예: `@지라 질문 envector 롤백은 어떻게 해?`)
               `@지라 ES2-123` — 이슈 키로 상세 카드 조회 (상태 전환 버튼 포함)
               `@지라 할당 ES2-123 홍길동` — 이슈 담당자 지정 (@멘션도 가능)
               `@지라 ES2-123 담당자를 홍길동으로` — 자연어 담당자 변경 · `ES2-123 담당자 누구야` — 담당자 조회(카드)
@@ -147,6 +148,7 @@ public class SlackEventController {
     private final BugNotionService bugNotionService;
     private final PrImportService prImportService;
     private final CiAlertService ciAlertService;
+    private final com.jirabot.slack.rag.DocQaService docQaService;
     private final Set<String> allowedChannels;
 
     public SlackEventController(IssueCreateService issueCreateService,
@@ -169,6 +171,7 @@ public class SlackEventController {
                                 BugNotionService bugNotionService,
                                 PrImportService prImportService,
                                 CiAlertService ciAlertService,
+                                com.jirabot.slack.rag.DocQaService docQaService,
                                 @Value("${slack.allowed-channels:}") String allowedChannelsConfig) {
         this.issueCreateService = issueCreateService;
         this.issueSearchService = issueSearchService;
@@ -190,6 +193,7 @@ public class SlackEventController {
         this.bugNotionService = bugNotionService;
         this.prImportService = prImportService;
         this.ciAlertService = ciAlertService;
+        this.docQaService = docQaService;
         // STUDY: 허용 채널이 비어있으면 모든 채널 허용. 쉼표 구분으로 파싱.
         if (allowedChannelsConfig == null || allowedChannelsConfig.isBlank()) {
             this.allowedChannels = Set.of();
@@ -332,6 +336,30 @@ public class SlackEventController {
         }
         if (lower.startsWith("할당알림 ") || lower.startsWith("assign-dm ")) {
             handleAssignDm(event, cleaned.substring(cleaned.indexOf(' ') + 1).strip().toLowerCase());
+            return;
+        }
+        // STUDY: 문서 질문 (v0.0.99) — `질문 <소스> <질문>`. 소스 이름이 맞는지는 rag 사이드카가 판단하고,
+        //        없는 소스면 쓸 수 있는 소스 목록을 안내한다 (봇은 소스 목록을 따로 들고 있지 않는다).
+        if (lower.equals("질문") || lower.equals("ask")) {
+            replyInThread(event, com.jirabot.slack.rag.DocQaService.USAGE);
+            return;
+        }
+        if (lower.startsWith("질문 ") || lower.startsWith("ask ")) {
+            String rest = cleaned.substring(cleaned.indexOf(' ') + 1).strip();
+            int sp = rest.indexOf(' ');
+            if (sp < 0) {
+                replyInThread(event, com.jirabot.slack.rag.DocQaService.USAGE);
+                return;
+            }
+            String source = rest.substring(0, sp);
+            String question = rest.substring(sp + 1).strip();
+            docQaService.answer(source, question)
+                    .thenAccept(result -> replyInThread(event, result))
+                    .exceptionally(ex -> {
+                        log.warn("Doc question failed source='{}': {}", source, ex.toString());
+                        replyInThread(event, ":x: 문서 질문 처리 중 오류가 발생했어요.");
+                        return null;
+                    });
             return;
         }
         if (lower.equals("검색") || lower.equals("search")) {
@@ -1059,6 +1087,16 @@ public class SlackEventController {
                         replyThread(event, ":thinking_face: 이해하지 못했어요. `@지라 help`로 사용 가능한 명령을 확인해주세요.");
             }
         });
+    }
+
+    // STUDY: 스레드 안에서 부르면 그 스레드에, 채널에서 부르면 질문 글 아래 새 스레드에 답한다.
+    //        (replyThread 는 항상 event.ts 에 달아서, 스레드 안의 댓글에서 부르면 엉뚱한 곳에 달릴 수 있다.)
+    private void replyInThread(SlackEventInner event, String message) {
+        if (event.channel() == null) return;
+        String threadTs = event.thread_ts() != null ? event.thread_ts() : event.ts();
+        if (threadTs != null) {
+            slackNotifier.postThreadReply(event.channel(), threadTs, message);
+        }
     }
 
     private void replyThread(SlackEventInner event, String message) {

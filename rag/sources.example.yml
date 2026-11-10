@@ -1,0 +1,16 @@
+# ${RAG_DATA_DIR}/sources.yml 로 복사해서 쓴다. 실제 목록은 repo 에 넣지 않는다.
+model: BAAI/bge-m3
+
+sources:
+  # `@지라 질문 example <질문>` 의 example 이 이 이름이다.
+  example:
+    repo: your-org/your-repo        # GitHub owner/repo
+    ref: main
+    include:                        # ** 는 하위 폴더 전체
+      - "docs/runbooks/**"
+      - "docs/troubleshooting/**"
+    exclude: []
+    extensions: [".md"]
+    backend: local                  # local | envector
+    mode: vector                    # vector | hybrid
+    index: ""                       # envector 인덱스 이름 (backend: envector 일 때)

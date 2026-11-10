@@ -161,6 +161,19 @@ daily-prompt:
 # #sol-dev-alarm 알림 자동 대응 (v0.0.91) — 알림 앱(Sol Dev Alarm)이 올린 CI·SBOM 실패 알림에
 # 멘션 없이 스레드 답글(원인 분석)을 단다. GITHUB_ALERT_TOKEN 이 비어 있으면 기능만 꺼진다(기동 영향 없음).
 # Slack 앱에 message.channels 이벤트 + channels:history, (선택) reactions:write 권한이 필요하다.
+# 문서 질문 (v0.0.99) — `@지라 질문 <소스> <질문>`. 검색은 같은 서버의 rag 사이드카(rag/, docker-compose 의 rag 서비스)가
+# 하고, 봇은 찾은 문서 조각을 Claude 에 넘겨 답을 만든다. 사이드카가 꺼져 있어도 봇의 다른 기능은 그대로 돈다.
+rag:
+  enabled: ${RAG_ENABLED:true}
+  base-url: ${RAG_BASE_URL:http://127.0.0.1:8090}
+  # 답변에 근거로 넘길 조각 수
+  top-k: ${RAG_TOP_K:6}
+  search-timeout-seconds: ${RAG_SEARCH_TIMEOUT_SECONDS:20}
+  # 조각 6개(약 1만 자)를 읽고 답을 쓰므로 claude.timeout-seconds(20초)보다 길게 둔다.
+  answer-timeout-seconds: ${RAG_ANSWER_TIMEOUT_SECONDS:90}
+  # 답변에 쓸 모델. 비면 claude.model.
+  model: ${RAG_MODEL:}
+
 ci-alert:
   enabled: ${CI_ALERT_ENABLED:true}
   channel: ${CI_ALERT_CHANNEL:C0BKS6Q6XPD}

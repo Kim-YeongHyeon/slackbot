@@ -1,0 +1,5 @@
+# torch 는 Dockerfile 에서 CPU 전용 인덱스로 먼저 설치한다.
+sentence-transformers==6.2.0
+transformers==5.22.2
+numpy==2.5.4
+PyYAML==6.0.3

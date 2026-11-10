@@ -57,5 +57,36 @@ services:
     depends_on:
       - server
 
+  # 문서 질문(`@지라 질문 <소스> <질문>`)용 검색 사이드카 (v0.0.99). 임베딩 모델과 문서 조각을 메모리에 올려 둔다.
+  #   띄우기:        docker-compose --profile rag up -d --build rag
+  #   문서 다시 만들기: scripts/rag-build.sh <소스>
+  # 문서 원문·키·소스 목록은 repo 밖의 RAG_DATA_DIR 에만 둔다. 포트는 이 서버 안에서만 열린다.
+  rag:
+    build: ./rag
+    container_name: jirabot-rag
+    restart: unless-stopped
+    profiles: ["rag"]
+    user: "${RAG_UID:-1001}:${RAG_GID:-1001}"
+    environment:
+      RAG_DATA_DIR: /data
+      HF_HOME: /data/hf
+      HOME: /data/home
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - ${RAG_DATA_DIR:-/home/ubuntu/jirabot-rag}:/data
+    mem_limit: 4g
+    # pyenvector 가 SecKey 를 메모리에 잠그려면 memlock 제한을 풀어야 한다 (envector 연결 단계에서 사용).
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 180s
+
 volumes:
   postgres-data:

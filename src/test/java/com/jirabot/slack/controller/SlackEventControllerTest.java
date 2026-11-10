@@ -60,6 +60,7 @@ class SlackEventControllerTest {
     private com.jirabot.slack.service.BugNotionService bugNotionService;
     private com.jirabot.slack.service.PrImportService prImportService;
     private com.jirabot.slack.cialert.CiAlertService ciAlertService;
+    private com.jirabot.slack.rag.DocQaService docQaService;
     private SlackEventController controller;
     private MockMvc mockMvc;
 
@@ -83,6 +84,7 @@ class SlackEventControllerTest {
         bugNotionService = mock(com.jirabot.slack.service.BugNotionService.class);
         prImportService = mock(com.jirabot.slack.service.PrImportService.class);
         ciAlertService = mock(com.jirabot.slack.cialert.CiAlertService.class);
+        docQaService = mock(com.jirabot.slack.rag.DocQaService.class);
         Executor directExecutor = Runnable::run;
         SlackEventDeduplicator deduplicator = new SlackEventDeduplicator();
         controller = new SlackEventController(
@@ -91,7 +93,7 @@ class SlackEventControllerTest {
                 threadActionClassifier, intentFailureRepository,
                 userMappingRepository, slackNotifier,
                 directExecutor, deduplicator, reminderSubscriptionService, bugNotionService,
-                prImportService, ciAlertService, "C1,C2");
+                prImportService, ciAlertService, docQaService, "C1,C2");
         mockMvc = standaloneSetup(controller).build();
     }
 
@@ -595,6 +597,80 @@ class SlackEventControllerTest {
 
         verify(issueSearchService).searchByKeyword("로그인");
         verify(slackNotifier).postThreadReply(any(), any(), any());
+    }
+
+    @Test
+    void askCommand_routesSourceAndQuestionToDocQa() throws Exception {
+        when(docQaService.answer("envector", "롤백은 어떻게 해?"))
+                .thenReturn(CompletableFuture.completedFuture(":books: 답"));
+        String ts = freshTs();
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 질문 envector 롤백은 어떻게 해?", ts)))
+                .andExpect(status().isOk());
+
+        verify(docQaService).answer("envector", "롤백은 어떻게 해?");
+        verify(slackNotifier).postThreadReply("C1", ts, ":books: 답");
+        verify(intentClassifier, never()).classify(anyString());
+    }
+
+    @Test
+    void askCommand_english_keepsQuestionCase() throws Exception {
+        when(docQaService.answer("envector", "What is IP3?"))
+                .thenReturn(CompletableFuture.completedFuture("ok"));
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> ask envector What is IP3?", freshTs())))
+                .andExpect(status().isOk());
+
+        verify(docQaService).answer("envector", "What is IP3?");
+    }
+
+    @Test
+    void askCommand_insideThread_repliesToThatThread() throws Exception {
+        when(docQaService.answer(anyString(), anyString()))
+                .thenReturn(CompletableFuture.completedFuture("답"));
+        String body = """
+                {"type":"event_callback","event":{
+                    "type":"app_mention","user":"U1","text":"<@U0BOT> 질문 envector 키는 어디에 둬?",
+                    "channel":"C1","ts":"%s","thread_ts":"1700000000.000100"}}
+                """.formatted(freshTs());
+
+        mockMvc.perform(post("/api/slack/event").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        verify(slackNotifier).postThreadReply("C1", "1700000000.000100", "답");
+    }
+
+    @Test
+    void askCommand_withoutQuestion_sendsUsage() throws Exception {
+        String ts = freshTs();
+        for (String text : List.of("<@U0BOT> 질문", "<@U0BOT> 질문 envector")) {
+            mockMvc.perform(post("/api/slack/event")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(appMentionEvent(text, ts)))
+                    .andExpect(status().isOk());
+        }
+
+        verify(docQaService, never()).answer(any(), any());
+        verify(slackNotifier, org.mockito.Mockito.atLeastOnce())
+                .postThreadReply("C1", ts, com.jirabot.slack.rag.DocQaService.USAGE);
+    }
+
+    @Test
+    void askCommand_serviceFailure_repliesWithError() throws Exception {
+        when(docQaService.answer(anyString(), anyString()))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("boom")));
+        String ts = freshTs();
+
+        mockMvc.perform(post("/api/slack/event")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 질문 envector 뭐야", ts)))
+                .andExpect(status().isOk());
+
+        verify(slackNotifier).postThreadReply("C1", ts, ":x: 문서 질문 처리 중 오류가 발생했어요.");
     }
 
     @Test
