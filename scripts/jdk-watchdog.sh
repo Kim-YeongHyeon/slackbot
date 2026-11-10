@@ -2,11 +2,14 @@
 # JDK 워치독 — unattended-upgrades 가 openjdk 를 in-place 교체하면 실행 중인 JVM 은
 # 서브프로세스(claude CLI)를 못 만든다 (jspawnhelper 버전 불일치, lessons L17).
 # 탐지: JDK 가 교체되면 실행 중인 java 프로세스의 /proc/PID/exe 심링크가 "(deleted)" 로 표시된다.
-# 조치: 봇을 최신 jar 로 재시작 (배포 스크립트와 동일한 setsid + .env source 패턴).
+# 조치: 실행 중이던 jar 를 그대로 재시작 (배포 스크립트와 동일한 setsid + .env source 패턴).
 # 설치: crontab — */10 * * * * /home/ubuntu/slackbot/scripts/jdk-watchdog.sh >> /tmp/jdk-watchdog.log 2>&1
 set -u
 
 APP_DIR=/home/ubuntu/slackbot
+# cron 의 PATH 에는 ~/.local/bin 이 없다. 봇은 이 PATH 를 물려받아 `claude` 를 찾으므로 여기서 넣는다
+# (2026-11-10 실발생: 재시작된 봇의 모든 claude 호출이 "Cannot run program \"claude\"" 로 실패, lessons L25).
+export PATH="/home/ubuntu/.local/bin:$PATH"
 ts() { date '+%F %T'; }
 
 # 봇 java 프로세스 찾기 (bash 래퍼 제외 — comm 이 java 인 것만)
@@ -29,10 +32,15 @@ esac
 
 echo "$(ts) JDK replaced under running JVM (pid=$PID exe='$EXE') — restarting bot"
 
-JAR=$(ls -t "$APP_DIR"/build/libs/slackbot-server-*-SNAPSHOT.jar 2>/dev/null | head -1)
-if [ -z "$JAR" ]; then
-    echo "$(ts) ERROR: no jar found under $APP_DIR/build/libs — abort"
+# 지금 돌고 있던 jar 를 그대로 다시 띄운다. 가장 최근 jar 를 고르면 빌드만 하고 배포하지 않은 버전이 올라간다.
+JAR=$(tr '\0' '\n' < "/proc/$PID/cmdline" 2>/dev/null | grep -m1 'slackbot-server-.*-SNAPSHOT\.jar$')
+case "$JAR" in /*) ;; *) JAR="$APP_DIR/build/libs/$(basename "$JAR")" ;; esac
+if [ ! -f "$JAR" ]; then
+    echo "$(ts) ERROR: running jar '$JAR' not found — abort"
     exit 1
+fi
+if ! command -v claude > /dev/null 2>&1; then
+    echo "$(ts) WARN: claude CLI not on PATH ($PATH) — LLM features will fail after restart"
 fi
 
 kill "$PID"
@@ -45,7 +53,7 @@ setsid bash -c "set -a; source $APP_DIR/.env; set +a; exec java -jar '$JAR' > /t
 
 for i in $(seq 1 40); do
     if curl -sf http://localhost:8080/actuator/health > /dev/null 2>&1; then
-        echo "$(ts) restart OK — $(basename "$JAR") HEALTH UP (~$((i*2))s)"
+        echo "$(ts) restart OK — $(basename "$JAR") HEALTH UP (~$((i*2))s), claude=$(command -v claude || echo MISSING)"
         exit 0
     fi
     sleep 2

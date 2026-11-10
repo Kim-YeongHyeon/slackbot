@@ -401,3 +401,15 @@ v0.0.96 에서 CI 분석 모델을 Sonnet 5 로 바꾸자 첫 시도가 exit 1(s
   `--output-format stream-json --verbose` 의 init 이벤트(`tools`, `mcp_servers`)로 실제로 0개인지 확인한다.
 - 서버 계정에 커넥터·플러그인을 추가하면 봇 호출에도 따라 들어간다고 가정한다 — 플래그로 막아 두면 무관하다.
 - CLI 실패 로그에는 stderr 뿐 아니라 stdout JSON 의 `subtype`·`result` 를 남긴다 (claude -p 는 오류를 stdout 으로 낸다).
+
+## L25. cron 이 띄운 봇은 cron 의 PATH 를 물려받는다 — `claude` 가 `~/.local/bin` 에 있으면 못 찾는다
+
+2026-11-10 07:00 JDK 자동 업데이트 → `jdk-watchdog.sh`(cron)가 봇을 재시작했다. health 는 UP 이었지만 cron PATH
+(`/usr/bin:/bin` 계열)에 `~/.local/bin` 이 없어 이후 모든 `claude -p` 호출이 `Cannot run program "claude": error=2`
+로 실패했다(CI 분석 5건 "분석 실패"). 9/22 재시작 때는 claude 가 다른 경로에 있어서 드러나지 않았다.
+같은 재시작은 `ls -t` 로 가장 최근 jar 를 골라, 빌드만 하고 배포하지 않은 버전을 올릴 수도 있었다.
+
+**규칙**:
+- 봇을 띄우는 스크립트(cron·워치독·배포)는 `PATH` 에 `~/.local/bin` 을 직접 넣는다. 사람 셸에서 되는 것과 별개다.
+- 재시작 후 확인은 health 만이 아니라 `/proc/<PID>/environ` 의 PATH 로 `claude` 가 잡히는지까지 본다.
+- 워치독의 재시작은 "지금 돌던 jar" 를 다시 띄운다. 버전을 바꾸는 건 배포이지 워치독의 일이 아니다.
