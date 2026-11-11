@@ -50,6 +50,14 @@ public class GitHubRepoClientImpl implements GitHubRepoClient {
     }
 
     @Override
+    public List<String> pullFiles(String repo, int number) {
+        List<String> out = new ArrayList<>();
+        call(HttpMethod.GET, "/repos/{org}/{repo}/pulls/{n}/files?per_page=50", null, org, repo, number)
+                .forEach(f -> out.add(f.path("filename").asText("")));
+        return out;
+    }
+
+    @Override
     public String defaultBranch(String repo) {
         return call(HttpMethod.GET, "/repos/{org}/{repo}", null, org, repo).path("default_branch").asText("main");
     }

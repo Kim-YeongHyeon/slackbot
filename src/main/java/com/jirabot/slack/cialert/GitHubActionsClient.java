@@ -24,9 +24,17 @@ public interface GitHubActionsClient {
     // 아티팩트 zip 전체. maxBytes 를 넘으면 GitHubActionsException (부분 zip 은 풀 수 없으므로 자르지 않는다).
     byte[] downloadArtifactZip(String repo, long artifactId, int maxBytes);
 
+    // path: 워크플로 파일 경로 (".github/workflows/ci.yaml") — 연속 실패 자동 수정(v0.0.100)이 에이전트에게 알려 준다.
     record RunInfo(long id, String name, long workflowId, String headSha, String headBranch,
                    String event, String conclusion, int runAttempt, String htmlUrl,
-                   String commitMessage, String commitAuthor) {}
+                   String commitMessage, String commitAuthor, String path) {
+        public RunInfo(long id, String name, long workflowId, String headSha, String headBranch,
+                       String event, String conclusion, int runAttempt, String htmlUrl,
+                       String commitMessage, String commitAuthor) {
+            this(id, name, workflowId, headSha, headBranch, event, conclusion, runAttempt, htmlUrl,
+                    commitMessage, commitAuthor, "");
+        }
+    }
 
     record JobInfo(long id, String name, String conclusion, List<StepInfo> steps) {
         public boolean failed() {

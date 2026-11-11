@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -58,11 +59,13 @@ public class CiAlertService {
     private final SlackNotifier slack;
     private final SbomArtifactReader sbomReader;
     private final SbomFixService sbomFix;
+    private final CiCodeFixService codeFix;
     private final Executor executor;
 
     public CiAlertService(CiAlertProperties props, CiAlertRepository repository, GitHubActionsClient github,
                           CiFailureAnalyzer analyzer, SlackNotifier slack, SbomArtifactReader sbomReader,
-                          SbomFixService sbomFix, @Qualifier(AsyncConfig.CI_ALERT_EXECUTOR) Executor executor) {
+                          SbomFixService sbomFix, CiCodeFixService codeFix,
+                          @Qualifier(AsyncConfig.CI_ALERT_EXECUTOR) Executor executor) {
         this.props = props;
         this.repository = repository;
         this.github = github;
@@ -70,6 +73,7 @@ public class CiAlertService {
         this.slack = slack;
         this.sbomReader = sbomReader;
         this.sbomFix = sbomFix;
+        this.codeFix = codeFix;
         this.executor = executor;
     }
 
@@ -287,28 +291,77 @@ public class CiAlertService {
         }
         String fingerprint = LogExcerpts.fingerprint(repo, run.name(), steps, errorLines);
 
+        // STUDY: 연속 실패 횟수는 반복 판단보다 먼저 구한다 (v0.0.100) — 2·3번째 실패는 "같은 실패예요" 답글로 끝나므로
+        //        3번째에 수정 단계를 시작하려면 반복 경로에서도 횟수가 필요하다.
+        RunStreak streak = runStreak(repo, run);
+        // 커밋 조회까지 필요한 실패 정보는 분석이나 수정 단계가 실제로 쓸 때 만든다.
+        Supplier<CiFailureAnalyzer.Input> inputOf = () -> {
+            CommitInfo commit = commitOrEmpty(repo, run);
+            return new CiFailureAnalyzer.Input(repo, run.name(), alert.runUrl(), run.headBranch(), run.headSha(),
+                    commit.message().isBlank() ? run.commitMessage() : commit.message(),
+                    commit.author().isBlank() ? run.commitAuthor() : commit.author(), commit.files(),
+                    streak.label().isBlank() ? "(알 수 없음)" : streak.label(), jobs, cut(alert.text(), ALERT_TEXT_MAX));
+        };
+
         if (replyIfRepeat(row, target, repo, fingerprint)) {
+            codeFix(row, alert, target, run, streak, fingerprint, inputOf, row.getCategory(), row.getSummary());
             return;
         }
 
-        CommitInfo commit = commitOrEmpty(repo, run);
-        String author = commit.author().isBlank() ? run.commitAuthor() : commit.author();
-        String runStatus = runStatus(repo, run);
-        CiFailureAnalyzer.Input input = new CiFailureAnalyzer.Input(repo, run.name(), alert.runUrl(),
-                run.headBranch(), run.headSha(), commit.message().isBlank() ? run.commitMessage() : commit.message(),
-                author, commit.files(), runStatus.isBlank() ? "(알 수 없음)" : runStatus, jobs,
-                cut(alert.text(), ALERT_TEXT_MAX));
+        CiFailureAnalyzer.Input input = inputOf.get();
         Optional<CiAnalysis> analysis = analyzer.analyze(input);
         if (analysis.isEmpty()) {
             fail(row, target, alert, "Claude 분석이 시간 안에 끝나지 않았거나 응답이 올바르지 않아요");
             return;
         }
         CiAnalysis a = analysis.get();
-        Optional<String> ts = reply(target, CiReplyRenderer.analysis(repo, run.name(), a, runStatus,
-                run.headSha(), author, alert.runUrl()));
+        Optional<String> ts = reply(target, CiReplyRenderer.analysis(repo, run.name(), a, streak.label(),
+                run.headSha(), input.commitAuthor(), alert.runUrl()));
         row.finish(Status.DONE, fingerprint, a.category(), a.summary(), ts.orElse(null));
         repository.save(row);
         react(target, "white_check_mark");
+        codeFix(row, alert, target, run, streak, fingerprint, () -> input, a.category(), a.summary());
+    }
+
+    // STUDY: 연속 실패 자동 수정 (v0.0.100). 이미 올라온 PR·앞선 시도가 있으면 그 링크만 달고, 없으면 "찾는 중"
+    //        답글을 먼저 단 뒤 에이전트 결과로 바꾼다 (SBOM 의 runFix 와 같은 방식). 여기서 나는 오류는 분석 답글을 깨지 않는다.
+    private void codeFix(CiAlertEntity row, CiAlert alert, Target target, RunInfo run, RunStreak streak, String fingerprint,
+                         Supplier<CiFailureAnalyzer.Input> input, String category, String summary) {
+        // 취약점 건은 SBOM 수정(grype 재검사)이 맡는다 — 아티팩트가 없어 로그 분석으로 온 경우에도 여기서는 손대지 않는다.
+        if ("VULNERABILITY".equals(category) || !codeFix.wants(streak.count(), target.dryRun(), target.fix())) {
+            return;
+        }
+        CiCodeFixService.Request req = new CiCodeFixService.Request(row.getId(), target.rowChannel(), alert, run,
+                streak.count(), streak.recovered(), fingerprint, target.dryRun(), target.fix());
+        Optional<String> placeholder = Optional.empty();
+        CiCodeFixService.Result result;
+        String key = null;
+        try {
+            key = codeFix.keyOf(req);
+            result = codeFix.existing(req).orElse(null);
+            if (result == null) {
+                placeholder = reply(target, "🔧 " + (streak.count() >= 2 ? streak.count() + "번 연속 실패라 " : "")
+                        + "원인을 다시 보고 수정 방법을 찾는 중이에요… (Claude 에이전트가 레포를 살펴봐요, 길면 30분)");
+                result = codeFix.fix(req, input.get(), category, summary);
+            }
+        } catch (RuntimeException e) {
+            log.warn("ci-alert code fix failed id={}: {}", row.getId(), e.toString());
+            result = CiCodeFixService.Result.of(CiCodeFixService.Status.FAILED, e.getMessage() == null ? e.toString() : e.getMessage());
+        }
+        String text = CiCodeFixService.render(result, streak.count());
+        if (placeholder.isPresent() && !target.dryRun()) {
+            slack.updateMessage(target.channel(), placeholder.get(), text, null);
+        } else if (!text.isBlank()) {
+            reply(target, text);
+        }
+        // 앞선 시도를 다시 보여 준 것은 새 시도로 남기지 않는다 — 그래야 24시간 뒤에는 에이전트가 다시 돈다.
+        if (!result.reused() && key != null) {
+            row.recordFix(key, result.status().name(), CiCodeFixService.record(result));
+            if (result.url().contains("/pull/")) {
+                row.recordPrs(result.url());
+            }
+            repository.save(row);
+        }
     }
 
     // 24시간 안에 같은 지문으로 분석을 끝낸 알림이 있으면 그 분석 링크만 단다. 답글을 달았으면 true.
@@ -401,17 +454,39 @@ public class CiAlertService {
         }
     }
 
-    // "3번 연속 실패" / "직전 실행은 성공" — 같은 워크플로의 최근 run 을 이번 run 기준으로 거슬러 센다.
-    // 취소·건너뜀은 판단에서 빼고 넘어간다.
+    // 같은 워크플로의 연속 실패 횟수 (이번 run 포함).
+    // closed: 그 앞에서 성공한 실행을 찾았다 (아니면 "N번 이상"). recovered: 이번 run 뒤의 실행이 성공했다.
+    record RunStreak(int count, boolean closed, boolean known, boolean recovered) {
+        static final RunStreak UNKNOWN = new RunStreak(1, false, false, false);
+
+        // "3번 연속 실패" / "직전 실행은 성공" / "2번 이상 연속 실패" / "" (알 수 없음)
+        String label() {
+            if (!known) {
+                return "";
+            }
+            if (closed) {
+                return count == 1 ? "직전 실행은 성공" : count + "번 연속 실패";
+            }
+            return count >= 2 ? count + "번 이상 연속 실패" : "";
+        }
+    }
+
     String runStatus(String repo, RunInfo run) {
+        return runStreak(repo, run).label();
+    }
+
+    // 같은 워크플로의 최근 run 을 이번 run 기준으로 거슬러 센다. 취소·건너뜀은 판단에서 빼고 넘어간다.
+    RunStreak runStreak(String repo, RunInfo run) {
         List<RunSummary> recent;
         try {
             recent = github.recentRuns(repo, run.workflowId(), run.headBranch(), 10);
         } catch (GitHubActionsException e) {
-            return "";
+            return RunStreak.UNKNOWN;
         }
         // recent 는 최신순. run id 는 생성 순으로 커지므로 이번 run 보다 작은 id 부터가 "이전 실행"이다.
         int start = recent.size();
+        boolean recovered = false;
+        boolean newerSeen = false;
         for (int i = 0; i < recent.size(); i++) {
             long id = recent.get(i).id();
             if (id == run.id()) {
@@ -422,6 +497,12 @@ public class CiAlertService {
                 start = i;
                 break;
             }
+            // 이번 run 보다 나중 실행 중 결론이 난 가장 최근 것이 성공이면 이미 풀린 실패다.
+            String c = recent.get(i).conclusion();
+            if (!newerSeen && ("success".equals(c) || "failure".equals(c) || "timed_out".equals(c))) {
+                newerSeen = true;
+                recovered = "success".equals(c);
+            }
         }
         int streak = 1;
         for (int i = start; i < recent.size(); i++) {
@@ -429,10 +510,10 @@ public class CiAlertService {
             if ("failure".equals(c) || "timed_out".equals(c)) {
                 streak++;
             } else if ("success".equals(c)) {
-                return streak == 1 ? "직전 실행은 성공" : streak + "번 연속 실패";
+                return new RunStreak(streak, true, true, recovered);
             }
         }
-        return streak >= 2 ? streak + "번 이상 연속 실패" : "";
+        return new RunStreak(streak, false, true, recovered);
     }
 
     private void fail(CiAlertEntity row, Target target, CiAlert alert, String reason) {

@@ -44,7 +44,7 @@ public record CiFixProperties(
             maxTurns = 60;
         }
         if (agentImage == null || agentImage.isBlank()) {
-            agentImage = "jirabot-fix-agent:latest";
+            agentImage = "jirabot-fix-agent:2";
         }
         if (agentDockerDir == null || agentDockerDir.isBlank()) {
             agentDockerDir = "docker/fix-agent";

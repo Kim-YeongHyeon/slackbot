@@ -20,7 +20,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 인터랙티브 버튼 | 이슈 생성 알림에 "진행 중" / "완료" 버튼 → 클릭으로 Jira 상태 전환 |
 | 브랜치 만들기 | "진행 중" 전환 시 **repo 선택 버튼**을 띄워 클릭하면 봇이 GitHub API로 브랜치 직접 생성(브랜치명은 Claude가 한글 요약→영어 슬러그, `feature/`·`bugfix/`). 브랜치명에 이슈키가 있어 Jira 개발 패널에 자동 연결. `github.token` 미설정 시 Jira 개발 패널 링크 안내로 폴백 |
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
-| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94, nightly·벤치마크 글은 무시 — v0.0.95, 분석·수정 모델 Sonnet 5 — v0.0.96, 서브모듈은 팀 PR 링크 — v0.0.97, 이미 반영된 수정은 건너뜀 — v0.0.98 |
+| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94, nightly·벤치마크 글은 무시 — v0.0.95, 분석·수정 모델 Sonnet 5 — v0.0.96, 서브모듈은 팀 PR 링크 — v0.0.97, 이미 반영된 수정은 건너뜀 — v0.0.98, 3번 이상 연속 실패하면 수정 PR 링크·자동 생성(Opus) — v0.0.100 |
 | 문서 질문 | `@지라 질문 <소스> <질문>` → 미리 조각내 임베딩해 둔 문서에서 찾아 Claude 가 출처와 함께 답변 — v0.0.99 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
@@ -181,7 +181,29 @@ sudo docker run --rm -v "$PWD/rag":/rag -w /rag python:3.12-slim \
 
 설정(`application.yml` 의 `rag.*`): `RAG_ENABLED`(기본 true), `RAG_BASE_URL`, `RAG_TOP_K`(6), `RAG_SEARCH_TIMEOUT_SECONDS`(20), `RAG_ANSWER_TIMEOUT_SECONDS`(90), `RAG_MODEL`(비면 `claude.model`).
 
-다음 단계: 검색 백엔드를 envector 로 바꾸고(v0.0.100), hybrid 검색을 붙인다(v0.0.101). 지금은 `backend: local`(이 서버 메모리의 벡터)로 찾는다.
+다음 단계: 검색 백엔드를 envector 로 바꾸고, 그다음 hybrid 검색을 붙인다(v0.0.101 이후). 지금은 `backend: local`(이 서버 메모리의 벡터)로 찾는다.
+
+### 3번 이상 연속 실패하면 수정 PR 까지 (v0.0.100)
+
+같은 워크플로가 같은 브랜치에서 3번 이상 연속 실패하면, 분석 답글(또는 "같은 실패예요" 답글) 뒤에 수정 단계가 돈다.
+
+1. 봇이 올린 열린 PR 이 있으면(본문 표식 `sol-ci-fix key=<repo>/<workflowId>@<branch>`) 그 PR 을 링크한다.
+2. 24시간 안에 같은 워크플로를 이미 시도했으면 그 결과(PR 링크, "레포 수정으로는 못 고침")를 한 줄로 다시 보여 준다. 에이전트는 돌지 않는다.
+3. 이 알림 뒤의 실행이 이미 성공했으면 건너뛴다.
+4. 그 밖에는 Opus 에이전트(`claude-opus-5-5`, `--effort high`)가 격리 컨테이너에서 실패한 브랜치의 작업 사본을 보며 원인을 다시 분석한다. 답은 셋 중 하나다.
+   - **이미 고치는 PR 이 있다**: 봇이 보여 준 열린 PR 목록(제목·본문 앞부분·변경 파일)에 있는 번호일 때만 링크한다.
+   - **레포 수정으로 못 고친다**(시크릿 만료, 러너·외부 서비스 문제): PR 없이 원인과 사람이 할 조치를 단다.
+   - **고쳤다**: `DiffGuard` 가 변경 범위를 검사하고, 통과하면 `bot/ci-fix-<워크플로>-<지문 8자>` 브랜치로 push 해 실패한 브랜치를 base 로 PR 을 만든다. 자동 머지는 없다.
+
+- 변경 범위(`DiffGuard.Policy.code`): 삭제·심볼릭 링크·권한 변경·바이너리 거부. `.env*`·키 파일·`.claude/`·`CLAUDE.md`·`AGENTS.md`·`.gitmodules`·`CODEOWNERS` 거부. `.github/` 는 `workflows/` 와 `actions/` 만. 상한은 300줄·10파일.
+  - 추가된 줄에 `continue-on-error: true` 나 `|| true` 가 있으면 거부한다. 실패를 숨기는 수정을 막기 위해서다.
+- 워크플로 파일(`.github/workflows/*`)을 고친 브랜치는 `GITHUB_ALERT_TOKEN` 에 **Workflows: Read and write** 권한이 있어야 push 된다. 없으면 PR 대신 스레드에 원인과 diff 를 단다.
+- SBOM 수정과 달리 이 서버에서 수정 결과를 다시 돌려 볼 수 없다. 검증은 그 PR 의 CI 가 하고, PR 본문에 그렇게 적는다.
+- 수정 단계는 알림 처리 스레드에서 차례로 돈다(최대 30분). 그동안 온 알림은 줄을 선다.
+- 에이전트 이미지에 `actionlint`·`python3`·`make` 를 넣었고 기본 태그를 `jirabot-fix-agent:2` 로 올렸다. 이미지가 없으면 봇이 처음 한 번 빌드한다.
+- 설정(`ci-alert.code-fix.*`): `CI_ALERT_CODE_FIX_ENABLED`(true), `_MIN_STREAK`(3), `_MODEL`(`claude-opus-5-5`), `_EFFORT`(`high`), `_TIMEOUT_MINUTES`(30), `_MAX_TURNS`(100), `_MAX_DIFF_LINES`(300), `_MAX_FILES`(10), `_COOLDOWN_HOURS`(24), `_MAX_OPEN_PRS`(20). `CLAUDE_CODE_OAUTH_TOKEN` 이 비면 꺼진다.
+- 재처리: `POST /api/admin/ci-alerts/replay {"runUrl"|"ts", "dryRunUser", "fix": true}` — `fix: true` 면 연속 횟수와 상관없이 수정 단계를 돌린다. dry-run 이면 push 없이 원인과 diff 만 DM 으로 온다.
+- DB: `ci_alerts` 에 `fix_key`, `fix_status`, `fix_detail` 추가(V11).
 
 ### 이미 반영된 수정은 에이전트 없이 건너뜀 (v0.0.98)
 
@@ -883,12 +905,12 @@ GITHUB_ORG=<조직 (기본 CryptoLabInc)>
 GITHUB_BRANCH_REPOS=<버튼에 띄울 repo, 콤마 구분 (기본 envector-msa,evi)>
 
 # CI·SBOM 실패 알림 자동 분석 (선택, v0.0.91) — 비우면 기능만 꺼짐
-GITHUB_ALERT_TOKEN=<fine-grained PAT, 알림 대상 repo — Actions: Read (+ Contents/Pull requests: Read and write)>
+GITHUB_ALERT_TOKEN=<fine-grained PAT, 알림 대상 repo — Actions: Read (+ Contents/Pull requests: Read and write, 워크플로 수정 PR 은 Workflows: Read and write)>
 CI_ALERT_CHANNEL=<알림 채널 ID>
 CI_ALERT_BOT_IDS=<알림을 올리는 앱의 bot_id, 콤마 구분>
 CI_ALERT_REPOS=<대상 repo, 콤마 구분>
 CI_ALERT_SBOM_IMAGE_OWNERS=<SBOM 이미지 → 고칠 repo, "image=repo" 콤마 구분 (선택)>
-CLAUDE_CODE_OAUTH_TOKEN=<SBOM 자동 수정 에이전트용, 별도 터미널에서 `claude setup-token` (선택, v0.0.94)>
+CLAUDE_CODE_OAUTH_TOKEN=<SBOM·연속 실패 자동 수정 에이전트용, 별도 터미널에서 `claude setup-token` (선택, v0.0.94)>
 
 # 터널 경유 대시보드 접근 (선택, v0.0.30) — 둘 다 설정해야 Go봇 프록시가 켜짐
 DASHBOARD_USER=<대시보드 Basic Auth 아이디>

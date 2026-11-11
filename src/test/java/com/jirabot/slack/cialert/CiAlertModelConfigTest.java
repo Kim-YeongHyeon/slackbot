@@ -41,4 +41,28 @@ class CiAlertModelConfigTest {
         assertThat(both.getProperty("ci-alert.model")).isEqualTo("m-alert");
         assertThat(both.getProperty("ci-alert.fix.model")).isEqualTo("m-fix");
     }
+
+    // 연속 실패 자동 수정 (v0.0.100) 은 Opus·effort high 를 따로 쓴다 — ci-alert.model 을 바꿔도 따라가지 않는다.
+    @Test
+    void codeFixDefaultsToOpusHigh_independentOfTheAlertModel() throws Exception {
+        StandardEnvironment env = env(Map.of("CI_ALERT_MODEL", "m-alert"));
+
+        assertThat(env.getProperty("ci-alert.code-fix.model")).isEqualTo("claude-opus-5-5");
+        assertThat(env.getProperty("ci-alert.code-fix.effort")).isEqualTo("high");
+        assertThat(env.getProperty("ci-alert.code-fix.min-streak")).isEqualTo("3");
+        assertThat(env(Map.of("CI_ALERT_CODE_FIX_MODEL", "opus")).getProperty("ci-alert.code-fix.model")).isEqualTo("opus");
+    }
+
+    @Test
+    void codeFixProperties_fillDefaults() {
+        CiCodeFixProperties p = new CiCodeFixProperties(null, 0, " ", null, 0, 0, null, 0, 0, 0, 0);
+
+        assertThat(p.enabled()).isTrue();
+        assertThat(p.minStreak()).isEqualTo(3);
+        assertThat(p.model()).isEqualTo("claude-opus-5-5");
+        assertThat(p.effort()).isEqualTo("high");
+        assertThat(p.timeoutMinutes()).isEqualTo(30);
+        assertThat(p.cooldownHours()).isEqualTo(24);
+        assertThat(new CiCodeFixProperties(false, 5, "m", "", 1, 1, "p", 1, 1, 1, 1).effort()).as("빈 effort 는 플래그 없음").isEmpty();
+    }
 }

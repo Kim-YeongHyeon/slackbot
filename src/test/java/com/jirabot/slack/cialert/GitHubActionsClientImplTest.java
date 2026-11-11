@@ -42,6 +42,7 @@ class GitHubActionsClientImplTest {
         server.enqueue(json(200, """
                 {"id":7,"name":"evi main","workflow_id":99,"head_sha":"abc123","head_branch":"main",
                  "event":"push","conclusion":"failure","run_attempt":2,"html_url":"https://x/7",
+                 "path":".github/workflows/main.yaml",
                  "head_commit":{"message":"Fix it\\n\\nbody","author":{"name":"dev"}}}"""));
 
         GitHubActionsClient.RunInfo run = client.getRun("evi", 7);
@@ -50,6 +51,7 @@ class GitHubActionsClientImplTest {
         assertThat(run.workflowId()).isEqualTo(99);
         assertThat(run.runAttempt()).isEqualTo(2);
         assertThat(run.commitAuthor()).isEqualTo("dev");
+        assertThat(run.path()).isEqualTo(".github/workflows/main.yaml");
         RecordedRequest req = server.takeRequest();
         assertThat(req.getPath()).isEqualTo("/repos/CryptoLabInc/evi/actions/runs/7");
         assertThat(req.getHeader("Authorization")).isEqualTo("Bearer tok");

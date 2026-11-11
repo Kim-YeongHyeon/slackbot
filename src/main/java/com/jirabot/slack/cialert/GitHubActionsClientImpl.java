@@ -82,7 +82,7 @@ public class GitHubActionsClientImpl implements GitHubActionsClient {
                 r.path("head_sha").asText(""), r.path("head_branch").asText(""), r.path("event").asText(""),
                 r.path("conclusion").asText(""), Math.max(1, r.path("run_attempt").asInt(1)),
                 r.path("html_url").asText(""), commit.path("message").asText(""),
-                commit.path("author").path("name").asText(""));
+                commit.path("author").path("name").asText(""), r.path("path").asText(""));
     }
 
     @Override

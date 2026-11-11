@@ -13,6 +13,9 @@ public interface GitHubRepoClient {
 
     PullInfo createPull(String repo, String head, String base, String title, String body);
 
+    // PR 이 바꾼 파일 경로 (최대 50개) — 연속 실패 자동 수정(v0.0.100)이 "이미 고치는 PR 이 있나"를 볼 때 쓴다.
+    List<String> pullFiles(String repo, int number);
+
     String defaultBranch(String repo);
 
     // 브랜치 HEAD 커밋 sha. 없으면 empty.

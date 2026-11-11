@@ -63,6 +63,16 @@ public class CiAlertEntity {
     @Column(name = "pr_urls", columnDefinition = "TEXT")
     private String prUrls;
 
+    // 연속 실패 자동 수정 (v0.0.100): "<repo>/<workflowId>@<branch>", 결과 상태, 원인 한 줄
+    @Column(name = "fix_key", length = 300)
+    private String fixKey;
+
+    @Column(name = "fix_status", length = 20)
+    private String fixStatus;
+
+    @Column(name = "fix_detail", columnDefinition = "TEXT")
+    private String fixDetail;
+
     @Column(columnDefinition = "TEXT")
     private String error;
 
@@ -116,6 +126,14 @@ public class CiAlertEntity {
         touch();
     }
 
+    // 연속 실패 자동 수정 결과 (v0.0.100) — 같은 워크플로를 24시간 안에 다시 돌리지 않는 근거
+    public void recordFix(String fixKey, String fixStatus, String fixDetail) {
+        this.fixKey = fixKey;
+        this.fixStatus = fixStatus;
+        this.fixDetail = fixDetail;
+        touch();
+    }
+
     public void fail(Status status, String error) {
         this.status = status;
         this.error = error;
@@ -139,6 +157,9 @@ public class CiAlertEntity {
     public String getReplyTs() { return replyTs; }
     public String getVulnIds() { return vulnIds; }
     public String getPrUrls() { return prUrls; }
+    public String getFixKey() { return fixKey; }
+    public String getFixStatus() { return fixStatus; }
+    public String getFixDetail() { return fixDetail; }
     public String getError() { return error; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

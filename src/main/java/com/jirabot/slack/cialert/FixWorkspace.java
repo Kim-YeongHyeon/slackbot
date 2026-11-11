@@ -49,6 +49,11 @@ public class FixWorkspace {
     record Replace(String module, Path target) {}
 
     public Workspace prepare(String repo, String jobId) {
+        return prepare(repo, jobId, null);
+    }
+
+    // branch 가 있으면 그 브랜치를 받는다 (연속 실패 자동 수정은 실패한 run 의 브랜치에서 고친다, v0.0.100).
+    public Workspace prepare(String repo, String jobId, String branch) {
         Path root = Path.of(fixProps.workDir(), jobId);
         Path repoDir = root.resolve("repo");
         Path agentDir = root.resolve("agent");
@@ -58,7 +63,11 @@ public class FixWorkspace {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        git(root, "clone", "-q", "--depth", "1", "--no-tags", "--single-branch", repoUrl(repo), "repo");
+        if (branch == null || branch.isBlank()) {
+            git(root, "clone", "-q", "--depth", "1", "--no-tags", "--single-branch", repoUrl(repo), "repo");
+        } else {
+            git(root, "clone", "-q", "--depth", "1", "--no-tags", "--single-branch", "--branch", branch, repoUrl(repo), "repo");
+        }
 
         Map<String, String> submodules = submodules(repoDir);   // path → repo name
         List<String> fetched = new ArrayList<>();
@@ -85,12 +94,16 @@ public class FixWorkspace {
 
     // 허용 파일만 add → 커밋 → 새 브랜치로 push. hook 은 끈다 (작업 트리는 에이전트가 만진 곳이라).
     public void commitAndPush(Workspace ws, List<String> files, String branch, String message) {
+        commitAndPush(ws, files, branch, message, "sol-sbom-bot");
+    }
+
+    public void commitAndPush(Workspace ws, List<String> files, String branch, String message, String author) {
         List<String> add = new ArrayList<>(worktreeGit(ws));
         add.addAll(List.of("add", "--"));
         add.addAll(files);
         run(add, ws.root(), Map.of(), "git add");
         List<String> commit = new ArrayList<>(worktreeGit(ws));
-        commit.addAll(List.of("-c", "user.name=sol-sbom-bot", "-c", "user.email=sol-sbom-bot@users.noreply.github.com",
+        commit.addAll(List.of("-c", "user.name=" + author, "-c", "user.email=" + author + "@users.noreply.github.com",
                 "commit", "-q", "-m", message));
         run(commit, ws.root(), Map.of(), "git commit");
         run(List.of("git", "-c", "core.hooksPath=/dev/null", "--git-dir=" + ws.repoDir().resolve(".git"), "push", "-q",

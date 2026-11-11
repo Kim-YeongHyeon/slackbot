@@ -50,6 +50,14 @@ class GitHubRepoClientImplTest {
     }
 
     @Test
+    void pullFiles_listsChangedPaths() throws Exception {
+        server.enqueue(json(200, "[{\"filename\":\".github/workflows/gpu.yaml\"},{\"filename\":\"scripts/build.sh\"}]"));
+
+        assertThat(client.pullFiles("evi", 8)).containsExactly(".github/workflows/gpu.yaml", "scripts/build.sh");
+        assertThat(server.takeRequest().getPath()).isEqualTo("/repos/CryptoLabInc/evi/pulls/8/files?per_page=50");
+    }
+
+    @Test
     void createPull_postsJsonBody() throws Exception {
         server.enqueue(json(201, "{\"number\":9,\"title\":\"T\",\"body\":\"B\",\"html_url\":\"u\",\"head\":{\"ref\":\"bot/x\"}}"));
 

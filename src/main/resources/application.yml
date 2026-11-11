@@ -204,7 +204,7 @@ ci-alert:
     # 에이전트 실행 횟수 상한 (grype 재검사에서 남으면 남은 항목을 알려주고 한 번 더)
     max-attempts: ${CI_ALERT_FIX_MAX_ATTEMPTS:2}
     max-turns: ${CI_ALERT_FIX_MAX_TURNS:60}
-    agent-image: ${CI_ALERT_FIX_AGENT_IMAGE:jirabot-fix-agent:latest}
+    agent-image: ${CI_ALERT_FIX_AGENT_IMAGE:jirabot-fix-agent:2}
     agent-docker-dir: ${CI_ALERT_FIX_AGENT_DOCKER_DIR:docker/fix-agent}
     prompt-file: ${CI_ALERT_FIX_PROMPT_FILE:prompts/sbom-fix-agent.md}
     work-dir: ${CI_ALERT_FIX_WORK_DIR:/var/tmp/ci-fix}
@@ -212,6 +212,23 @@ ci-alert:
     grype-cache-dir: ${CI_ALERT_FIX_GRYPE_CACHE_DIR:/var/tmp/ci-fix/grype-db}
     # go.sum 을 뺀 변경 줄 수 상한 (넘으면 PR 을 만들지 않는다)
     max-diff-lines: ${CI_ALERT_FIX_MAX_DIFF_LINES:400}
+  # 연속 실패 자동 수정 (v0.0.100). 같은 워크플로가 min-streak 번 이상 연속 실패하면 Opus 에이전트가 레포를 보며
+  # 원인을 다시 분석하고, 이미 고치는 PR 이 있으면 링크, 없고 레포에서 고칠 수 있으면 수정 PR 을 올린다.
+  # 토큰·작업 폴더·에이전트 이미지는 위 fix 설정을 같이 쓴다. 워크플로 파일 수정 PR 은 GITHUB_ALERT_TOKEN 에
+  # Workflows: Read and write 권한이 있어야 push 된다 (없으면 스레드에 diff 만 단다).
+  code-fix:
+    enabled: ${CI_ALERT_CODE_FIX_ENABLED:true}
+    min-streak: ${CI_ALERT_CODE_FIX_MIN_STREAK:3}
+    model: ${CI_ALERT_CODE_FIX_MODEL:claude-opus-5-5}
+    effort: ${CI_ALERT_CODE_FIX_EFFORT:high}
+    timeout-minutes: ${CI_ALERT_CODE_FIX_TIMEOUT_MINUTES:30}
+    max-turns: ${CI_ALERT_CODE_FIX_MAX_TURNS:100}
+    prompt-file: ${CI_ALERT_CODE_FIX_PROMPT_FILE:prompts/ci-fix-agent.md}
+    max-diff-lines: ${CI_ALERT_CODE_FIX_MAX_DIFF_LINES:300}
+    max-files: ${CI_ALERT_CODE_FIX_MAX_FILES:10}
+    # 같은 워크플로·브랜치에 에이전트를 다시 돌리기까지의 시간
+    cooldown-hours: ${CI_ALERT_CODE_FIX_COOLDOWN_HOURS:24}
+    max-open-prs: ${CI_ALERT_CODE_FIX_MAX_OPEN_PRS:20}
 
 # STUDY: Actuator. /actuator/health = 헬스체크. Phase 1에서는 별도 /health 컨트롤러도 제공.
 management:

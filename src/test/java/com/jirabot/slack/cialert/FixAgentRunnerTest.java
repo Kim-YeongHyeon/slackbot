@@ -67,6 +67,37 @@ class FixAgentRunnerTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void runRaw_usesTheGivenModelEffortPromptAndLimits_andReturnsTheAgentJson() throws Exception {
+        when(runner.run(any(), anyString(), any(Duration.class), isNull(), anyMap())).thenReturn(new ProcessRunner.Result(0,
+                envelope("{\"outcome\":\"not_fixable\",\"root_cause\":\"r\"}", false), "", false));
+
+        FixAgentRunner.Raw raw = agent.runRaw(ws, "TASK", "job-2", new FixAgentRunner.AgentSpec("claude-opus-5-5", "high",
+                "prompts/ci-fix-agent.md", 100, 30, List.of("GOTOOLCHAIN=auto")));
+
+        assertThat(raw.ok()).isTrue();
+        assertThat(raw.out().path("outcome").asText()).isEqualTo("not_fixable");
+        ArgumentCaptor<List<String>> cmd = ArgumentCaptor.forClass(List.class);
+        verify(runner).run(cmd.capture(), eq("TASK"), eq(Duration.ofMinutes(30)), isNull(), anyMap());
+        assertThat(String.join(" ", cmd.getValue())).doesNotContain("SECRET-OAUTH", "GOFLAGS")
+                .contains("--name fix-job-2", "-e GOTOOLCHAIN=auto", "--max-turns 100", "--model claude-opus-5-5 --effort high",
+                        "--append-system-prompt-file /prompts/ci-fix-agent.md", "--strict-mcp-config");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void sbomRun_keepsItsEnvAndSendsNoEffortFlag() throws Exception {
+        when(runner.run(any(), anyString(), any(Duration.class), isNull(), anyMap())).thenReturn(new ProcessRunner.Result(0,
+                envelope("{\"changed\":false}", false), "", false));
+
+        agent.run(ws, "TASK", "job-3");
+
+        ArgumentCaptor<List<String>> cmd = ArgumentCaptor.forClass(List.class);
+        verify(runner).run(cmd.capture(), eq("TASK"), eq(Duration.ofMinutes(20)), isNull(), anyMap());
+        assertThat(String.join(" ", cmd.getValue())).contains("-e GOTOOLCHAIN=auto -e GOFLAGS=-mod=mod").doesNotContain("--effort");
+    }
+
+    @Test
     void parse_errorEnvelopeAndGarbage_areFailures() throws Exception {
         assertThat(agent.parse(new ProcessRunner.Result(1, envelope("x", true), "auth failed", false)).error())
                 .startsWith("에이전트 실행 오류").contains("auth failed");
@@ -89,9 +120,9 @@ class FixAgentRunnerTest {
 
     @Test
     void ensureImage_buildsOnlyWhenMissing_andFailsLoudly() {
-        when(runner.run(eq(List.of("sudo", "-n", "docker", "image", "inspect", "jirabot-fix-agent:latest")), isNull(), any(Duration.class)))
+        when(runner.run(eq(List.of("sudo", "-n", "docker", "image", "inspect", "jirabot-fix-agent:2")), isNull(), any(Duration.class)))
                 .thenReturn(new ProcessRunner.Result(1, "", "No such image", false));
-        when(runner.run(eq(List.of("sudo", "-n", "docker", "build", "-q", "-t", "jirabot-fix-agent:latest", "docker/fix-agent")),
+        when(runner.run(eq(List.of("sudo", "-n", "docker", "build", "-q", "-t", "jirabot-fix-agent:2", "docker/fix-agent")),
                 isNull(), any(Duration.class))).thenReturn(new ProcessRunner.Result(1, "", "network down", false));
 
         assertThatThrownBy(() -> agent.ensureImage()).hasMessageContaining("network down");

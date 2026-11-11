@@ -49,6 +49,7 @@ class CiAlertServiceTest {
     private SlackNotifier slack;
     private SbomArtifactReader sbomReader;
     private SbomFixService sbomFix;
+    private CiCodeFixService codeFix;
     private CiAlertService service;
     private final Map<Long, CiAlertEntity> store = new HashMap<>();
     private final AtomicLong seq = new AtomicLong();
@@ -67,11 +68,12 @@ class CiAlertServiceTest {
         slack = mock(SlackNotifier.class);
         sbomReader = mock(SbomArtifactReader.class);
         sbomFix = mock(SbomFixService.class);
+        codeFix = mock(CiCodeFixService.class);
         when(repository.saveAndFlush(any())).thenAnswer(inv -> persist(inv.getArgument(0)));
         when(repository.save(any())).thenAnswer(inv -> persist(inv.getArgument(0)));
         when(repository.findById(anyLong())).thenAnswer(inv -> Optional.ofNullable(store.get((Long) inv.getArgument(0))));
         when(slack.postThreadReplyTs(anyString(), anyString(), anyString())).thenReturn(Optional.of("reply.1"));
-        service = new CiAlertService(props("tok"), repository, github, analyzer, slack, sbomReader, sbomFix, Runnable::run);
+        service = new CiAlertService(props("tok"), repository, github, analyzer, slack, sbomReader, sbomFix, codeFix, Runnable::run);
     }
 
     private CiAlertEntity persist(CiAlertEntity e) {
@@ -142,7 +144,7 @@ class CiAlertServiceTest {
         assertThat(service.accepts(new SlackEventInner("message", null,
                 ":hourglass_flowing_sand: evi CI — 2 job(s) waiting over 30 min for a runner\nrun: <" + RUN_URL + ">",
                 CHANNEL, ts, null, ALERT_BOT, null))).as("러너 대기 알림").isFalse();
-        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, sbomFix, Runnable::run);
+        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, sbomFix, codeFix, Runnable::run);
         assertThat(off.accepts(alertEvent(ts))).as("토큰 없음 → 기능 꺼짐").isFalse();
     }
 
@@ -323,7 +325,7 @@ class CiAlertServiceTest {
 
         assertThatThrownBy(() -> service.replay("2.0", null)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.replay("3.0", null)).isInstanceOf(IllegalArgumentException.class);
-        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, sbomFix, Runnable::run);
+        CiAlertService off = new CiAlertService(props(""), repository, github, analyzer, slack, sbomReader, sbomFix, codeFix, Runnable::run);
         assertThatThrownBy(() -> off.replay("2.0", null)).isInstanceOf(IllegalStateException.class);
     }
 
@@ -542,6 +544,173 @@ class CiAlertServiceTest {
         verify(slack, never()).updateMessage(anyString(), anyString(), anyString(), any());
     }
 
+    // ── 연속 실패 자동 수정 (v0.0.100) ───────────────────────
+
+    private void stubStreak(int failures) {
+        List<RunSummary> runs = new java.util.ArrayList<>();
+        for (int i = 0; i < failures; i++) {
+            runs.add(new RunSummary(1000 - i * 10L, "failure", "s" + i));
+        }
+        runs.add(new RunSummary(900, "success", "ok"));
+        when(github.recentRuns("evi", 77, "main", 10)).thenReturn(runs);
+    }
+
+    private static CiCodeFixService.Result created() {
+        return new CiCodeFixService.Result(CiCodeFixService.Status.CREATED, "https://gh/evi/pull/12", "#12 fix(ci): mount",
+                "마운트 경로가 틀렸어요.", "-v 경로를 바꿨어요.", List.of(), false);
+    }
+
+    @Test
+    void thirdConsecutiveFailure_runsFixAfterAnalysis_andPlaceholderBecomesTheResult() {
+        stubRun("##[error]boom\n");
+        stubStreak(3);
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+        when(codeFix.wants(3, false, false)).thenReturn(true);
+        when(codeFix.keyOf(any())).thenReturn("evi/77@main");
+        when(codeFix.existing(any())).thenReturn(Optional.empty());
+        when(codeFix.fix(any(), any(), eq("INFRA"), eq("레지스트리 접속 실패예요."))).thenReturn(created());
+        when(slack.postThreadReplyTs(anyString(), anyString(), anyString()))
+                .thenReturn(Optional.of("analysis.ts"), Optional.of("placeholder.ts"));
+        String ts = nowTs();
+
+        service.submit(alertEvent(ts));
+
+        ArgumentCaptor<String> replies = ArgumentCaptor.forClass(String.class);
+        verify(slack, org.mockito.Mockito.times(2)).postThreadReplyTs(eq(CHANNEL), eq(ts), replies.capture());
+        assertThat(replies.getAllValues().get(0)).contains("3번 연속 실패");
+        assertThat(replies.getAllValues().get(1)).startsWith("🔧 3번 연속 실패라 원인을 다시 보고");
+        ArgumentCaptor<String> updated = ArgumentCaptor.forClass(String.class);
+        verify(slack).updateMessage(eq(CHANNEL), eq("placeholder.ts"), updated.capture(), org.mockito.ArgumentMatchers.isNull());
+        assertThat(updated.getValue()).contains("<https://gh/evi/pull/12|#12 fix(ci): mount>", "마운트 경로가 틀렸어요.");
+        ArgumentCaptor<CiCodeFixService.Request> req = ArgumentCaptor.forClass(CiCodeFixService.Request.class);
+        verify(codeFix).fix(req.capture(), any(), anyString(), anyString());
+        assertThat(req.getValue().streak()).isEqualTo(3);
+        assertThat(req.getValue().channel()).isEqualTo(CHANNEL);
+        assertThat(req.getValue().dryRun()).isFalse();
+        CiAlertEntity row = store.get(1L);
+        assertThat(row.getStatus()).as("분석 결과는 그대로").isEqualTo(Status.DONE);
+        assertThat(row.getFixKey()).isEqualTo("evi/77@main");
+        assertThat(row.getFixStatus()).isEqualTo("CREATED");
+        assertThat(row.getFixDetail()).isEqualTo("마운트 경로가 틀렸어요.");
+        assertThat(row.getPrUrls()).isEqualTo("https://gh/evi/pull/12");
+    }
+
+    @Test
+    void secondConsecutiveFailure_doesNotStartTheFix() {
+        stubRun("##[error]boom\n");
+        stubStreak(2);
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+
+        service.submit(alertEvent(nowTs()));
+
+        verify(codeFix).wants(2, false, false);
+        verify(codeFix, never()).existing(any());
+        verify(codeFix, never()).fix(any(), any(), any(), any());
+        assertThat(store.get(1L).getFixStatus()).isNull();
+    }
+
+    @Test
+    void vulnerabilityCategory_isLeftToTheSbomFix() {
+        stubRun("##[error]boom\n");
+        stubStreak(4);
+        when(analyzer.analyze(any())).thenReturn(Optional.of(
+                new CiAnalysis("VULNERABILITY", "high", "grype 게이트 실패예요.", "d", List.of(), List.of())));
+        when(codeFix.wants(4, false, false)).thenReturn(true);
+
+        service.submit(alertEvent(nowTs()));
+
+        verify(codeFix, never()).existing(any());
+        verify(codeFix, never()).fix(any(), any(), any(), any());
+    }
+
+    @Test
+    void repeatAlertOnThirdFailure_startsTheFixToo_withThePriorAnalysis() {
+        stubRun("##[error]boom\n");
+        stubStreak(3);
+        CiAlertEntity prior = new CiAlertEntity(CHANNEL, "1.0");
+        prior.finish(Status.DONE, "fp", "CONFIG", "마운트 경로 문제예요.", "prior.reply");
+        when(repository.findFirstByChannelAndRepoAndFingerprintAndStatusAndCreatedAtAfterAndIdNotOrderByCreatedAtDesc(
+                eq(CHANNEL), eq("evi"), anyString(), eq(Status.DONE), any(), any())).thenReturn(Optional.of(prior));
+        when(codeFix.wants(3, false, false)).thenReturn(true);
+        when(codeFix.keyOf(any())).thenReturn("evi/77@main");
+        when(codeFix.existing(any())).thenReturn(Optional.empty());
+        when(codeFix.fix(any(), any(), eq("CONFIG"), eq("마운트 경로 문제예요."))).thenReturn(created());
+
+        service.submit(alertEvent(nowTs()));
+
+        verify(analyzer, never()).analyze(any());
+        ArgumentCaptor<CiFailureAnalyzer.Input> input = ArgumentCaptor.forClass(CiFailureAnalyzer.Input.class);
+        verify(codeFix).fix(any(), input.capture(), eq("CONFIG"), eq("마운트 경로 문제예요."));
+        assertThat(input.getValue().recentRuns()).isEqualTo("3번 연속 실패");
+        assertThat(input.getValue().failedJobs()).singleElement().satisfies(j -> assertThat(j.excerpt()).contains("boom"));
+        assertThat(store.get(1L).getStatus()).isEqualTo(Status.REPEAT);
+        assertThat(store.get(1L).getFixStatus()).isEqualTo("CREATED");
+    }
+
+    @Test
+    void earlierAttempt_isLinkedWithoutPlaceholderOrAgent_andNotRecordedAgain() {
+        stubRun("##[error]boom\n");
+        stubStreak(5);
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+        when(codeFix.wants(5, false, false)).thenReturn(true);
+        when(codeFix.keyOf(any())).thenReturn("evi/77@main");
+        when(codeFix.existing(any())).thenReturn(Optional.of(new CiCodeFixService.Result(CiCodeFixService.Status.CREATED,
+                "https://gh/evi/pull/12", "#12", "", "", List.of(), true)));
+        String ts = nowTs();
+
+        service.submit(alertEvent(ts));
+
+        verify(codeFix, never()).fix(any(), any(), any(), any());
+        verify(slack).postThreadReplyTs(eq(CHANNEL), eq(ts), org.mockito.ArgumentMatchers.contains("수정 PR <https://gh/evi/pull/12|#12> 이 올라와 있어요"));
+        verify(slack, never()).updateMessage(anyString(), anyString(), anyString(), any());
+        assertThat(store.get(1L).getFixStatus()).as("다시 보여 준 결과는 새 시도로 남기지 않는다").isNull();
+    }
+
+    @Test
+    void fixStepThrows_analysisReplyStays_andFailureIsReported() {
+        stubRun("##[error]boom\n");
+        stubStreak(3);
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+        when(codeFix.wants(3, false, false)).thenReturn(true);
+        when(codeFix.keyOf(any())).thenReturn("evi/77@main");
+        when(codeFix.existing(any())).thenThrow(new GitHubActionsException(502, "bad gateway"));
+        String ts = nowTs();
+
+        service.submit(alertEvent(ts));
+
+        verify(slack).postThreadReplyTs(eq(CHANNEL), eq(ts), org.mockito.ArgumentMatchers.contains("🤖 *CI 실패 분석*"));
+        verify(slack).postThreadReplyTs(eq(CHANNEL), eq(ts), org.mockito.ArgumentMatchers.contains("수정 PR 을 만들지 못했어요: bad gateway"));
+        assertThat(store.get(1L).getStatus()).isEqualTo(Status.DONE);
+        assertThat(store.get(1L).getFixStatus()).isEqualTo("FAILED");
+        verify(slack).addReaction(CHANNEL, ts, "white_check_mark");
+    }
+
+    @Test
+    void dryRunReplay_runsTheFixOnlyWhenAsked_andRepliesByDm() {
+        stubRun("##[error]boom\n");
+        stubStreak(3);
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+        when(codeFix.wants(3, true, true)).thenReturn(true);
+        when(codeFix.keyOf(any())).thenReturn("evi/77@main");
+        when(codeFix.existing(any())).thenReturn(Optional.empty());
+        when(codeFix.fix(any(), any(), anyString(), anyString())).thenReturn(
+                CiCodeFixService.Result.of(CiCodeFixService.Status.DRY_RUN, "파일 scripts/build.sh"));
+
+        service.replayRun(RUN_URL, "U_ME");
+        verify(codeFix).wants(3, true, false);
+        verify(codeFix, never()).fix(any(), any(), any(), any());
+
+        service.replayRun(RUN_URL, "U_ME", true);
+        ArgumentCaptor<CiCodeFixService.Request> req = ArgumentCaptor.forClass(CiCodeFixService.Request.class);
+        verify(codeFix).fix(req.capture(), any(), anyString(), anyString());
+        assertThat(req.getValue().dryRun()).isTrue();
+        assertThat(req.getValue().force()).isTrue();
+        assertThat(req.getValue().channel()).isEqualTo("DM:U_ME");
+        verify(slack, org.mockito.Mockito.atLeastOnce()).sendDirectMessage(eq("U_ME"), org.mockito.ArgumentMatchers.contains("🧪 dry-run"));
+        verify(slack, never()).postThreadReplyTs(anyString(), anyString(), anyString());
+        verify(slack, never()).updateMessage(anyString(), anyString(), anyString(), any());
+    }
+
     // ── runStatus ────────────────────────────────────────────
 
     private static RunInfo run(long id) {
@@ -576,5 +745,26 @@ class CiAlertServiceTest {
 
         when(github.recentRuns("evi", 5, "main", 10)).thenThrow(new GitHubActionsException(500, "x"));
         assertThat(service.runStatus("evi", run(10))).isEmpty();
+    }
+
+    @Test
+    void runStreak_countsThisRun_andSeesWhetherALaterRunPassed() {
+        when(github.recentRuns("evi", 5, "main", 10)).thenReturn(List.of(
+                new RunSummary(12, "cancelled", "n2"), new RunSummary(11, "success", "n1"),
+                new RunSummary(10, "failure", "a"), new RunSummary(9, "failure", "b"), new RunSummary(8, "failure", "c")));
+        CiAlertService.RunStreak recovered = service.runStreak("evi", run(10));
+        assertThat(recovered.count()).isEqualTo(3);
+        assertThat(recovered.closed()).isFalse();
+        assertThat(recovered.recovered()).as("취소는 건너뛰고 그 앞의 성공을 본다").isTrue();
+
+        when(github.recentRuns("evi", 5, "main", 10)).thenReturn(List.of(
+                new RunSummary(12, "failure", "n2"), new RunSummary(11, "success", "n1"),
+                new RunSummary(10, "failure", "a"), new RunSummary(9, "success", "b")));
+        CiAlertService.RunStreak failingAgain = service.runStreak("evi", run(10));
+        assertThat(failingAgain.count()).isEqualTo(1);
+        assertThat(failingAgain.recovered()).as("가장 최근 실행이 다시 실패").isFalse();
+
+        when(github.recentRuns("evi", 5, "main", 10)).thenThrow(new GitHubActionsException(500, "x"));
+        assertThat(service.runStreak("evi", run(10)).count()).as("모르면 1 — 수정 단계가 돌지 않는다").isEqualTo(1);
     }
 }
