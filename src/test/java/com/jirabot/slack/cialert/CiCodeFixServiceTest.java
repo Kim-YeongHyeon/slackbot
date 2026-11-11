@@ -3,6 +3,7 @@ package com.jirabot.slack.cialert;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -131,6 +132,63 @@ class CiCodeFixServiceTest {
         assertThat(r.url()).isEqualTo("https://gh/evi/pull/12");
         assertThat(r.label()).isEqualTo("#12");
         assertThat(service.existing(req(true, true))).as("재처리에서 요청하면 다시 돌린다").isEmpty();
+    }
+
+    private void priorAttempt(String status) {
+        CiAlertEntity prior = new CiAlertEntity("C", "1.0");
+        prior.recordFix(KEY, status, "러너 쪽 문제라 레포 수정으로는 못 고쳐요.");
+        when(alerts.findFirstByChannelAndFixKeyAndFixStatusIsNotNullAndCreatedAtAfterAndIdNotOrderByCreatedAtDesc(
+                eq("C"), eq(KEY), any(), eq(1L))).thenReturn(Optional.of(prior));
+    }
+
+    @Test
+    void withinCooldown_aPrTouchingTheFailingWorkflowFile_isLinkedInsteadOfTheOldConclusion() {
+        priorAttempt("NOT_FIXABLE");
+        when(repos.listPulls("evi", "open")).thenReturn(List.of(
+                pull(20, "docs: readme", ""),
+                pull(21, "ci: stop mistaking a stale host dir for the mount", "## Why\n...")));
+        when(repos.pullFiles("evi", 20)).thenReturn(List.of("README.md"));
+        when(repos.pullFiles("evi", 21)).thenReturn(List.of(".github/workflows/gpu.yaml"));
+
+        Result r = service.existing(req(false, false)).orElseThrow();
+
+        assertThat(r.status()).isEqualTo(Status.RELATED);
+        assertThat(r.url()).isEqualTo("https://gh/evi/pull/21");
+        assertThat(r.label()).startsWith("#21 ci:");
+        assertThat(r.reused()).as("새 결과라 기록되고, 다음 알림은 이 PR 을 재사용한다").isFalse();
+        verify(agent, never()).runRaw(any(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void withinCooldown_noRelatedPr_botPr_orPriorAlreadyLinkedAPr_keepsReuse() {
+        priorAttempt("NOT_FIXABLE");
+        when(repos.listPulls("evi", "open")).thenReturn(List.of(
+                pull(20, "docs", ""),
+                pull(22, "fix(ci): other", "<!-- sol-ci-fix key=evi/99@main -->")));
+        when(repos.pullFiles("evi", 20)).thenReturn(List.of("README.md"));
+        when(repos.pullFiles("evi", 22)).thenReturn(List.of(".github/workflows/gpu.yaml"));
+
+        Result r = service.existing(req(false, false)).orElseThrow();
+        assertThat(r.status()).as("관련 없는 PR·봇 PR 은 링크하지 않는다").isEqualTo(Status.NOT_FIXABLE);
+        assertThat(r.reused()).isTrue();
+        verify(repos, never()).pullFiles("evi", 22);
+
+        priorAttempt("RELATED");
+        when(repos.pullFiles("evi", 20)).thenReturn(List.of(".github/workflows/gpu.yaml"));
+        assertThat(service.existing(req(false, false)).orElseThrow().status())
+                .as("이미 PR 을 알린 결과는 다시 찾지 않고 재사용").isEqualTo(Status.RELATED);
+    }
+
+    @Test
+    void relatedPrLookup_needsTheWorkflowFilePath() {
+        priorAttempt("NOT_FIXABLE");
+        RunInfo noPath = new RunInfo(1000, "GPU CI", 77, "abcdef1234", "main", "push", "failure", 1, RUN_URL, "msg", "dev", "");
+        Request r = new Request(1, "C", ALERT, noPath, 7, false, "fp", false, false);
+
+        when(repos.listPulls("evi", "open")).thenReturn(List.of(pull(21, "ci: x", "")));
+
+        assertThat(service.existing(r).orElseThrow().status()).isEqualTo(Status.NOT_FIXABLE);
+        verify(repos, never()).pullFiles(anyString(), anyInt());
     }
 
     @Test
@@ -330,6 +388,10 @@ class CiCodeFixServiceTest {
                 .contains("Workflows 권한 필요", "```-a\n+b```");
         assertThat(CiCodeFixService.render(Result.of(Status.FAILED, "변경이 너무 커요"), 3)).contains("⚠️ 수정 PR 을 만들지 못했어요: 변경이 너무 커요");
         assertThat(CiCodeFixService.render(Result.of(Status.DRY_RUN, "diff"), 1)).startsWith("🔧 *자동 수정*\n").contains("🧪 dry-run");
+        assertThat(CiCodeFixService.render(new Result(Status.RELATED, "https://gh/evi/pull/21", "#21 ci: <x>", "",
+                ".github/workflows/gpu.yaml", List.of(), false), 7))
+                .contains("이 워크플로 파일(`.github/workflows/gpu.yaml`)을 고치는 PR 이 올라왔어요",
+                        "<https://gh/evi/pull/21|#21 ci: &lt;x&gt;>", "이 실패를 고치는지 확인해 주세요");
     }
 
     @Test
@@ -338,6 +400,8 @@ class CiCodeFixServiceTest {
                 .isEqualTo("🔧 수정 PR <https://gh/evi/pull/12|#12> 이 올라와 있어요 — 머지되면 해결돼요");
         assertThat(CiCodeFixService.render(new Result(Status.NOT_FIXABLE, "", "", "", "시크릿이 비어 있어요.", List.of(), true), 5))
                 .isEqualTo("🔧 레포 수정으로는 고칠 수 없는 실패예요\n시크릿이 비어 있어요.");
+        assertThat(CiCodeFixService.render(new Result(Status.RELATED, "https://gh/evi/pull/21", "#21", "", ".github/workflows/gpu.yaml",
+                List.of(), true), 5)).isEqualTo("🔧 이 워크플로 파일을 고치는 열린 PR <https://gh/evi/pull/21|#21> 이 있어요");
         assertThat(CiCodeFixService.render(new Result(Status.FAILED, "", "", "", "x", List.of(), true), 5)).isEmpty();
         assertThat(CiCodeFixService.render(new Result(Status.SKIPPED, "", "", "", "x", List.of(), true), 5)).isEmpty();
     }

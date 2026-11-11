@@ -60,7 +60,8 @@ public class CiCodeFixService {
     }
 
     // PATCH: 워크플로 파일이라 봇 토큰으로 push 하지 못해 diff 만 답글로. NOT_FIXABLE: 원인이 레포 밖.
-    public enum Status { CREATED, EXISTS, PATCH, NOT_FIXABLE, SKIPPED, DRY_RUN, FAILED }
+    // RELATED: 앞선 시도 뒤에 사람이 올린 열린 PR 이 실패한 워크플로 파일을 고친다 (v0.0.101). 같은 원인인지는 사람이 본다.
+    public enum Status { CREATED, EXISTS, RELATED, PATCH, NOT_FIXABLE, SKIPPED, DRY_RUN, FAILED }
 
     // channel: 반복 판단과 같은 구분 (실제 알림 채널 또는 "DM:<user>"). force: 재처리에서 수정까지 요청함.
     public record Request(long alertId, String channel, CiAlert alert, RunInfo run, int streak, boolean recovered,
@@ -97,7 +98,8 @@ public class CiCodeFixService {
     public Optional<Result> existing(Request req) {
         String repo = req.alert().repo();
         String key = key(repo, req.run(), branch(req));
-        Optional<PullInfo> mine = repos.listPulls(repo, "open").stream()
+        List<PullInfo> open = repos.listPulls(repo, "open");
+        Optional<PullInfo> mine = open.stream()
                 .filter(p -> p.body() != null && p.body().contains(marker(key))).findFirst();
         if (mine.isPresent()) {
             PullInfo p = mine.get();
@@ -111,12 +113,35 @@ public class CiCodeFixService {
                 .findFirstByChannelAndFixKeyAndFixStatusIsNotNullAndCreatedAtAfterAndIdNotOrderByCreatedAtDesc(
                         req.channel(), key, since, req.alertId());
         if (prior.isPresent()) {
-            return Optional.of(reuse(prior.get()));
+            Result reused = reuse(prior.get());
+            // STUDY: 재사용은 "그때의 결론"이다. 그 뒤 누가 워크플로를 고치는 PR 을 올렸으면 옛 결론 대신 그 PR 을 알린다.
+            //        에이전트는 다시 돌리지 않는다 — PR 이 실패한 워크플로 파일을 바꾸는지만 본다.
+            if (reused.status() != Status.CREATED && reused.status() != Status.EXISTS && reused.status() != Status.RELATED) {
+                Optional<Result> related = relatedPr(repo, req.run().path(), open);
+                if (related.isPresent()) {
+                    return related;
+                }
+            }
+            return Optional.of(reused);
         }
         if (req.recovered()) {
             return Optional.of(Result.of(Status.SKIPPED, "이 알림 뒤의 실행이 이미 성공했어요"));
         }
         return Optional.empty();
+    }
+
+    // 실패한 워크플로 파일을 바꾸는 열린 PR (봇 PR 제외, 최근 갱신 순으로 maxOpenPrs 개까지 본다)
+    private Optional<Result> relatedPr(String repo, String workflowFile, List<PullInfo> open) {
+        if (workflowFile == null || workflowFile.isBlank()) {
+            return Optional.empty();
+        }
+        return open.stream()
+                .filter(p -> p.body() == null || !p.body().contains(MARKER))
+                .limit(codeProps.maxOpenPrs())
+                .filter(p -> filesOf(repo, p.number()).contains(workflowFile))
+                .findFirst()
+                .map(p -> new Result(Status.RELATED, p.htmlUrl(), "#" + p.number() + " " + p.title(), "",
+                        workflowFile, List.of(), false));
     }
 
     private static Result reuse(CiAlertEntity prior) {
@@ -300,10 +325,16 @@ public class CiCodeFixService {
             return switch (r.status()) {
                 case CREATED, EXISTS -> r.url().isBlank() ? ""
                         : "🔧 수정 PR <" + r.url() + "|" + escape(r.label()) + "> 이 올라와 있어요 — 머지되면 해결돼요";
+                case RELATED -> r.url().isBlank() ? ""
+                        : "🔧 이 워크플로 파일을 고치는 열린 PR <" + r.url() + "|" + escape(r.label()) + "> 이 있어요";
                 case PATCH -> "🔧 앞서 제안한 워크플로 수정이 아직 적용되지 않았어요" + line(r.detail());
                 case NOT_FIXABLE -> "🔧 레포 수정으로는 고칠 수 없는 실패예요" + line(r.detail());
                 default -> "";
             };
+        }
+        if (r.status() == Status.RELATED) {
+            return "🔧 *자동 수정* · 앞서 본 결론 뒤에 이 워크플로 파일(`" + escape(r.detail()) + "`)을 고치는 PR 이 올라왔어요\n"
+                    + "🔁 <" + r.url() + "|" + escape(r.label()) + "> — 이 실패를 고치는지 확인해 주세요. 에이전트는 다시 돌리지 않았어요.";
         }
         StringBuilder sb = new StringBuilder("🔧 *자동 수정*");
         if (streak >= 2) {
@@ -330,6 +361,7 @@ public class CiCodeFixService {
                     sb.append('\n').append(escape(cut(r.detail(), 600)));
                 }
             }
+            case RELATED -> { }
             case DRY_RUN -> sb.append("🧪 dry-run (push 안 함)\n").append(escape(r.detail()));
             case SKIPPED -> sb.append("건너뜀: ").append(escape(r.detail()));
             case FAILED -> sb.append("⚠️ 수정 PR 을 만들지 못했어요: ").append(escape(r.detail()));
