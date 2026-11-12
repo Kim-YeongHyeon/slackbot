@@ -102,6 +102,9 @@ class CiAlertParserTest {
     void isFailureAlert_acceptsTheTwoAlertWorkflowHeadlines() {
         assertThat(CiAlertParser.isFailureAlert(CI_ALERT)).isTrue();
         assertThat(CiAlertParser.isFailureAlert(":rotating_light: *SBOM pipeline failed on main*\nrun: <u>")).isTrue();
+        assertThat(CiAlertParser.isFailureAlert(":rotating_light: *SBOM pipeline and Go checks failed on main*\nrun: <u>"))
+                .as("envector #2779 부터 Go 검사도 같은 알림").isTrue();
+        assertThat(CiAlertParser.isFailureAlert(":rotating_light: *Go checks failed on main*\nrun: <u>")).isTrue();
         assertThat(CiAlertParser.isFailureAlert(
                 ":rotating_light: *release run failed on main (step list unavailable — possible SBOM failure)*\nrun: <u>"))
                 .isTrue();
@@ -122,6 +125,9 @@ class CiAlertParserTest {
                 .isFalse();
         assertThat(CiAlertParser.isFailureAlert("see :rotating_light: *evi main failed on main* (CryptoLabInc/evi)"))
                 .as("제목은 글 맨 앞에 있어야 함").isFalse();
+        assertThat(CiAlertParser.isFailureAlert(":rotating_light: *Nightly Go checks failed on main*" + run))
+                .as("Go checks 로 시작해야 한다").isFalse();
+        assertThat(CiAlertParser.isFailureAlert(":rotating_light: *Go checks passed on main*" + run)).isFalse();
         assertThat(CiAlertParser.isFailureAlert(null)).isFalse();
         assertThat(CiAlertParser.isFailureAlert("")).isFalse();
     }
