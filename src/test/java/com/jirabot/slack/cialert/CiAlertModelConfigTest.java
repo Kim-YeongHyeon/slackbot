@@ -2,6 +2,7 @@ package com.jirabot.slack.cialert;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.env.YamlPropertySourceLoader;
@@ -50,12 +51,14 @@ class CiAlertModelConfigTest {
         assertThat(env.getProperty("ci-alert.code-fix.model")).isEqualTo("claude-opus-5-5");
         assertThat(env.getProperty("ci-alert.code-fix.effort")).isEqualTo("high");
         assertThat(env.getProperty("ci-alert.code-fix.min-streak")).isEqualTo("3");
+        assertThat(env.getProperty("ci-alert.code-fix.go-check-steps[1]")).isEqualTo("Go vulnerability check (govulncheck)");
+        assertThat(env.getProperty("ci-alert.code-fix.go-check-max-files")).isEqualTo("30");
         assertThat(env(Map.of("CI_ALERT_CODE_FIX_MODEL", "opus")).getProperty("ci-alert.code-fix.model")).isEqualTo("opus");
     }
 
     @Test
     void codeFixProperties_fillDefaults() {
-        CiCodeFixProperties p = new CiCodeFixProperties(null, 0, " ", null, 0, 0, null, 0, 0, 0, 0);
+        CiCodeFixProperties p = new CiCodeFixProperties(null, 0, " ", null, 0, 0, null, 0, 0, 0, 0, null, null, 0);
 
         assertThat(p.enabled()).isTrue();
         assertThat(p.minStreak()).isEqualTo(3);
@@ -63,6 +66,11 @@ class CiAlertModelConfigTest {
         assertThat(p.effort()).isEqualTo("high");
         assertThat(p.timeoutMinutes()).isEqualTo(30);
         assertThat(p.cooldownHours()).isEqualTo(24);
-        assertThat(new CiCodeFixProperties(false, 5, "m", "", 1, 1, "p", 1, 1, 1, 1).effort()).as("빈 effort 는 플래그 없음").isEmpty();
+        assertThat(p.goCheckSteps()).containsExactly("Go version check", "Go vulnerability check (govulncheck)");
+        assertThat(p.goCheckPromptFile()).isEqualTo("prompts/go-check-fix-agent.md");
+        assertThat(p.goCheckMaxFiles()).isEqualTo(30);
+        assertThat(new CiCodeFixProperties(true, 3, "m", "h", 1, 1, "p", 1, 1, 1, 1, List.of(), " ", 0).goCheckSteps())
+                .as("빈 목록은 기본값").hasSize(2);
+        assertThat(new CiCodeFixProperties(false, 5, "m", "", 1, 1, "p", 1, 1, 1, 1, List.of("x"), "g", 1).effort()).as("빈 effort 는 플래그 없음").isEmpty();
     }
 }

@@ -79,9 +79,14 @@ public class CiAlertService {
 
     // 답글 대상: 알림 스레드, 또는 재처리 테스트(dry-run)면 지정한 사용자의 DM.
     // fix: 재처리에서 자동 수정까지 돌릴지 (dry-run 이면 push 없이 diff 만 DM 으로).
-    record Target(String channel, String alertTs, String dryRunUser, boolean fix) {
+    // atRunCommit: dry-run 에서 수정 에이전트를 브랜치 HEAD 대신 실패한 run 의 커밋에서 돌린다 (v0.0.103, 이미 고쳐진 뒤 시험용).
+    record Target(String channel, String alertTs, String dryRunUser, boolean fix, boolean atRunCommit) {
         Target(String channel, String alertTs, String dryRunUser) {
-            this(channel, alertTs, dryRunUser, false);
+            this(channel, alertTs, dryRunUser, false, false);
+        }
+
+        Target(String channel, String alertTs, String dryRunUser, boolean fix) {
+            this(channel, alertTs, dryRunUser, fix, false);
         }
 
         boolean dryRun() {
@@ -143,8 +148,15 @@ public class CiAlertService {
     }
 
     public long replay(String ts, String dryRunUser, boolean fix) {
+        return replay(ts, dryRunUser, fix, false);
+    }
+
+    public long replay(String ts, String dryRunUser, boolean fix, boolean atRunCommit) {
         if (!props.effectivelyEnabled()) {
             throw new IllegalStateException("ci-alert 기능이 꺼져 있어요 (GITHUB_ALERT_TOKEN 확인)");
+        }
+        if (atRunCommit && (dryRunUser == null || dryRunUser.isBlank())) {
+            throw new IllegalArgumentException("atRunCommit 은 dry-run(dryRunUser)에서만 쓸 수 있어요");
         }
         SlackHistoryMessage m = slack.getMessage(props.channel(), ts)
                 .orElseThrow(() -> new IllegalArgumentException("채널에서 메시지를 찾을 수 없어요: " + ts));
@@ -152,7 +164,7 @@ public class CiAlertService {
             throw new IllegalArgumentException("알림 앱이 올린 메시지가 아니에요: " + ts);
         }
         boolean dryRun = dryRunUser != null && !dryRunUser.isBlank();
-        Target target = new Target(props.channel(), ts, dryRun ? dryRunUser : null, fix);
+        Target target = new Target(props.channel(), ts, dryRun ? dryRunUser : null, fix, atRunCommit);
         CiAlertEntity row;
         if (dryRun) {
             row = new CiAlertEntity(target.rowChannel(), ts + "#" + System.currentTimeMillis());
@@ -176,6 +188,10 @@ public class CiAlertService {
     }
 
     public long replayRun(String runUrl, String dryRunUser, boolean fix) {
+        return replayRun(runUrl, dryRunUser, fix, false);
+    }
+
+    public long replayRun(String runUrl, String dryRunUser, boolean fix, boolean atRunCommit) {
         if (!props.effectivelyEnabled()) {
             throw new IllegalStateException("ci-alert 기능이 꺼져 있어요 (GITHUB_ALERT_TOKEN 확인)");
         }
@@ -185,7 +201,7 @@ public class CiAlertService {
         String text = "run: <" + runUrl + ">";
         CiAlert alert = CiAlertParser.parse(text, props.org(), props.repos())
                 .orElseThrow(() -> new IllegalArgumentException("대상 레포의 GitHub Actions run 링크가 아니에요: " + runUrl));
-        Target target = new Target(props.channel(), null, dryRunUser, fix);
+        Target target = new Target(props.channel(), null, dryRunUser, fix, atRunCommit);
         long id = repository.saveAndFlush(new CiAlertEntity(target.rowChannel(),
                 "run:" + alert.runId() + "#" + System.currentTimeMillis())).getId();
         dispatch(id, text, target);
@@ -255,10 +271,16 @@ public class CiAlertService {
         }
         // STUDY: 알림 제목이 아니라 GitHub 가 알려준 "실패한 step 이름"으로 판단한다 (v0.0.93).
         //        HE-KMS release 처럼 일반 CI 알림 제목으로 오는 grype 실패도 취약점 표로 답하기 위해서.
+        // STUDY: Go 버전·govulncheck 검사 실패 (v0.0.103) — 연속 횟수와 상관없이 첫 알림부터 수정 단계를 돈다.
+        //        SBOM 실패와 같이 오면 SBOM 답글 뒤에, 아니면 분석 답글 뒤에 (아래 codeFix 의 mode).
+        List<String> goSteps = codeFix.goCheckSteps(allFailed.stream().flatMap(j -> j.failedStepNames().stream()).toList());
         if (sbomScanFailed(allFailed)) {
             Optional<GrypeReport> report = sbomReader.read(repo, run.id());
             if (report.isPresent() && !report.get().isEmpty()) {
                 replySbom(row, alert, target, run, report.get());
+                if (!goSteps.isEmpty()) {
+                    goChecksAfterSbom(row, alert, target, run, allFailed, goSteps);
+                }
                 return;
             }
             log.info("ci-alert SBOM run={} has no grype artifact/findings — falling back to log analysis", run.id());
@@ -303,8 +325,12 @@ public class CiAlertService {
                     streak.label().isBlank() ? "(알 수 없음)" : streak.label(), jobs, cut(alert.text(), ALERT_TEXT_MAX));
         };
 
+        CiCodeFixService.Mode mode = goSteps.isEmpty() ? CiCodeFixService.Mode.STREAK : CiCodeFixService.Mode.GO_CHECKS;
+        // Go 검사 모드의 에이전트에게는 Go 검사 job 만 보여 준다 (같은 run 의 다른 실패는 이 수정의 범위가 아니다).
+        Supplier<CiFailureAnalyzer.Input> fixInputOf = mode == CiCodeFixService.Mode.STREAK ? inputOf
+                : () -> onlyJobs(inputOf.get(), goSteps);
         if (replyIfRepeat(row, target, repo, fingerprint)) {
-            codeFix(row, alert, target, run, streak, fingerprint, inputOf, row.getCategory(), row.getSummary());
+            codeFix(row, alert, target, run, streak, fingerprint, fixInputOf, row.getCategory(), row.getSummary(), mode, goSteps);
             return;
         }
 
@@ -320,19 +346,66 @@ public class CiAlertService {
         row.finish(Status.DONE, fingerprint, a.category(), a.summary(), ts.orElse(null));
         repository.save(row);
         react(target, "white_check_mark");
-        codeFix(row, alert, target, run, streak, fingerprint, () -> input, a.category(), a.summary());
+        codeFix(row, alert, target, run, streak, fingerprint,
+                mode == CiCodeFixService.Mode.STREAK ? () -> input : () -> onlyJobs(input, goSteps), a.category(), a.summary(),
+                mode, goSteps);
+    }
+
+    private static CiFailureAnalyzer.Input onlyJobs(CiFailureAnalyzer.Input in, List<String> goSteps) {
+        List<CiFailureAnalyzer.FailedJob> jobs = in.failedJobs().stream()
+                .filter(j -> j.failedSteps().stream().anyMatch(goSteps::contains)).toList();
+        return new CiFailureAnalyzer.Input(in.repo(), in.workflow(), in.runUrl(), in.branch(), in.headSha(),
+                in.commitMessage(), in.commitAuthor(), in.changedFiles(), in.recentRuns(),
+                jobs.isEmpty() ? in.failedJobs() : jobs, in.alertText());
+    }
+
+    // SBOM 답글 뒤의 Go 검사 수정 단계. SBOM 경로는 job 로그를 받지 않았으므로 Go 검사 job 로그만 따로 받는다.
+    private void goChecksAfterSbom(CiAlertEntity row, CiAlert alert, Target target, RunInfo run, List<JobInfo> allFailed,
+                                   List<String> goSteps) {
+        if (!codeFix.wants(CiCodeFixService.Mode.GO_CHECKS, 0, target.dryRun(), target.fix())) {
+            return;
+        }
+        String repo = alert.repo();
+        List<CiFailureAnalyzer.FailedJob> jobs = new ArrayList<>();
+        List<String> steps = new ArrayList<>();
+        List<String> errorLines = new ArrayList<>();
+        for (JobInfo j : allFailed) {
+            List<String> hit = j.failedStepNames().stream().filter(goSteps::contains).toList();
+            if (hit.isEmpty()) {
+                continue;
+            }
+            List<String> lines = LogExcerpts.cleanLines(downloadLog(repo, j));
+            errorLines.addAll(LogExcerpts.errorContext(lines));
+            hit.forEach(s -> steps.add(j.name() + " → " + s));
+            jobs.add(new CiFailureAnalyzer.FailedJob(j.name(), j.failedStepNames(),
+                    lines.isEmpty() ? "(로그를 받지 못함)" : LogExcerpts.excerpt(lines, EXCERPT_PER_JOB)));
+        }
+        String fingerprint = LogExcerpts.fingerprint(repo, "go-checks", steps, errorLines);
+        RunStreak streak = runStreak(repo, run);
+        Supplier<CiFailureAnalyzer.Input> input = () -> {
+            CommitInfo commit = commitOrEmpty(repo, run);
+            return new CiFailureAnalyzer.Input(repo, run.name(), alert.runUrl(), run.headBranch(), run.headSha(),
+                    commit.message().isBlank() ? run.commitMessage() : commit.message(),
+                    commit.author().isBlank() ? run.commitAuthor() : commit.author(), commit.files(),
+                    streak.label().isBlank() ? "(알 수 없음)" : streak.label(), jobs, cut(alert.text(), ALERT_TEXT_MAX));
+        };
+        codeFix(row, alert, target, run, streak, fingerprint, input, "", "", CiCodeFixService.Mode.GO_CHECKS, goSteps);
     }
 
     // STUDY: 연속 실패 자동 수정 (v0.0.100). 이미 올라온 PR·앞선 시도가 있으면 그 링크만 달고, 없으면 "찾는 중"
     //        답글을 먼저 단 뒤 에이전트 결과로 바꾼다 (SBOM 의 runFix 와 같은 방식). 여기서 나는 오류는 분석 답글을 깨지 않는다.
     private void codeFix(CiAlertEntity row, CiAlert alert, Target target, RunInfo run, RunStreak streak, String fingerprint,
-                         Supplier<CiFailureAnalyzer.Input> input, String category, String summary) {
+                         Supplier<CiFailureAnalyzer.Input> input, String category, String summary,
+                         CiCodeFixService.Mode mode, List<String> goSteps) {
+        boolean go = mode == CiCodeFixService.Mode.GO_CHECKS;
         // 취약점 건은 SBOM 수정(grype 재검사)이 맡는다 — 아티팩트가 없어 로그 분석으로 온 경우에도 여기서는 손대지 않는다.
-        if ("VULNERABILITY".equals(category) || !codeFix.wants(streak.count(), target.dryRun(), target.fix())) {
+        // Go 검사(govulncheck 포함)는 SBOM 수정이 보지 않는 go.mod·툴체인이라 분류와 상관없이 돈다.
+        if ((!go && "VULNERABILITY".equals(category)) || !codeFix.wants(mode, streak.count(), target.dryRun(), target.fix())) {
             return;
         }
         CiCodeFixService.Request req = new CiCodeFixService.Request(row.getId(), target.rowChannel(), alert, run,
-                streak.count(), streak.recovered(), fingerprint, target.dryRun(), target.fix());
+                streak.count(), streak.recovered(), fingerprint, target.dryRun(), target.fix(), mode, goSteps,
+                target.atRunCommit() ? run.headSha() : null);
         Optional<String> placeholder = Optional.empty();
         CiCodeFixService.Result result;
         String key = null;
@@ -340,7 +413,9 @@ public class CiAlertService {
             key = codeFix.keyOf(req);
             result = codeFix.existing(req).orElse(null);
             if (result == null) {
-                placeholder = reply(target, "🔧 " + (streak.count() >= 2 ? streak.count() + "번 연속 실패라 " : "")
+                placeholder = reply(target, go
+                        ? "🔧 Go 검사(" + String.join(", ", goSteps) + ") 실패를 고치는 중이에요… (Claude 에이전트가 레포를 살펴봐요, 길면 30분)"
+                        : "🔧 " + (streak.count() >= 2 ? streak.count() + "번 연속 실패라 " : "")
                         + "원인을 다시 보고 수정 방법을 찾는 중이에요… (Claude 에이전트가 레포를 살펴봐요, 길면 30분)");
                 result = codeFix.fix(req, input.get(), category, summary);
             }
@@ -348,7 +423,7 @@ public class CiAlertService {
             log.warn("ci-alert code fix failed id={}: {}", row.getId(), e.toString());
             result = CiCodeFixService.Result.of(CiCodeFixService.Status.FAILED, e.getMessage() == null ? e.toString() : e.getMessage());
         }
-        String text = CiCodeFixService.render(result, streak.count());
+        String text = CiCodeFixService.render(result, streak.count(), mode);
         if (placeholder.isPresent() && !target.dryRun()) {
             slack.updateMessage(target.channel(), placeholder.get(), text, null);
         } else if (!text.isBlank()) {
@@ -358,7 +433,9 @@ public class CiAlertService {
         if (!result.reused() && key != null) {
             row.recordFix(key, result.status().name(), CiCodeFixService.record(result));
             if (result.url().contains("/pull/")) {
-                row.recordPrs(result.url());
+                // SBOM 알림 행에는 SBOM 수정 PR 이 이미 있을 수 있어 뒤에 붙인다 (재사용은 마지막 링크를 쓴다)
+                String prior = row.getPrUrls();
+                row.recordPrs(prior == null || prior.isBlank() ? result.url() : prior + "," + result.url());
             }
             repository.save(row);
         }

@@ -1,5 +1,6 @@
 package com.jirabot.slack.cialert;
 
+import java.util.List;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 // STUDY: 연속 실패 자동 수정 (v0.0.100) 설정. ci-alert.code-fix.* — 같은 워크플로가 minStreak 번 이상 연속 실패하면
@@ -21,7 +22,12 @@ public record CiCodeFixProperties(
         // 같은 워크플로·브랜치에 수정 단계를 다시 돌리기까지의 시간
         int cooldownHours,
         // 에이전트에게 보여 줄 열린 PR 수 (최근 갱신 순)
-        int maxOpenPrs
+        int maxOpenPrs,
+        // Go 검사 수정 (v0.0.103): 이 step 이름이 실패하면 연속 횟수와 상관없이 첫 알림부터 고친다.
+        List<String> goCheckSteps,
+        String goCheckPromptFile,
+        // Go 버전 올리기는 go.mod·Dockerfile·고정값이 여러 곳이라 파일 수 상한을 따로 둔다 (envector #2812 는 19개)
+        int goCheckMaxFiles
 ) {
     public CiCodeFixProperties {
         if (enabled == null) {
@@ -56,6 +62,18 @@ public record CiCodeFixProperties(
         }
         if (maxOpenPrs <= 0) {
             maxOpenPrs = 20;
+        }
+        // STUDY: 빈 리스트도 "설정 안 함"으로 본다 — 끄려면 code-fix.enabled 를 쓴다.
+        if (goCheckSteps == null || goCheckSteps.isEmpty()) {
+            goCheckSteps = List.of("Go version check", "Go vulnerability check (govulncheck)");
+        } else {
+            goCheckSteps = List.copyOf(goCheckSteps);
+        }
+        if (goCheckPromptFile == null || goCheckPromptFile.isBlank()) {
+            goCheckPromptFile = "prompts/go-check-fix-agent.md";
+        }
+        if (goCheckMaxFiles <= 0) {
+            goCheckMaxFiles = 30;
         }
     }
 }

@@ -20,7 +20,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 인터랙티브 버튼 | 이슈 생성 알림에 "진행 중" / "완료" 버튼 → 클릭으로 Jira 상태 전환 |
 | 브랜치 만들기 | "진행 중" 전환 시 **repo 선택 버튼**을 띄워 클릭하면 봇이 GitHub API로 브랜치 직접 생성(브랜치명은 Claude가 한글 요약→영어 슬러그, `feature/`·`bugfix/`). 브랜치명에 이슈키가 있어 Jira 개발 패널에 자동 연결. `github.token` 미설정 시 Jira 개발 패널 링크 안내로 폴백 |
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
-| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94, nightly·벤치마크 글은 무시 — v0.0.95, 분석·수정 모델 Sonnet 5 — v0.0.96, 서브모듈은 팀 PR 링크 — v0.0.97, 이미 반영된 수정은 건너뜀 — v0.0.98, 3번 이상 연속 실패하면 수정 PR 링크·자동 생성(Opus) — v0.0.100, 그 뒤 올라온 워크플로 수정 PR 링크 — v0.0.101, envector 의 "SBOM pipeline and Go checks"·"Go checks" 알림 인식 — v0.0.102 |
+| CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94, nightly·벤치마크 글은 무시 — v0.0.95, 분석·수정 모델 Sonnet 5 — v0.0.96, 서브모듈은 팀 PR 링크 — v0.0.97, 이미 반영된 수정은 건너뜀 — v0.0.98, 3번 이상 연속 실패하면 수정 PR 링크·자동 생성(Opus) — v0.0.100, 그 뒤 올라온 워크플로 수정 PR 링크 — v0.0.101, envector 의 "SBOM pipeline and Go checks"·"Go checks" 알림 인식 — v0.0.102, Go 버전·govulncheck 실패는 첫 알림부터 수정 PR — v0.0.103 |
 | 문서 질문 | `@지라 질문 <소스> <질문>` → 미리 조각내 임베딩해 둔 문서에서 찾아 Claude 가 출처와 함께 답변 — v0.0.99 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
@@ -205,6 +205,21 @@ sudo docker run --rm -v "$PWD/rag":/rag -w /rag python:3.12-slim \
 - 설정(`ci-alert.code-fix.*`): `CI_ALERT_CODE_FIX_ENABLED`(true), `_MIN_STREAK`(3), `_MODEL`(`claude-opus-5-5`), `_EFFORT`(`high`), `_TIMEOUT_MINUTES`(30), `_MAX_TURNS`(100), `_MAX_DIFF_LINES`(300), `_MAX_FILES`(10), `_COOLDOWN_HOURS`(24), `_MAX_OPEN_PRS`(20). `CLAUDE_CODE_OAUTH_TOKEN` 이 비면 꺼진다.
 - 재처리: `POST /api/admin/ci-alerts/replay {"runUrl"|"ts", "dryRunUser", "fix": true}` — `fix: true` 면 연속 횟수와 상관없이 수정 단계를 돌린다. dry-run 이면 push 없이 원인과 diff 만 DM 으로 온다.
 - DB: `ci_alerts` 에 `fix_key`, `fix_status`, `fix_detail` 추가(V11).
+
+### Go 검사 실패는 첫 알림부터 수정 PR (v0.0.103)
+
+envector 의 `release.yaml` `Go checks` 잡에서 **`Go version check`** 나 **`Go vulnerability check (govulncheck)`** 가 실패하면, 연속 횟수와 상관없이 위 수정 단계를 "Go 검사 모드"로 돌린다.
+판단은 알림 제목이 아니라 GitHub 의 실패 step 이름으로 한다. `gosec`·`go-licenses` 는 고치는 방법이 기계적이지 않아 대상이 아니다(지금처럼 분석 + 3번 연속 규칙).
+
+- SBOM 실패와 같이 오면 SBOM 답글·SBOM 수정 뒤에, Go 검사만 실패하면 분석 답글 뒤에 돈다. 에이전트에게는 Go 검사 job 의 로그만 보여 준다.
+- key 는 `<repo>/go-checks@<branch>` 라 워크플로 연속 실패 수정과 따로 센다. 24시간 재사용 중에 사람이 `go.mod` 를 바꾸는 PR 을 열면 그 PR 을 링크한다.
+- 에이전트(Opus high, 프롬프트 `prompts/go-check-fix-agent.md`)는 먼저 워크플로의 검사 명령을 브랜치 HEAD 에서 다시 돌린다. 이미 통과하면 "이미 고쳐졌어요"로 끝난다.
+  - Go 버전: 검사 스크립트가 보는 모든 고정값(go.mod, `ARG GO_VERSION`, `golang:<ver>@sha256:` 이미지)을 올린다. 이미지 digest 는 레지스트리 API 로 조회한다.
+  - govulncheck: 모듈은 `go get <mod>@<fixed>` + `go mod tidy`, 표준 라이브러리는 Go 버전 올리기.
+  - 바이너리 해시 같은 고정 결과물은 이전 버전으로 다시 빌드해 기존 해시가 그대로 나올 때만 갱신한다. 아니면 PR 본문 `## 남은 일` 에 적는다.
+- 브랜치 `bot/go-checks-<지문 8자>`, 파일 상한 30개(Go 버전 하나 올리는 데 go.mod·Dockerfile·고정값이 20곳 가까이 바뀐다).
+- 설정: `ci-alert.code-fix.go-check-steps`, `CI_ALERT_GO_CHECK_PROMPT_FILE`, `CI_ALERT_GO_CHECK_MAX_FILES`(30).
+- 재처리에 `"atRunCommit": true`(dry-run 전용)를 주면 에이전트가 브랜치 HEAD 대신 실패한 run 의 커밋에서 돈다. 이미 고쳐진 뒤에 수정 경로를 시험할 때 쓴다.
 
 ### 이미 반영된 수정은 에이전트 없이 건너뜀 (v0.0.98)
 

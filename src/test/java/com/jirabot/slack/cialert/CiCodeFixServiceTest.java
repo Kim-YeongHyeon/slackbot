@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -67,7 +68,7 @@ class CiCodeFixServiceTest {
 
     private CiCodeFixService service(String oauth, boolean enabled) {
         CiFixProperties fixProps = new CiFixProperties(true, oauth, null, 0, 0, 0, null, null, null, null, null, null, 0);
-        CiCodeFixProperties codeProps = new CiCodeFixProperties(enabled, 0, null, null, 0, 0, null, 0, 0, 0, 0);
+        CiCodeFixProperties codeProps = new CiCodeFixProperties(enabled, 0, null, null, 0, 0, null, 0, 0, 0, 0, null, null, 0);
         return new CiCodeFixService(fixProps, codeProps, repos, alerts, workspace, agent, guard, om);
     }
 
@@ -390,7 +391,7 @@ class CiCodeFixServiceTest {
         assertThat(CiCodeFixService.render(Result.of(Status.DRY_RUN, "diff"), 1)).startsWith("🔧 *자동 수정*\n").contains("🧪 dry-run");
         assertThat(CiCodeFixService.render(new Result(Status.RELATED, "https://gh/evi/pull/21", "#21 ci: <x>", "",
                 ".github/workflows/gpu.yaml", List.of(), false), 7))
-                .contains("이 워크플로 파일(`.github/workflows/gpu.yaml`)을 고치는 PR 이 올라왔어요",
+                .contains("관련 파일(`.github/workflows/gpu.yaml`)을 고치는 PR 이 올라왔어요",
                         "<https://gh/evi/pull/21|#21 ci: &lt;x&gt;>", "이 실패를 고치는지 확인해 주세요");
     }
 
@@ -401,7 +402,7 @@ class CiCodeFixServiceTest {
         assertThat(CiCodeFixService.render(new Result(Status.NOT_FIXABLE, "", "", "", "시크릿이 비어 있어요.", List.of(), true), 5))
                 .isEqualTo("🔧 레포 수정으로는 고칠 수 없는 실패예요\n시크릿이 비어 있어요.");
         assertThat(CiCodeFixService.render(new Result(Status.RELATED, "https://gh/evi/pull/21", "#21", "", ".github/workflows/gpu.yaml",
-                List.of(), true), 5)).isEqualTo("🔧 이 워크플로 파일을 고치는 열린 PR <https://gh/evi/pull/21|#21> 이 있어요");
+                List.of(), true), 5)).isEqualTo("🔧 관련 파일(`.github/workflows/gpu.yaml`)을 고치는 열린 PR <https://gh/evi/pull/21|#21> 이 있어요");
         assertThat(CiCodeFixService.render(new Result(Status.FAILED, "", "", "", "x", List.of(), true), 5)).isEmpty();
         assertThat(CiCodeFixService.render(new Result(Status.SKIPPED, "", "", "", "x", List.of(), true), 5)).isEmpty();
     }
@@ -410,5 +411,112 @@ class CiCodeFixServiceTest {
     void record_keepsFirstLineOfCause() {
         assertThat(CiCodeFixService.record(new Result(Status.CREATED, "u", "l", "첫 줄\n둘째 줄", "d", List.of(), false))).isEqualTo("첫 줄");
         assertThat(CiCodeFixService.record(Result.of(Status.FAILED, "이유"))).isEqualTo("이유");
+    }
+
+    // ── Go 검사 모드 (v0.0.103) ─────────────────────────────
+
+    private static final List<String> GO_STEPS = List.of("Go version check", "Go vulnerability check (govulncheck)");
+
+    private static Request goReq(boolean dryRun, boolean force, String ref) {
+        return new Request(1, "C", ALERT, RUN, 1, false, "f00dcafe1234", dryRun, force, CiCodeFixService.Mode.GO_CHECKS,
+                GO_STEPS, ref);
+    }
+
+    @Test
+    void goChecks_runFromTheFirstFailure_andOnlyForConfiguredSteps() {
+        assertThat(service.wants(CiCodeFixService.Mode.GO_CHECKS, 1, false, false)).isTrue();
+        assertThat(service.wants(CiCodeFixService.Mode.STREAK, 1, false, false)).isFalse();
+        assertThat(service.wants(CiCodeFixService.Mode.GO_CHECKS, 1, true, false)).as("dry-run 은 요청했을 때만").isFalse();
+        assertThat(service("oauth", false).wants(CiCodeFixService.Mode.GO_CHECKS, 1, false, false)).isFalse();
+        assertThat(service.goCheckSteps(List.of("Build", "Go vulnerability check (govulncheck)", "Go secure coding check (gosec)",
+                "Go vulnerability check (govulncheck)"))).as("gosec 은 대상이 아니다").containsExactly("Go vulnerability check (govulncheck)");
+        assertThat(service.goCheckSteps(List.of("Go license check (go-licenses)"))).isEmpty();
+    }
+
+    @Test
+    void goChecks_haveTheirOwnKey_soABotPrForTheWorkflowIsNotMistakenForIt() {
+        assertThat(service.keyOf(goReq(false, false, null))).isEqualTo("evi/go-checks@main");
+        when(repos.listPulls("evi", "open")).thenReturn(List.of(
+                pull(5, "fix(ci): mount", "<!-- sol-ci-fix key=evi/77@main -->"),
+                pull(6, "fix(go): Go 1.26.11", "<!-- sol-ci-fix key=evi/go-checks@main -->")));
+
+        Result r = service.existing(goReq(false, false, null)).orElseThrow();
+
+        assertThat(r.status()).isEqualTo(Status.EXISTS);
+        assertThat(r.url()).isEqualTo("https://gh/evi/pull/6");
+    }
+
+    @Test
+    void goChecks_withinCooldown_linkAHumanPrThatChangesAGoMod() {
+        CiAlertEntity prior = new CiAlertEntity("C", "1.0");
+        prior.recordFix("evi/go-checks@main", "FAILED", "변경이 너무 커요");
+        when(alerts.findFirstByChannelAndFixKeyAndFixStatusIsNotNullAndCreatedAtAfterAndIdNotOrderByCreatedAtDesc(
+                eq("C"), eq("evi/go-checks@main"), any(), eq(1L))).thenReturn(Optional.of(prior));
+        when(repos.listPulls("evi", "open")).thenReturn(List.of(pull(30, "docs", ""), pull(31, "fix(build): Go 1.26.11", "")));
+        when(repos.pullFiles("evi", 30)).thenReturn(List.of("README.md", ".github/workflows/gpu.yaml"));
+        when(repos.pullFiles("evi", 31)).thenReturn(List.of("build/docker/x/Dockerfile", "services/go.mod"));
+
+        Result r = service.existing(goReq(false, false, null)).orElseThrow();
+
+        assertThat(r.status()).as("Go 모드는 워크플로 파일이 아니라 go.mod 로 본다").isEqualTo(Status.RELATED);
+        assertThat(r.url()).isEqualTo("https://gh/evi/pull/31");
+        assertThat(r.detail()).isEqualTo("services/go.mod");
+    }
+
+    @Test
+    void goChecks_agentGetsGoPrompt_failedChecks_andWiderFileLimit_andPrIsNamedForGo() throws Exception {
+        agentSays("""
+                {"outcome":"fixed","title":"fix(build): build with Go 1.26.11 to clear GO-2026-6859",
+                 "root_cause":"Go 1.26.10 이 최신 패치가 아니고 GO-2026-6859 가 stdlib 에 있어요.","summary":"Go 를 1.26.11 로 올렸어요.",
+                 "verification":"check_go_version.py 통과","manual_steps":["verifier_sha256 을 다시 빌드해 갱신"],"notes":""}""");
+        when(guard.check(eq(ws), any())).thenReturn(new DiffGuard.Verdict(true, List.of("services/go.mod"), 2, "", "-go 1.26.10\n+go 1.26.11"));
+        when(repos.branchHead(eq("evi"), eq("bot/go-checks-f00dcafe"))).thenReturn(Optional.empty());
+        when(repos.createPull(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(pull(40, "t", "b"));
+
+        Result r = service.fix(goReq(false, false, "a".repeat(40)), INPUT, "", "");
+
+        assertThat(r.status()).isEqualTo(Status.CREATED);
+        assertThat(r.steps()).containsExactly("verifier_sha256 을 다시 빌드해 갱신");
+        verify(workspace).prepare(eq("evi"), contains("-gofix-"), eq("main"));   // 실제 PR 은 ref 를 무시하고 HEAD 에서
+        ArgumentCaptor<String> task = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<FixAgentRunner.AgentSpec> spec = ArgumentCaptor.forClass(FixAgentRunner.AgentSpec.class);
+        verify(agent).runRaw(eq(ws), task.capture(), anyString(), spec.capture());
+        assertThat(spec.getValue().promptFile()).isEqualTo("prompts/go-check-fix-agent.md");
+        assertThat(task.getValue()).startsWith("Fix these failed Go checks.")
+                .contains("\"failed_checks\":[\"Go version check\",\"Go vulnerability check (govulncheck)\"]");
+        ArgumentCaptor<DiffGuard.Policy> policy = ArgumentCaptor.forClass(DiffGuard.Policy.class);
+        verify(guard).check(eq(ws), policy.capture());
+        assertThat(policy.getValue().maxFiles()).isEqualTo(30);
+        ArgumentCaptor<String> body = ArgumentCaptor.forClass(String.class);
+        verify(repos).createPull(eq("evi"), eq("bot/go-checks-f00dcafe"), eq("main"),
+                eq("fix(build): build with Go 1.26.11 to clear GO-2026-6859"), body.capture());
+        assertThat(body.getValue()).contains("Go 검사 `Go version check`, `Go vulnerability check (govulncheck)` 가 실패",
+                "## 남은 일\n- [ ] verifier_sha256 을 다시 빌드해 갱신", "<!-- sol-ci-fix key=evi/go-checks@main -->");
+        assertThat(CiCodeFixService.render(r, 1, CiCodeFixService.Mode.GO_CHECKS))
+                .startsWith("🔧 *자동 수정* · Go 검사 실패라 바로 고쳐 봤어요\n")
+                .contains("*수정 PR* <https://gh/evi/pull/40|", "*남은 일*\n• verifier_sha256 을 다시 빌드해 갱신");
+    }
+
+    @Test
+    void goChecks_alreadyFixedOnHead_isSkippedWithoutGit_andDryRunCanUseTheRunCommit() throws Exception {
+        String sha = "b".repeat(40);
+        when(workspace.prepare(anyString(), anyString(), anyString(), anyString())).thenReturn(ws);
+        agentSays("{\"outcome\":\"already_fixed\",\"root_cause\":\"HEAD 에서는 Go 1.26.11 이에요.\"}");
+
+        Result r = service.fix(goReq(true, true, sha), INPUT, "", "");
+
+        assertThat(r.status()).isEqualTo(Status.SKIPPED);
+        assertThat(r.detail()).contains("이미 통과");
+        verify(workspace).prepare(eq("evi"), anyString(), eq("main"), eq(sha));
+        verify(guard, never()).check(any(), any());
+        verify(workspace, never()).commitAndPush(any(), anyList(), anyString(), anyString(), anyString());
+        assertThat(goReq(false, false, sha).ref()).as("실제 알림은 ref 를 쓰지 않는다").isNull();
+        assertThat(CiCodeFixService.title("", "w", CiCodeFixService.Mode.GO_CHECKS)).isEqualTo("fix(go): Go 검사 실패 수정");
+        assertThat(CiCodeFixService.alertHints(":rotating_light: *Go checks failed on main*\nfailed steps:\nGo checks → Go version check\n"
+                + "Go version: raise services/go.mod to the version in the step log\n"
+                + "govulncheck: bump each module (go get <module>@<version>)\n"))
+                .containsExactly("Go version: raise services/go.mod to the version in the step log",
+                        "govulncheck: bump each module (go get <module>@<version>)");
+        assertThat(CiCodeFixService.alertHints(null)).isEmpty();
     }
 }

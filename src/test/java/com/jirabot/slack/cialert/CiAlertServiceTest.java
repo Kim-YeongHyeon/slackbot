@@ -565,7 +565,7 @@ class CiAlertServiceTest {
         stubRun("##[error]boom\n");
         stubStreak(3);
         when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
-        when(codeFix.wants(3, false, false)).thenReturn(true);
+        when(codeFix.wants(CiCodeFixService.Mode.STREAK, 3, false, false)).thenReturn(true);
         when(codeFix.keyOf(any())).thenReturn("evi/77@main");
         when(codeFix.existing(any())).thenReturn(Optional.empty());
         when(codeFix.fix(any(), any(), eq("INFRA"), eq("레지스트리 접속 실패예요."))).thenReturn(created());
@@ -603,7 +603,7 @@ class CiAlertServiceTest {
 
         service.submit(alertEvent(nowTs()));
 
-        verify(codeFix).wants(2, false, false);
+        verify(codeFix).wants(CiCodeFixService.Mode.STREAK, 2, false, false);
         verify(codeFix, never()).existing(any());
         verify(codeFix, never()).fix(any(), any(), any(), any());
         assertThat(store.get(1L).getFixStatus()).isNull();
@@ -615,7 +615,7 @@ class CiAlertServiceTest {
         stubStreak(4);
         when(analyzer.analyze(any())).thenReturn(Optional.of(
                 new CiAnalysis("VULNERABILITY", "high", "grype 게이트 실패예요.", "d", List.of(), List.of())));
-        when(codeFix.wants(4, false, false)).thenReturn(true);
+        when(codeFix.wants(CiCodeFixService.Mode.STREAK, 4, false, false)).thenReturn(true);
 
         service.submit(alertEvent(nowTs()));
 
@@ -631,7 +631,7 @@ class CiAlertServiceTest {
         prior.finish(Status.DONE, "fp", "CONFIG", "마운트 경로 문제예요.", "prior.reply");
         when(repository.findFirstByChannelAndRepoAndFingerprintAndStatusAndCreatedAtAfterAndIdNotOrderByCreatedAtDesc(
                 eq(CHANNEL), eq("evi"), anyString(), eq(Status.DONE), any(), any())).thenReturn(Optional.of(prior));
-        when(codeFix.wants(3, false, false)).thenReturn(true);
+        when(codeFix.wants(CiCodeFixService.Mode.STREAK, 3, false, false)).thenReturn(true);
         when(codeFix.keyOf(any())).thenReturn("evi/77@main");
         when(codeFix.existing(any())).thenReturn(Optional.empty());
         when(codeFix.fix(any(), any(), eq("CONFIG"), eq("마운트 경로 문제예요."))).thenReturn(created());
@@ -652,7 +652,7 @@ class CiAlertServiceTest {
         stubRun("##[error]boom\n");
         stubStreak(5);
         when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
-        when(codeFix.wants(5, false, false)).thenReturn(true);
+        when(codeFix.wants(CiCodeFixService.Mode.STREAK, 5, false, false)).thenReturn(true);
         when(codeFix.keyOf(any())).thenReturn("evi/77@main");
         when(codeFix.existing(any())).thenReturn(Optional.of(new CiCodeFixService.Result(CiCodeFixService.Status.CREATED,
                 "https://gh/evi/pull/12", "#12", "", "", List.of(), true)));
@@ -671,7 +671,7 @@ class CiAlertServiceTest {
         stubRun("##[error]boom\n");
         stubStreak(3);
         when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
-        when(codeFix.wants(3, false, false)).thenReturn(true);
+        when(codeFix.wants(CiCodeFixService.Mode.STREAK, 3, false, false)).thenReturn(true);
         when(codeFix.keyOf(any())).thenReturn("evi/77@main");
         when(codeFix.existing(any())).thenThrow(new GitHubActionsException(502, "bad gateway"));
         String ts = nowTs();
@@ -690,14 +690,14 @@ class CiAlertServiceTest {
         stubRun("##[error]boom\n");
         stubStreak(3);
         when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
-        when(codeFix.wants(3, true, true)).thenReturn(true);
+        when(codeFix.wants(CiCodeFixService.Mode.STREAK, 3, true, true)).thenReturn(true);
         when(codeFix.keyOf(any())).thenReturn("evi/77@main");
         when(codeFix.existing(any())).thenReturn(Optional.empty());
         when(codeFix.fix(any(), any(), anyString(), anyString())).thenReturn(
                 CiCodeFixService.Result.of(CiCodeFixService.Status.DRY_RUN, "파일 scripts/build.sh"));
 
         service.replayRun(RUN_URL, "U_ME");
-        verify(codeFix).wants(3, true, false);
+        verify(codeFix).wants(CiCodeFixService.Mode.STREAK, 3, true, false);
         verify(codeFix, never()).fix(any(), any(), any(), any());
 
         service.replayRun(RUN_URL, "U_ME", true);
@@ -709,6 +709,110 @@ class CiAlertServiceTest {
         verify(slack, org.mockito.Mockito.atLeastOnce()).sendDirectMessage(eq("U_ME"), org.mockito.ArgumentMatchers.contains("🧪 dry-run"));
         verify(slack, never()).postThreadReplyTs(anyString(), anyString(), anyString());
         verify(slack, never()).updateMessage(anyString(), anyString(), anyString(), any());
+    }
+
+    // ── Go 검사 수정 (v0.0.103) ─────────────────────────────
+
+    private void stubGoJobs(String repo, long runId, JobInfo other) {
+        when(github.listJobs(repo, runId, 1)).thenReturn(List.of(other,
+                new JobInfo(6, "Go checks", "failure", List.of(new StepInfo("Go version check", "failure"),
+                        new StepInfo("Go vulnerability check (govulncheck)", "failure")))));
+        when(github.downloadJobLogTail(eq(repo), eq(6L), anyInt()))
+                .thenReturn("##[error]Process completed with exit code 1.\n❌ Go 1.26.10 is behind; raise it to 1.26.11\n");
+        when(codeFix.goCheckSteps(any())).thenReturn(List.of("Go version check", "Go vulnerability check (govulncheck)"));
+        when(codeFix.wants(eq(CiCodeFixService.Mode.GO_CHECKS), anyInt(), eq(false), eq(false))).thenReturn(true);
+        when(codeFix.keyOf(any())).thenReturn(repo + "/go-checks@main");
+        when(codeFix.existing(any())).thenReturn(Optional.empty());
+    }
+
+    @Test
+    void sbomAndGoChecksFailed_sbomReplyFirst_thenGoFixWithOnlyTheGoJob() {
+        stubSbomRun("Generate SBOM and Grype JSON");
+        stubGoJobs("envector", 2000, new JobInfo(5, "build-docker-image (linux)", "failure",
+                List.of(new StepInfo("Generate SBOM and Grype JSON", "failure"))));
+        when(sbomReader.read("envector", 2000)).thenReturn(Optional.of(report()));
+        when(sbomFix.enabled()).thenReturn(false);
+        when(codeFix.fix(any(), any(), eq(""), eq(""))).thenReturn(new CiCodeFixService.Result(CiCodeFixService.Status.CREATED,
+                "https://gh/envector/pull/50", "#50 fix(build): Go 1.26.11", "Go 가 뒤처졌어요.", "올렸어요.", List.of(), false));
+        when(slack.postThreadReplyTs(anyString(), anyString(), anyString()))
+                .thenReturn(Optional.of("sbom.ts"), Optional.of("placeholder.ts"));
+        String ts = nowTs();
+
+        service.submit(new SlackEventInner("message", null, SBOM_TEXT, CHANNEL, ts, null, ALERT_BOT, null));
+
+        ArgumentCaptor<String> replies = ArgumentCaptor.forClass(String.class);
+        verify(slack, org.mockito.Mockito.times(2)).postThreadReplyTs(eq(CHANNEL), eq(ts), replies.capture());
+        assertThat(replies.getAllValues().get(0)).contains("SBOM");
+        assertThat(replies.getAllValues().get(1)).startsWith("🔧 Go 검사(Go version check, Go vulnerability check (govulncheck)) 실패를 고치는 중");
+        ArgumentCaptor<CiCodeFixService.Request> req = ArgumentCaptor.forClass(CiCodeFixService.Request.class);
+        ArgumentCaptor<CiFailureAnalyzer.Input> input = ArgumentCaptor.forClass(CiFailureAnalyzer.Input.class);
+        verify(codeFix).fix(req.capture(), input.capture(), eq(""), eq(""));
+        assertThat(req.getValue().mode()).isEqualTo(CiCodeFixService.Mode.GO_CHECKS);
+        assertThat(req.getValue().goSteps()).containsExactly("Go version check", "Go vulnerability check (govulncheck)");
+        assertThat(req.getValue().ref()).isNull();
+        assertThat(input.getValue().failedJobs()).singleElement().satisfies(j -> {
+            assertThat(j.name()).isEqualTo("Go checks");
+            assertThat(j.excerpt()).contains("raise it to 1.26.11");
+        });
+        verify(slack).updateMessage(eq(CHANNEL), eq("placeholder.ts"),
+                org.mockito.ArgumentMatchers.contains("Go 검사 실패라 바로 고쳐 봤어요"), org.mockito.ArgumentMatchers.isNull());
+        CiAlertEntity row = store.get(1L);
+        assertThat(row.getCategory()).as("행은 SBOM 분석 결과 그대로").isEqualTo("VULNERABILITY");
+        assertThat(row.getFixKey()).isEqualTo("envector/go-checks@main");
+        assertThat(row.getPrUrls()).isEqualTo("https://gh/envector/pull/50");
+    }
+
+    @Test
+    void goChecksOnly_fixStartsOnTheFirstFailure_afterTheAnalysis_withOnlyTheGoJob() {
+        stubRun("##[error]boom\n");
+        stubGoJobs("evi", 1000, new JobInfo(2, "test (gpu)", "failure", List.of(new StepInfo("Build", "failure"))));
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+        when(codeFix.fix(any(), any(), anyString(), anyString())).thenReturn(
+                CiCodeFixService.Result.of(CiCodeFixService.Status.SKIPPED, "이미 통과해요"));
+
+        service.submit(alertEvent(nowTs()));
+
+        verify(codeFix, never()).wants(eq(CiCodeFixService.Mode.STREAK), anyInt(), org.mockito.ArgumentMatchers.anyBoolean(),
+                org.mockito.ArgumentMatchers.anyBoolean());
+        ArgumentCaptor<CiCodeFixService.Request> req = ArgumentCaptor.forClass(CiCodeFixService.Request.class);
+        ArgumentCaptor<CiFailureAnalyzer.Input> input = ArgumentCaptor.forClass(CiFailureAnalyzer.Input.class);
+        verify(codeFix).fix(req.capture(), input.capture(), eq("INFRA"), anyString());
+        assertThat(req.getValue().mode()).isEqualTo(CiCodeFixService.Mode.GO_CHECKS);
+        assertThat(req.getValue().streak()).as("1번째 실패에도").isEqualTo(1);
+        assertThat(input.getValue().failedJobs()).extracting(CiFailureAnalyzer.FailedJob::name).containsExactly("Go checks");
+        assertThat(store.get(1L).getFixStatus()).isEqualTo("SKIPPED");
+    }
+
+    @Test
+    void goChecksVulnerabilityAnalysis_stillRunsTheGoFix_butNoGoSteps_meansTheStreakRule() {
+        stubRun("##[error]boom\n");
+        stubGoJobs("evi", 1000, new JobInfo(2, "test (gpu)", "failure", List.of(new StepInfo("Build", "failure"))));
+        when(analyzer.analyze(any())).thenReturn(Optional.of(
+                new CiAnalysis("VULNERABILITY", "high", "govulncheck 실패예요.", "d", List.of(), List.of())));
+        when(codeFix.fix(any(), any(), anyString(), anyString())).thenReturn(
+                CiCodeFixService.Result.of(CiCodeFixService.Status.SKIPPED, "x"));
+
+        service.submit(alertEvent(nowTs()));
+
+        verify(codeFix).fix(any(), any(), eq("VULNERABILITY"), anyString());
+    }
+
+    @Test
+    void atRunCommit_passesTheRunShaAsRef_onlyInDryRun() {
+        stubRun("##[error]boom\n");
+        stubGoJobs("evi", 1000, new JobInfo(2, "test (gpu)", "failure", List.of(new StepInfo("Build", "failure"))));
+        when(codeFix.wants(eq(CiCodeFixService.Mode.GO_CHECKS), anyInt(), eq(true), eq(true))).thenReturn(true);
+        when(analyzer.analyze(any())).thenReturn(Optional.of(analysis()));
+        when(codeFix.fix(any(), any(), anyString(), anyString())).thenReturn(
+                CiCodeFixService.Result.of(CiCodeFixService.Status.DRY_RUN, "diff"));
+
+        service.replayRun(RUN_URL, "U_ME", true, true);
+
+        ArgumentCaptor<CiCodeFixService.Request> req = ArgumentCaptor.forClass(CiCodeFixService.Request.class);
+        verify(codeFix).fix(req.capture(), any(), anyString(), anyString());
+        assertThat(req.getValue().ref()).isEqualTo("abcdef1234");
+        assertThatThrownBy(() -> service.replay("1.5", null, true, true))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("dry-run");
     }
 
     // ── runStatus ────────────────────────────────────────────

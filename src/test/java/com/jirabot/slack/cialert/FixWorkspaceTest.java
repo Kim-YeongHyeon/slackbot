@@ -1,6 +1,7 @@
 package com.jirabot.slack.cialert;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
@@ -115,5 +116,36 @@ class FixWorkspaceTest {
         String header = "AUTHORIZATION: basic " + Base64.getEncoder().encodeToString("x-access-token:SECRET-TOKEN".getBytes());
         assertThat(envs).anySatisfy(e -> assertThat(e).containsEntry("GIT_CONFIG_VALUE_0", header));
         assertThat(commands).anySatisfy(c -> assertThat(c).containsSequence("rsync", "-a", "--exclude=.git"));
+    }
+
+    @Test
+    void prepare_withRef_checksOutThatCommitAfterCloningTheBranch_andRejectsShortShas() throws Exception {
+        ProcessRunner runner = mock(ProcessRunner.class);
+        List<List<String>> commands = new ArrayList<>();
+        Path work = tmp.resolve("work2");
+        when(runner.run(any(), any(), any(Duration.class), any(), anyMap())).thenAnswer(inv -> {
+            List<String> cmd = inv.getArgument(0);
+            commands.add(cmd);
+            if (String.join(" ", cmd).contains(" clone ")) {
+                Files.createDirectories(work.resolve("job2/repo"));
+            }
+            return new ProcessRunner.Result(0, "", "", false);
+        });
+        CiAlertProperties props = new CiAlertProperties(true, "C", List.of("B"), "CryptoLabInc", List.of("envector"),
+                "T", null, 24, 180, 60, List.of(), null);
+        CiFixProperties fixProps = new CiFixProperties(true, "t", null, 0, 0, 0, null, null, null, work.toString(),
+                null, null, 0);
+        FixWorkspace fw = new FixWorkspace(runner, props, fixProps);
+        String sha = "ab2e546d" + "0".repeat(32);
+
+        fw.prepare("envector", "job2", "main", sha);
+
+        List<String> joined = commands.stream().map(c -> String.join(" ", c)).toList();
+        int clone = joined.indexOf(joined.stream().filter(c -> c.contains(" clone ")).findFirst().orElseThrow());
+        assertThat(joined.get(clone)).contains("--branch main");
+        assertThat(joined.get(clone + 1)).isEqualTo("git fetch -q --depth 1 origin " + sha);
+        assertThat(joined.get(clone + 2)).isEqualTo("git checkout -q --detach FETCH_HEAD");
+        assertThatThrownBy(() -> fw.prepare("envector", "job3", "main", "ab2e546d"))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("40자");
     }
 }

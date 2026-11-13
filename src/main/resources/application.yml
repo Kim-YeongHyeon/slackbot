@@ -229,6 +229,12 @@ ci-alert:
     # 같은 워크플로·브랜치에 에이전트를 다시 돌리기까지의 시간
     cooldown-hours: ${CI_ALERT_CODE_FIX_COOLDOWN_HOURS:24}
     max-open-prs: ${CI_ALERT_CODE_FIX_MAX_OPEN_PRS:20}
+    # Go 검사 실패 수정 (v0.0.103): 이 step 이 실패하면 첫 알림부터 고친다 (gosec·go-licenses 는 제외)
+    go-check-steps:
+      - Go version check
+      - Go vulnerability check (govulncheck)
+    go-check-prompt-file: ${CI_ALERT_GO_CHECK_PROMPT_FILE:prompts/go-check-fix-agent.md}
+    go-check-max-files: ${CI_ALERT_GO_CHECK_MAX_FILES:30}
 
 # STUDY: Actuator. /actuator/health = 헬스체크. Phase 1에서는 별도 /health 컨트롤러도 제공.
 management:

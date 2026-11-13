@@ -54,6 +54,15 @@ public class FixWorkspace {
 
     // branch 가 있으면 그 브랜치를 받는다 (연속 실패 자동 수정은 실패한 run 의 브랜치에서 고친다, v0.0.100).
     public Workspace prepare(String repo, String jobId, String branch) {
+        return prepare(repo, jobId, branch, null);
+    }
+
+    // STUDY: ref(커밋 sha) 가 있으면 브랜치를 받은 뒤 그 커밋만 얕게 받아 체크아웃한다 (v0.0.103, dry-run 전용).
+    //        이미 고쳐진 브랜치에서도 실패 당시 커밋으로 에이전트를 시험해 볼 수 있게. 실제 PR 은 언제나 브랜치 HEAD 기준.
+    public Workspace prepare(String repo, String jobId, String branch, String ref) {
+        if (ref != null && !ref.matches("[0-9a-fA-F]{40}")) {
+            throw new IllegalArgumentException("ref 는 40자 커밋 sha 여야 해요 (얕은 fetch 는 전체 sha 만 받는다): " + ref);
+        }
         Path root = Path.of(fixProps.workDir(), jobId);
         Path repoDir = root.resolve("repo");
         Path agentDir = root.resolve("agent");
@@ -67,6 +76,10 @@ public class FixWorkspace {
             git(root, "clone", "-q", "--depth", "1", "--no-tags", "--single-branch", repoUrl(repo), "repo");
         } else {
             git(root, "clone", "-q", "--depth", "1", "--no-tags", "--single-branch", "--branch", branch, repoUrl(repo), "repo");
+        }
+        if (ref != null) {
+            git(repoDir, "fetch", "-q", "--depth", "1", "origin", ref);
+            git(repoDir, "checkout", "-q", "--detach", "FETCH_HEAD");
         }
 
         Map<String, String> submodules = submodules(repoDir);   // path → repo name

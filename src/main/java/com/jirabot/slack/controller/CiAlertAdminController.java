@@ -30,12 +30,15 @@ public class CiAlertAdminController {
         String runUrl = body.get("runUrl") instanceof String s ? s.strip() : "";
         String dryRunUser = body.get("dryRunUser") instanceof String s ? s.strip() : null;
         boolean fix = Boolean.TRUE.equals(body.get("fix"));
+        // STUDY: dry-run 에서 수정 에이전트를 실패한 run 의 커밋에서 돌린다 (v0.0.103). 브랜치가 이미 고쳐진 뒤 시험용.
+        boolean atRunCommit = Boolean.TRUE.equals(body.get("atRunCommit"));
         if (runUrl.isEmpty() && !ts.matches("\\d+\\.\\d+")) {
             return ResponseEntity.badRequest().body(Map.of("error",
                     "ts(Slack 메시지 ts, 예: 1793345678.123456) 또는 runUrl 을 주세요"));
         }
         try {
-            long id = runUrl.isEmpty() ? service.replay(ts, dryRunUser, fix) : service.replayRun(runUrl, dryRunUser, fix);
+            long id = runUrl.isEmpty() ? service.replay(ts, dryRunUser, fix, atRunCommit)
+                    : service.replayRun(runUrl, dryRunUser, fix, atRunCommit);
             return ResponseEntity.accepted().body(Map.of("queued", true, "alertId", id));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));

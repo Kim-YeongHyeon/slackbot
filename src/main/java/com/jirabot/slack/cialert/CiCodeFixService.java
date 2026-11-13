@@ -26,6 +26,8 @@ import org.springframework.stereotype.Service;
 //        에이전트는 "이미 고치는 PR 이 있다 / 레포 수정으로 못 고친다 / 고쳤다" 중 하나로 답하고,
 //        고쳤으면 DiffGuard(Policy.code) → 커밋·push → PR. SbomFixService 와 같은 구조이고 자동 머지는 없다.
 //        SBOM 과 달리 이 서버에서 수정 결과를 다시 검사할 수 없어, 검증은 그 PR 의 CI 가 한다.
+//        v0.0.103: Mode.GO_CHECKS — Go 버전·govulncheck 검사가 실패하면 연속 횟수와 상관없이 첫 알림부터 같은 단계를 돈다
+//        (key·프롬프트·파일 상한·브랜치 이름·문구만 다르다).
 @Service
 public class CiCodeFixService {
 
@@ -63,9 +65,23 @@ public class CiCodeFixService {
     // RELATED: 앞선 시도 뒤에 사람이 올린 열린 PR 이 실패한 워크플로 파일을 고친다 (v0.0.101). 같은 원인인지는 사람이 본다.
     public enum Status { CREATED, EXISTS, RELATED, PATCH, NOT_FIXABLE, SKIPPED, DRY_RUN, FAILED }
 
+    public enum Mode { STREAK, GO_CHECKS }
+
     // channel: 반복 판단과 같은 구분 (실제 알림 채널 또는 "DM:<user>"). force: 재처리에서 수정까지 요청함.
+    // goSteps: GO_CHECKS 에서 실패한 검사 step 이름. ref: dry-run 에서만, 브랜치 HEAD 대신 이 커밋에서 돌려 본다.
     public record Request(long alertId, String channel, CiAlert alert, RunInfo run, int streak, boolean recovered,
-                          String fingerprint, boolean dryRun, boolean force) {}
+                          String fingerprint, boolean dryRun, boolean force, Mode mode, List<String> goSteps, String ref) {
+        public Request {
+            mode = mode == null ? Mode.STREAK : mode;
+            goSteps = goSteps == null ? List.of() : List.copyOf(goSteps);
+            ref = dryRun && ref != null && !ref.isBlank() ? ref.strip() : null;   // 실제 PR 은 언제나 브랜치 HEAD 에서
+        }
+
+        public Request(long alertId, String channel, CiAlert alert, RunInfo run, int streak, boolean recovered,
+                       String fingerprint, boolean dryRun, boolean force) {
+            this(alertId, channel, alert, run, streak, recovered, fingerprint, dryRun, force, Mode.STREAK, List.of(), null);
+        }
+    }
 
     // label: 링크에 쓸 "#12 제목". detail: 상태별 부연 (변경 요약 · diff · 실패 이유).
     // reused: 앞선 시도의 결과를 다시 보여 주는 것 (에이전트를 돌리지 않음).
@@ -82,12 +98,29 @@ public class CiCodeFixService {
 
     // 실제 알림은 연속 실패 횟수로, 재처리(dry-run 포함)는 요청했을 때만 돈다.
     public boolean wants(int streak, boolean dryRun, boolean force) {
-        return enabled() && (force || (!dryRun && streak >= codeProps.minStreak()));
+        return wants(Mode.STREAK, streak, dryRun, force);
+    }
+
+    // GO_CHECKS 는 횟수 조건 없이 실제 알림마다 (비용은 표식 PR·24시간 재사용이 막는다).
+    public boolean wants(Mode mode, int streak, boolean dryRun, boolean force) {
+        boolean due = mode == Mode.GO_CHECKS || streak >= codeProps.minStreak();
+        return enabled() && (force || (!dryRun && due));
+    }
+
+    // 실패한 job 중 Go 검사 수정 대상 step (설정 순서와 상관없이 실패한 순서대로)
+    public List<String> goCheckSteps(List<String> failedSteps) {
+        return failedSteps.stream().filter(codeProps.goCheckSteps()::contains).distinct().toList();
     }
 
     // 같은 워크플로·브랜치를 가리키는 키 — PR 본문 표식과 DB 의 fix_key 에 쓴다.
     public String keyOf(Request req) {
-        return key(req.alert().repo(), req.run(), branch(req));
+        return key(req, branch(req));
+    }
+
+    private static String key(Request req, String branch) {
+        return req.mode() == Mode.GO_CHECKS
+                ? req.alert().repo().toLowerCase(Locale.ROOT) + "/go-checks@" + branch
+                : key(req.alert().repo(), req.run(), branch);
     }
 
     static String key(String repo, RunInfo run, String branch) {
@@ -97,7 +130,7 @@ public class CiCodeFixService {
     // 1~3단계: 에이전트 없이 끝나는 경우. 비어 있으면 fix() 를 돌려야 한다.
     public Optional<Result> existing(Request req) {
         String repo = req.alert().repo();
-        String key = key(repo, req.run(), branch(req));
+        String key = key(req, branch(req));
         List<PullInfo> open = repos.listPulls(repo, "open");
         Optional<PullInfo> mine = open.stream()
                 .filter(p -> p.body() != null && p.body().contains(marker(key))).findFirst();
@@ -117,7 +150,7 @@ public class CiCodeFixService {
             // STUDY: 재사용은 "그때의 결론"이다. 그 뒤 누가 워크플로를 고치는 PR 을 올렸으면 옛 결론 대신 그 PR 을 알린다.
             //        에이전트는 다시 돌리지 않는다 — PR 이 실패한 워크플로 파일을 바꾸는지만 본다.
             if (reused.status() != Status.CREATED && reused.status() != Status.EXISTS && reused.status() != Status.RELATED) {
-                Optional<Result> related = relatedPr(repo, req.run().path(), open);
+                Optional<Result> related = relatedPr(repo, req, open);
                 if (related.isPresent()) {
                     return related;
                 }
@@ -130,18 +163,24 @@ public class CiCodeFixService {
         return Optional.empty();
     }
 
-    // 실패한 워크플로 파일을 바꾸는 열린 PR (봇 PR 제외, 최근 갱신 순으로 maxOpenPrs 개까지 본다)
-    private Optional<Result> relatedPr(String repo, String workflowFile, List<PullInfo> open) {
-        if (workflowFile == null || workflowFile.isBlank()) {
+    // 실패와 관련된 파일을 바꾸는 열린 PR (봇 PR 제외, 최근 갱신 순으로 maxOpenPrs 개까지 본다).
+    // STREAK: 실패한 워크플로 파일. GO_CHECKS: go.mod (Go 버전·모듈 버전이 여기서 바뀐다). detail 에 그 파일을 남긴다.
+    private Optional<Result> relatedPr(String repo, Request req, List<PullInfo> open) {
+        String workflowFile = req.run().path();
+        if (req.mode() == Mode.STREAK && (workflowFile == null || workflowFile.isBlank())) {
             return Optional.empty();
         }
-        return open.stream()
-                .filter(p -> p.body() == null || !p.body().contains(MARKER))
-                .limit(codeProps.maxOpenPrs())
-                .filter(p -> filesOf(repo, p.number()).contains(workflowFile))
-                .findFirst()
-                .map(p -> new Result(Status.RELATED, p.htmlUrl(), "#" + p.number() + " " + p.title(), "",
-                        workflowFile, List.of(), false));
+        for (PullInfo p : open.stream().filter(p -> p.body() == null || !p.body().contains(MARKER))
+                .limit(codeProps.maxOpenPrs()).toList()) {
+            Optional<String> hit = filesOf(repo, p.number()).stream()
+                    .filter(f -> req.mode() == Mode.GO_CHECKS ? f.equals("go.mod") || f.endsWith("/go.mod") : f.equals(workflowFile))
+                    .findFirst();
+            if (hit.isPresent()) {
+                return Optional.of(new Result(Status.RELATED, p.htmlUrl(), "#" + p.number() + " " + p.title(), "",
+                        hit.get(), List.of(), false));
+            }
+        }
+        return Optional.empty();
     }
 
     private static Result reuse(CiAlertEntity prior) {
@@ -151,7 +190,9 @@ public class CiCodeFixService {
         } catch (IllegalArgumentException e) {
             status = Status.FAILED;
         }
-        String url = prior.getPrUrls() == null ? "" : prior.getPrUrls().split(",")[0];
+        // 수정 단계의 PR 은 맨 뒤에 붙는다 (SBOM 알림 행에는 SBOM 수정 PR 이 먼저 있다, v0.0.103)
+        String[] urls = prior.getPrUrls() == null ? new String[0] : prior.getPrUrls().split(",");
+        String url = urls.length == 0 ? "" : urls[urls.length - 1].strip();
         String label = url.contains("/pull/") ? "#" + url.substring(url.lastIndexOf('/') + 1) : "";
         String detail = prior.getFixDetail() == null ? "" : prior.getFixDetail();
         return new Result(status, url, label, "", detail, List.of(), true);
@@ -167,14 +208,17 @@ public class CiCodeFixService {
         if (repos.branchHead(repo, branch).isEmpty()) {
             return Result.of(Status.SKIPPED, "브랜치 " + branch + " 가 없어요");
         }
-        String key = key(repo, req.run(), branch);
+        String key = key(req, branch);
+        boolean go = req.mode() == Mode.GO_CHECKS;
         List<PullInfo> open = repos.listPulls(repo, "open").stream().limit(codeProps.maxOpenPrs()).toList();
-        String jobId = req.alertId() + "-cifix-" + repo.toLowerCase(Locale.ROOT) + "-" + (System.currentTimeMillis() % 100000);
+        String jobId = req.alertId() + (go ? "-gofix-" : "-cifix-") + repo.toLowerCase(Locale.ROOT) + "-" + (System.currentTimeMillis() % 100000);
         agent.ensureImage();
-        FixWorkspace.Workspace ws = workspace.prepare(repo, jobId, branch);
+        FixWorkspace.Workspace ws = req.ref() == null ? workspace.prepare(repo, jobId, branch)
+                : workspace.prepare(repo, jobId, branch, req.ref());
         try {
             FixAgentRunner.Raw raw = agent.runRaw(ws, task(req, branch, input, firstCategory, firstSummary, open), jobId,
-                    new FixAgentRunner.AgentSpec(codeProps.model(), codeProps.effort(), codeProps.promptFile(),
+                    new FixAgentRunner.AgentSpec(codeProps.model(), codeProps.effort(),
+                            go ? codeProps.goCheckPromptFile() : codeProps.promptFile(),
                             codeProps.maxTurns(), codeProps.timeoutMinutes(), List.of("GOTOOLCHAIN=auto")));
             if (!raw.ok()) {
                 return Result.of(Status.FAILED, raw.error());
@@ -186,6 +230,9 @@ public class CiCodeFixService {
                 case "not_fixable" -> new Result(Status.NOT_FIXABLE, "", "", rootCause, out.path("notes").asText(""),
                         strings(out.path("manual_steps")), false);
                 case "fixed" -> publish(req, ws, branch, key, input, out, rootCause);
+                // Go 검사 모드: 브랜치 HEAD 에서 다시 돌려 보니 이미 통과 (사람이 먼저 고침)
+                case "already_fixed" -> new Result(Status.SKIPPED, "", "", rootCause,
+                        "브랜치 " + branch + " HEAD 에서는 이미 통과해요 (누군가 먼저 고쳤어요)", List.of(), false);
                 default -> new Result(Status.FAILED, "", "", rootCause, "에이전트 응답을 이해하지 못했어요", List.of(), false);
             };
         } finally {
@@ -203,20 +250,25 @@ public class CiCodeFixService {
 
     private Result publish(Request req, FixWorkspace.Workspace ws, String branch, String key,
                            CiFailureAnalyzer.Input input, JsonNode out, String rootCause) {
-        DiffGuard.Verdict verdict = guard.check(ws, DiffGuard.Policy.code(codeProps.maxDiffLines(), codeProps.maxFiles()));
+        boolean go = req.mode() == Mode.GO_CHECKS;
+        DiffGuard.Verdict verdict = guard.check(ws, DiffGuard.Policy.code(codeProps.maxDiffLines(),
+                go ? codeProps.goCheckMaxFiles() : codeProps.maxFiles()));
         if (!verdict.ok()) {
             return new Result(Status.FAILED, "", "", rootCause, verdict.reason(), List.of(), false);
         }
         String summary = out.path("summary").asText("").strip();
+        // 고쳤지만 사람이 마저 해야 하는 일 (예: 이 컨테이너에서 재현하지 못한 고정 해시)
+        List<String> remaining = strings(out.path("manual_steps"));
         String changed = "파일 " + String.join(", ", verdict.files()) + " (" + verdict.changedLines() + "줄)";
         if (req.dryRun()) {
             return new Result(Status.DRY_RUN, "", "", rootCause,
                     changed + "\n요약: " + summary + "\n검증: " + out.path("verification").asText("") + fence(verdict.diff()),
-                    List.of(), false);
+                    remaining, false);
         }
         String repo = req.alert().repo();
-        String title = title(out.path("title").asText(""), req.run().name());
-        String head = freeBranch(repo, "bot/ci-fix-" + slug(req.run().name()) + "-" + shortFp(req.fingerprint()));
+        String title = title(out.path("title").asText(""), req.run().name(), req.mode());
+        String head = freeBranch(repo, go ? "bot/go-checks-" + shortFp(req.fingerprint())
+                : "bot/ci-fix-" + slug(req.run().name()) + "-" + shortFp(req.fingerprint()));
         try {
             workspace.commitAndPush(ws, verdict.files(), head, title + "\n\n" + req.alert().runUrl(), AUTHOR);
         } catch (RuntimeException e) {
@@ -224,13 +276,13 @@ public class CiCodeFixService {
             //        권한이 없으면 PR 대신 스레드에 diff 를 달아 사람이 적용하게 한다.
             if (verdict.files().stream().anyMatch(f -> f.startsWith(".github/workflows/"))) {
                 log.info("ci code fix push rejected for workflow files repo={}: {}", repo, e.getMessage());
-                return new Result(Status.PATCH, "", "", rootCause, summary + "\n" + changed + fence(verdict.diff()), List.of(), false);
+                return new Result(Status.PATCH, "", "", rootCause, summary + "\n" + changed + fence(verdict.diff()), remaining, false);
             }
             throw e;
         }
         PullInfo pr = repos.createPull(repo, head, branch, title, body(req, branch, key, input, verdict, out, rootCause));
         log.info("ci code fix PR created repo={} url={}", repo, pr.htmlUrl());
-        return new Result(Status.CREATED, pr.htmlUrl(), "#" + pr.number() + " " + title, rootCause, summary, List.of(), false);
+        return new Result(Status.CREATED, pr.htmlUrl(), "#" + pr.number() + " " + title, rootCause, summary, remaining, false);
     }
 
     String task(Request req, String branch, CiFailureAnalyzer.Input input, String firstCategory, String firstSummary,
@@ -242,6 +294,11 @@ public class CiCodeFixService {
         task.put("branch", branch);
         task.put("run_url", req.alert().runUrl());
         task.put("consecutive_failures", req.streak());
+        if (req.mode() == Mode.GO_CHECKS) {
+            task.put("failed_checks", req.goSteps());
+            // 알림 끝의 "고치는 방법" 줄 (job 로그가 있으면 <data> 에는 알림 원문이 들어가지 않는다)
+            task.put("alert_hints", alertHints(req.alert().text()));
+        }
         if (firstSummary != null && !firstSummary.isBlank()) {
             Map<String, Object> first = new LinkedHashMap<>();
             first.put("category", firstCategory == null ? "" : firstCategory);
@@ -260,11 +317,21 @@ public class CiCodeFixService {
         }
         task.put("open_prs", prs);
         try {
-            return "Investigate this repeated CI failure. Task:\n" + objectMapper.writeValueAsString(task) + "\n\n"
+            String head = req.mode() == Mode.GO_CHECKS ? "Fix these failed Go checks. Task:\n" : "Investigate this repeated CI failure. Task:\n";
+            return head + objectMapper.writeValueAsString(task) + "\n\n"
                     + CiFailureAnalyzer.buildInput(input);
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    static List<String> alertHints(String alertText) {
+        if (alertText == null) {
+            return List.of();
+        }
+        return alertText.lines().map(String::strip)
+                .filter(l -> l.matches("^(?:Go version|govulncheck|gosec|go-licenses): .+"))
+                .map(l -> cut(l, 300)).limit(4).toList();
     }
 
     private List<String> filesOf(String repo, int number) {
@@ -276,9 +343,13 @@ public class CiCodeFixService {
     }
 
     static String title(String agentTitle, String workflow) {
+        return title(agentTitle, workflow, Mode.STREAK);
+    }
+
+    static String title(String agentTitle, String workflow, Mode mode) {
         String t = agentTitle == null ? "" : agentTitle.strip().replaceAll("[\\r\\n]+", " ");
         if (!t.matches("^(?:fix|ci|build|chore|test|revert)(?:\\([^)]*\\))?: .+")) {
-            t = "fix(ci): " + workflow + " 연속 실패 수정";
+            t = mode == Mode.GO_CHECKS ? "fix(go): Go 검사 실패 수정" : "fix(ci): " + workflow + " 연속 실패 수정";
         }
         return t.length() > 100 ? t.substring(0, 99) + "…" : t;
     }
@@ -286,8 +357,14 @@ public class CiCodeFixService {
     static String body(Request req, String branch, String key, CiFailureAnalyzer.Input input, DiffGuard.Verdict verdict,
                        JsonNode out, String rootCause) {
         StringBuilder sb = new StringBuilder("## 문제\n");
-        sb.append("`").append(req.run().name()).append("` 워크플로가 `").append(branch).append("` 에서 ")
-                .append(req.streak()).append("번 연속 실패했습니다 ([run](").append(req.alert().runUrl()).append(")).\n");
+        if (req.mode() == Mode.GO_CHECKS) {
+            sb.append("`").append(branch).append("` 의 `").append(req.run().name()).append("` 에서 Go 검사 ")
+                    .append(String.join(", ", req.goSteps().stream().map(s -> "`" + s + "`").toList()))
+                    .append(" 가 실패했습니다 ([run](").append(req.alert().runUrl()).append(")).\n");
+        } else {
+            sb.append("`").append(req.run().name()).append("` 워크플로가 `").append(branch).append("` 에서 ")
+                    .append(req.streak()).append("번 연속 실패했습니다 ([run](").append(req.alert().runUrl()).append(")).\n");
+        }
         for (CiFailureAnalyzer.FailedJob j : input.failedJobs()) {
             sb.append("- 실패 job `").append(j.name()).append('`');
             if (!j.failedSteps().isEmpty()) {
@@ -305,6 +382,11 @@ public class CiCodeFixService {
             sb.append("- 에이전트: ").append(verification).append('\n');
         }
         sb.append("- 봇 서버에서는 이 워크플로를 다시 돌릴 수 없습니다. 이 PR 의 CI 결과로 확인해 주세요.\n");
+        List<String> remaining = strings(out.path("manual_steps"));
+        if (!remaining.isEmpty()) {
+            sb.append("\n## 남은 일\n");
+            remaining.forEach(m -> sb.append("- [ ] ").append(m).append('\n'));
+        }
         String notes = out.path("notes").asText("");
         if (!notes.isBlank()) {
             sb.append("\n## 참고\n").append(notes).append('\n');
@@ -321,23 +403,29 @@ public class CiCodeFixService {
 
     // 결과 답글 (스레드). 빈 문자열이면 답글을 달지 않는다. 링크는 Slack 형식, 나머지는 이스케이프.
     public static String render(Result r, int streak) {
+        return render(r, streak, Mode.STREAK);
+    }
+
+    public static String render(Result r, int streak, Mode mode) {
         if (r.reused()) {
             return switch (r.status()) {
                 case CREATED, EXISTS -> r.url().isBlank() ? ""
                         : "🔧 수정 PR <" + r.url() + "|" + escape(r.label()) + "> 이 올라와 있어요 — 머지되면 해결돼요";
                 case RELATED -> r.url().isBlank() ? ""
-                        : "🔧 이 워크플로 파일을 고치는 열린 PR <" + r.url() + "|" + escape(r.label()) + "> 이 있어요";
+                        : "🔧 관련 파일(`" + escape(r.detail()) + "`)을 고치는 열린 PR <" + r.url() + "|" + escape(r.label()) + "> 이 있어요";
                 case PATCH -> "🔧 앞서 제안한 워크플로 수정이 아직 적용되지 않았어요" + line(r.detail());
                 case NOT_FIXABLE -> "🔧 레포 수정으로는 고칠 수 없는 실패예요" + line(r.detail());
                 default -> "";
             };
         }
         if (r.status() == Status.RELATED) {
-            return "🔧 *자동 수정* · 앞서 본 결론 뒤에 이 워크플로 파일(`" + escape(r.detail()) + "`)을 고치는 PR 이 올라왔어요\n"
+            return "🔧 *자동 수정* · 앞서 본 결론 뒤에 관련 파일(`" + escape(r.detail()) + "`)을 고치는 PR 이 올라왔어요\n"
                     + "🔁 <" + r.url() + "|" + escape(r.label()) + "> — 이 실패를 고치는지 확인해 주세요. 에이전트는 다시 돌리지 않았어요.";
         }
         StringBuilder sb = new StringBuilder("🔧 *자동 수정*");
-        if (streak >= 2) {
+        if (mode == Mode.GO_CHECKS) {
+            sb.append(" · Go 검사 실패라 바로 고쳐 봤어요");
+        } else if (streak >= 2) {
             sb.append(" · ").append(streak).append("번 연속 실패라 원인을 다시 봤어요");
         }
         sb.append('\n');
@@ -346,7 +434,7 @@ public class CiCodeFixService {
         }
         switch (r.status()) {
             case CREATED -> sb.append("*수정 PR* <").append(r.url()).append("|").append(escape(r.label())).append(">")
-                    .append(line(r.detail()));
+                    .append(line(r.detail())).append(remaining(r.steps()));
             case EXISTS -> sb.append("🔁 이미 올라와 있는 PR <").append(r.url()).append("|").append(escape(r.label()))
                     .append("> — 머지되면 해결돼요");
             case PATCH -> sb.append("⚠️ 워크플로 파일 수정이라 봇 토큰으로는 push 하지 못했어요 ")
@@ -362,7 +450,7 @@ public class CiCodeFixService {
                 }
             }
             case RELATED -> { }
-            case DRY_RUN -> sb.append("🧪 dry-run (push 안 함)\n").append(escape(r.detail()));
+            case DRY_RUN -> sb.append("🧪 dry-run (push 안 함)\n").append(escape(r.detail())).append(remaining(r.steps()));
             case SKIPPED -> sb.append("건너뜀: ").append(escape(r.detail()));
             case FAILED -> sb.append("⚠️ 수정 PR 을 만들지 못했어요: ").append(escape(r.detail()));
         }
@@ -418,6 +506,15 @@ public class CiCodeFixService {
             return "";
         }
         return "\n```" + (d.length() > MAX_DIFF ? d.substring(0, MAX_DIFF) + "\n…" : d).replace("```", "'''") + "```";
+    }
+
+    private static String remaining(List<String> steps) {
+        if (steps == null || steps.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder("\n*남은 일*");
+        steps.stream().limit(4).forEach(s -> sb.append("\n• ").append(escape(cut(s, 400))));
+        return sb.toString();
     }
 
     private static String line(String detail) {
