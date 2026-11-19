@@ -104,6 +104,22 @@ class SecurityConfigIntegrationTest {
                 .andExpect(status().isOk());
     }
 
+    // v0.0.104: 임베드 탭의 Grafana 프록시 — 로그인 없이는 401, 로그인하면 일반 사용자도 통과
+    // (이 테스트 컨텍스트에는 Grafana 주소가 없어 컨트롤러가 404 를 준다 = 인증은 통과했다는 뜻).
+    @Test
+    void grafanaProxy_requiresLogin_openToEveryDashboardUser() throws Exception {
+        mockMvc.perform(get("/grafana/")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/grafana")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/grafana/api/ds/query")).andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/grafana/d/x").header("Authorization", basic("sol", "test-pw")))
+                .andExpect(status().isNotFound());
+        givenDbUser("kim", "pw1234", true);
+        mockMvc.perform(get("/grafana/d/x").header("Authorization", basic("kim", "pw1234")))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(get("/api/dashboard/embed-tabs").header("Authorization", basic("kim", "pw1234")))
+                .andExpect(status().isOk());
+    }
+
     // v0.0.73: 대시보드 전면 로그인 필수 — 터널이 아닌 :8080 직접 접근도 401 이어야 한다.
     @Test
     void dashboardPathsRequireLogin() throws Exception {

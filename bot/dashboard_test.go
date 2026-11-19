@@ -133,3 +133,30 @@ func TestRootRedirect_OnlyExactRoot(t *testing.T) {
 		t.Fatalf("GET /random-path = %d, want 404", rec.Code)
 	}
 }
+
+func TestRegisterDashboardRoutes_GrafanaReachableOthersNot(t *testing.T) {
+	// v0.0.104: 임베드 탭의 /grafana/ 는 터널로 열리고(로그인은 Spring), 화이트리스트 밖 Spring API 는 계속 404.
+	var gotPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.RequestURI()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+	mux := http.NewServeMux()
+	RegisterDashboardRoutes(mux, newTestProxy(t, upstream.URL))
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/grafana/d/abc?kiosk", nil))
+	if rec.Code != http.StatusOK || gotPath != "/grafana/d/abc?kiosk" {
+		t.Fatalf("GET /grafana/d/abc = %d upstream=%q, want 200 /grafana/d/abc?kiosk", rec.Code, gotPath)
+	}
+
+	for _, p := range []string{"/api/slack/event", "/api/jira/webhook", "/grafana-evil/x", "/api/ci-alerts/replay"} {
+		gotPath = ""
+		rec = httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+		if rec.Code != http.StatusNotFound || gotPath != "" {
+			t.Fatalf("GET %s = %d upstream=%q, want 404 without reaching Spring", p, rec.Code, gotPath)
+		}
+	}
+}

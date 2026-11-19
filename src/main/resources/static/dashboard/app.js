@@ -823,22 +823,66 @@ document.getElementById('art-paste-toggle').onclick = () => {
   ta.style.display = ta.style.display === 'none' ? '' : 'none';
 };
 
-// 2단 탭 (v0.0.70): 상위 [지라봇|아티팩트]. 지라봇 → 하위 탭바 표시 + 마지막 하위 탭 복원.
+// 2단 탭 (v0.0.70): 상위 [지라봇|아티팩트|임베드 탭…]. 지라봇 → 하위 탭바 표시 + 마지막 하위 탭 복원.
 // 아티팩트 → 하위 탭바 숨김 + 아티팩트 패널 표시.
+// 임베드 탭 (v0.0.104, id "embed-N") → 서버 설정(/api/dashboard/embed-tabs)대로 만든 iframe 패널. 처음 열 때 src 를 넣는다.
 let lastJirabotTab = 'overview';
 function showTopTab(name) {
   document.querySelectorAll('.top-tab').forEach(t => t.classList.toggle('active', t.dataset.top === name));
   const subNav = document.getElementById('tabs');
+  const embed = name.startsWith('embed-');
+  document.body.classList.toggle('embed-mode', embed);
   if (name === 'jirabot') {
     subNav.style.display = '';
     showTab(lastJirabotTab);
-  } else {
-    subNav.style.display = 'none';
-    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-artifacts'));
-    if (typeof loadArtifacts === 'function') loadArtifacts().catch(reportErr);
+    return;
+  }
+  subNav.style.display = 'none';
+  const panelId = embed ? 'panel-' + name : 'panel-artifacts';
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === panelId));
+  if (embed) {
+    const frame = document.querySelector('#' + panelId + ' iframe');
+    if (frame && !frame.getAttribute('src')) frame.setAttribute('src', frame.dataset.src);
+    fitEmbedFrames();
+  } else if (typeof loadArtifacts === 'function') {
+    loadArtifacts().catch(reportErr);
   }
 }
 document.querySelectorAll('.top-tab').forEach(t => t.onclick = () => showTopTab(t.dataset.top));
+
+// 임베드 탭 (v0.0.104). 서버가 같은 출처 경로만 내려주고, DOM API 로만 만들어 HTML 주입 여지를 두지 않는다.
+async function loadEmbedTabs() {
+  const res = await apiFetch('/api/dashboard/embed-tabs');
+  if (!res.ok) return;
+  const tabs = await res.json();
+  const nav = document.getElementById('top-tabs');
+  const main = document.querySelector('main');
+  tabs.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 'top-tab';
+    btn.dataset.top = t.id;
+    btn.textContent = t.label;
+    btn.onclick = () => showTopTab(t.id);
+    nav.appendChild(btn);
+    const panel = document.createElement('section');
+    panel.id = 'panel-' + t.id;
+    panel.className = 'panel embed-panel';
+    const frame = document.createElement('iframe');
+    frame.className = 'embed-frame';
+    frame.title = t.label;
+    frame.dataset.src = t.src;
+    panel.appendChild(frame);
+    main.appendChild(panel);
+  });
+}
+
+// iframe 이 헤더·탭바 아래 남은 화면 높이를 꽉 채우게 한다.
+function fitEmbedFrames() {
+  document.querySelectorAll('.embed-panel.active iframe').forEach(f => {
+    f.style.height = Math.max(400, window.innerHeight - f.getBoundingClientRect().top) + 'px';
+  });
+}
+window.addEventListener('resize', fitEmbedFrames);
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => { lastJirabotTab = t.dataset.tab; showTab(t.dataset.tab); });
 document.getElementById('trend-weeks').onchange = loadTrends;
@@ -1034,4 +1078,5 @@ document.getElementById('btn-member-add').onclick = async () => {
 
 /* 초기 로드 */
 loadMe().catch(reportErr);
+loadEmbedTabs().catch(reportErr);
 loadOverview().catch(reportErr);

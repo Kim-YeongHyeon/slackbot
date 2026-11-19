@@ -5,6 +5,9 @@ server:
     #        Go 프록시가 http 로 넘겨주므로 https 터널 사용자에게 http:// 주소로 redirect 되던 문제(v0.0.84)
     #        → Location 을 상대 경로(/dashboard/) 그대로 내보내 브라우저가 현재 https 기준으로 해석하게 한다.
     use-relative-redirects: true
+    # STUDY: Tomcat 은 쿼리의 [ ] { } | 를 기본으로 400 처리한다. Grafana 프론트(v0.0.104 /grafana/ 프록시)가
+    #        보내는 주소에 이 문자가 그대로 들어올 수 있어 받아 준다(GrafanaProxyController 가 다시 인코딩).
+    relaxed-query-chars: ["[", "]", "{", "}", "|"]
 
 # 대시보드 로그인 계정 (v0.0.73 — 전 경로 로그인 필수). Go 터널 프록시와 같은 값을 쓴다.
 dashboard:
@@ -15,6 +18,12 @@ dashboard:
   # 브라우저 로그인 창의 영역(realm) 이름 (v0.0.85). 바꾸면 모든 브라우저에 기억된 로그인이 무효화되어
   # 전원 재로그인 — 계정 정책 변경(예: 공용 sol 계정 폐지) 후 오래된 캐시를 정리할 때 사용.
   auth-realm: ${DASHBOARD_AUTH_REALM:sol dashboard 2}
+  # 임베드 탭 (v0.0.104) — 비어 있으면 탭도 프록시도 없다. 어떤 화면을 붙일지는 서버 .env 에서만 정한다.
+  embed:
+    # "라벨|/경로;라벨|/경로" — 같은 출처 경로만 (예: "모니터링|/grafana/d/abc?kiosk")
+    tabs: ${DASHBOARD_EMBED_TABS:}
+    # /grafana/** 를 넘길 Grafana 주소 (예: http://127.0.0.1:3001, Grafana 는 serve_from_sub_path + /grafana/)
+    grafana-url: ${DASHBOARD_GRAFANA_URL:}
 
 spring:
   application:

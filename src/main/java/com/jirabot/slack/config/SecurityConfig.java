@@ -90,7 +90,9 @@ public class SecurityConfig {
                                 // v0.0.75: 아티팩트 인라인 댓글 리뷰 페이지(정적 SPA) — 로그인 필수.
                                 "/api/artifacts/**", "/artifacts/view/**",
                                 "/api/artifact-folders", "/api/artifact-folders/**",
-                                "/artifacts/review/**").authenticated()
+                                "/artifacts/review/**",
+                                // v0.0.104: 임베드 탭의 Grafana 프록시 — 대시보드 사용자 모두 (GrafanaProxyController).
+                                "/grafana", "/grafana/**").authenticated()
                         // STUDY: /api/slack/** 는 SlackSignatureFilter 에서 HMAC 검증으로 이미 신원을 확인했으므로
                         // Spring Security 의 authorization 단계에서는 permitAll. 실패 시 필터에서 403 으로 이미 차단됨.
                         .requestMatchers("/api/slack/**").permitAll()

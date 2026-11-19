@@ -22,6 +22,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | Notion 버그 동기화 | 버그 완료 시 원인/해결방법(Claude 요약)을 Notion '버그 해결 기록' DB에 적재. 전체 버그는 '버그 현황' DB에 해결/미해결 구분해 동기화 (`@지라 notion백필`) |
 | CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94, nightly·벤치마크 글은 무시 — v0.0.95, 분석·수정 모델 Sonnet 5 — v0.0.96, 서브모듈은 팀 PR 링크 — v0.0.97, 이미 반영된 수정은 건너뜀 — v0.0.98, 3번 이상 연속 실패하면 수정 PR 링크·자동 생성(Opus) — v0.0.100, 그 뒤 올라온 워크플로 수정 PR 링크 — v0.0.101, envector 의 "SBOM pipeline and Go checks"·"Go checks" 알림 인식 — v0.0.102, Go 버전·govulncheck 실패는 첫 알림부터 수정 PR — v0.0.103 |
 | 문서 질문 | `@지라 질문 <소스> <질문>` → 미리 조각내 임베딩해 둔 문서에서 찾아 Claude 가 출처와 함께 답변 — v0.0.99 |
+| 대시보드 임베드 탭 | 서버 `.env` 에 적은 같은 출처 화면(예: 같은 서버의 Grafana)을 대시보드 상위 탭 iframe 으로, `/grafana/` 는 로그인 뒤 프록시 — v0.0.104 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -38,7 +39,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 - 사내망/SSH 포워딩: `http://<호스트IP>:8080/dashboard/` (인증 없음)
 - **외부(인터넷)**: `https://<ngrok-domain>/dashboard/` — Go봇이 :8080 으로 리버스 프록시하며
   **Basic Auth**(`DASHBOARD_USER`/`DASHBOARD_PASSWORD`, 둘 다 설정 시에만 활성)로 보호.
-  화이트리스트 경로만 노출: `/dashboard/`, `/api/dashboard/`, `/api/user-mappings`, `/actuator/health`
+  화이트리스트 경로만 노출: `/dashboard/`, `/api/dashboard/`, `/api/user-mappings`, `/actuator/health`, `/grafana/` (v0.0.104) 등 — 목록은 `bot/dashboard.go` `DashboardProxyPaths`
   — 그 외 Spring API 는 터널에서 계속 404.
 
 | 탭 | 내용 |
@@ -182,6 +183,26 @@ sudo docker run --rm -v "$PWD/rag":/rag -w /rag python:3.12-slim \
 설정(`application.yml` 의 `rag.*`): `RAG_ENABLED`(기본 true), `RAG_BASE_URL`, `RAG_TOP_K`(6), `RAG_SEARCH_TIMEOUT_SECONDS`(20), `RAG_ANSWER_TIMEOUT_SECONDS`(90), `RAG_MODEL`(비면 `claude.model`).
 
 다음 단계: 검색 백엔드를 envector 로 바꾸고, 그다음 hybrid 검색을 붙인다(v0.0.101 이후). 지금은 `backend: local`(이 서버 메모리의 벡터)로 찾는다.
+
+### 대시보드 임베드 탭 + Grafana 프록시 (v0.0.104)
+
+대시보드 상위 탭 [지라봇 | 아티팩트] 뒤에 **서버 `.env` 에 적은 화면을 iframe 탭으로** 붙인다. 이 레포에는 범용 기능만 있고,
+어떤 화면을 붙일지는 서버 설정에만 둔다. 둘 다 비어 있으면 탭도 프록시도 없다.
+
+```
+DASHBOARD_EMBED_TABS="라벨|/경로;라벨|/경로"     # 같은 출처 경로만 (/ 로 시작, //·\·스킴 금지, 최대 10개)
+DASHBOARD_GRAFANA_URL=http://127.0.0.1:3001     # /grafana/** 를 넘길 Grafana (비면 404)
+```
+
+- **탭**: 프런트가 `/api/dashboard/embed-tabs` 로 목록을 받아 상위 탭과 iframe 패널을 만든다. iframe 은 탭을 처음 열 때
+  불러오고, 화면 높이에 맞추며, 본문 폭 제한을 푼다. 잘못된 항목은 기동 로그에 경고만 남기고 건너뛴다.
+- **`/grafana/**` 프록시** (`GrafanaProxyController`): 대시보드 로그인 필수(관리자·일반 사용자 모두). 경로·쿼리·본문을 그대로
+  스트리밍으로 넘기되 sol 로그인 자격 증명(`Authorization`)과 쿠키는 Grafana 로 보내지 않고, Grafana 의 `Set-Cookie` 도 버린다.
+  리다이렉트는 따라가지 않고 브라우저로 돌려준다. Grafana 가 꺼져 있으면 502, 60초 넘게 응답이 없으면 504.
+  Go 봇 터널 화이트리스트에 `/grafana/` 추가.
+- **Grafana 쪽 설정**: `127.0.0.1` 에서만 열고, `root_url` 을 `https://<도메인>/grafana/` 로, `serve_from_sub_path`·
+  `allow_embedding` 을 켜고 익명 Viewer 로 둔다(바깥 로그인은 대시보드가 맡는다). Tomcat 은 쿼리의 `[ ] { } |` 를 받아 주도록
+  `relaxed-query-chars` 를 설정했다.
 
 ### 3번 이상 연속 실패하면 수정 PR 까지 (v0.0.100)
 
