@@ -23,6 +23,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | CI 실패 알림 분석 | 알림 채널의 main CI·SBOM 실패 알림에 멘션 없이 원인 분석 스레드 답글 (반복 알림은 이전 분석 링크) — v0.0.91. SBOM 취약점은 grype 아티팩트로 레포별 "패키지 → 고칠 버전" 표 — v0.0.92, 수정 PR 자동 생성(Claude 에이전트) — v0.0.94, nightly·벤치마크 글은 무시 — v0.0.95, 분석·수정 모델 Sonnet 5 — v0.0.96, 서브모듈은 팀 PR 링크 — v0.0.97, 이미 반영된 수정은 건너뜀 — v0.0.98, 3번 이상 연속 실패하면 수정 PR 링크·자동 생성(Opus) — v0.0.100, 그 뒤 올라온 워크플로 수정 PR 링크 — v0.0.101, envector 의 "SBOM pipeline and Go checks"·"Go checks" 알림 인식 — v0.0.102, Go 버전·govulncheck 실패는 첫 알림부터 수정 PR — v0.0.103 |
 | 문서 질문 | `@지라 질문 <소스> <질문>` → 미리 조각내 임베딩해 둔 문서에서 찾아 Claude 가 출처와 함께 답변 — v0.0.99 |
 | 대시보드 임베드 탭 | 서버 `.env` 에 적은 같은 출처 화면(예: 같은 서버의 Grafana)을 대시보드 상위 탭 iframe 으로, `/grafana/` 는 로그인 뒤 프록시 — v0.0.104 |
+| 기동 시 프롬프트 점검 | 작업 폴더에 `prompts/` 나 설정한 프롬프트 파일이 없으면 기동을 멈춤(엉뚱한 폴더에서 띄운 봇이 조용히 실패하던 문제) — v0.0.105 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -183,6 +184,18 @@ sudo docker run --rm -v "$PWD/rag":/rag -w /rag python:3.12-slim \
 설정(`application.yml` 의 `rag.*`): `RAG_ENABLED`(기본 true), `RAG_BASE_URL`, `RAG_TOP_K`(6), `RAG_SEARCH_TIMEOUT_SECONDS`(20), `RAG_ANSWER_TIMEOUT_SECONDS`(90), `RAG_MODEL`(비면 `claude.model`).
 
 다음 단계: 검색 백엔드를 envector 로 바꾸고, 그다음 hybrid 검색을 붙인다(v0.0.101 이후). 지금은 `backend: local`(이 서버 메모리의 벡터)로 찾는다.
+
+### 기동 시 프롬프트 점검 (v0.0.105)
+
+봇은 프롬프트(`prompts/*.md`)를 작업 폴더 기준 상대 경로로 찾는다. 2026-11-19 JDK 워치독이 cron(작업 폴더 = 홈)에서
+봇을 재시작하자 모든 `claude` 호출이 `System prompt file not found` 로 바로 끝났다. health 는 UP 이어서 4일 동안
+드러나지 않았고, `@지라` 자연어 요청은 "이해하지 못했어요"로만 답했다(lessons L27).
+- `StartupEnvValidator` 가 필수 환경변수 다음으로 작업 폴더의 `prompts/` 와, 환경변수로 바꿀 수 있는 프롬프트 4개
+  (`claude.intent.prompt-file`, `ci-alert.fix.prompt-file`, `ci-alert.code-fix.prompt-file`,
+  `ci-alert.code-fix.go-check-prompt-file`)가 있는지 본다. 없으면 작업 폴더와 없는 파일을 적고 기동을 멈춘다.
+  DB·Flyway 보다 먼저 실행된다.
+- `scripts/jdk-watchdog.sh` 는 재시작 전에 앱 폴더로 `cd` 한다. `start.sh` 는 원래 그렇게 한다.
+- Docker 이미지는 `WORKDIR /app` 에 `prompts` 를 복사하므로 영향 없다. 직접 띄울 때는 레포 루트에서 `java -jar build/libs/…` 로 실행한다.
 
 ### 대시보드 임베드 탭 + Grafana 프록시 (v0.0.104)
 
@@ -564,6 +577,8 @@ unattended-upgrades 가 openjdk 를 in-place 교체하면 실행 중인 JVM 이 
 - crontab `*/10 * * * *` 등록, 로그 `/tmp/jdk-watchdog.log`.
 - 2026-11-10 수정: 재시작한 봇이 cron PATH 를 물려받아 `claude`(`~/.local/bin`)를 못 찾던 문제(lessons L25) —
   스크립트가 PATH 에 `~/.local/bin` 을 넣고, 가장 최근 jar 가 아니라 실행 중이던 jar 를 다시 띄운다.
+- 2026-11-23 수정: 재시작한 봇이 cron 작업 폴더(홈)를 물려받아 `prompts/` 를 못 찾던 문제(lessons L27) —
+  스크립트가 앱 폴더로 `cd` 하고, 봇은 기동 시 프롬프트 점검으로 같은 실수를 바로 드러낸다(v0.0.105).
 - 대안 B(apt-mark hold)는 보안 패치가 밀려 기각 — A(자동 재시작)로 보안 패치 유지 + 무인 복구.
 
 ### 자격증명 포함 URL에서 대시보드 fetch 실패 수정 (v0.0.68)

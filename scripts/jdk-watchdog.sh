@@ -7,6 +7,9 @@
 set -u
 
 APP_DIR=/home/ubuntu/slackbot
+# cron 의 작업 폴더는 홈이다. 봇은 이 폴더를 물려받아 상대 경로 `prompts/*.md` 를 찾으므로 앱 폴더로 옮긴다
+# (2026-11-19 실발생: 재시작된 봇의 claude 호출이 "System prompt file not found: ~/prompts/…" 로 4일간 실패, lessons L27).
+cd "$APP_DIR" || exit 1
 # cron 의 PATH 에는 ~/.local/bin 이 없다. 봇은 이 PATH 를 물려받아 `claude` 를 찾으므로 여기서 넣는다
 # (2026-11-10 실발생: 재시작된 봇의 모든 claude 호출이 "Cannot run program \"claude\"" 로 실패, lessons L25).
 export PATH="/home/ubuntu/.local/bin:$PATH"
