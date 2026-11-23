@@ -1,9 +1,11 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 )
 
 // DashboardProxy exposes the Spring web dashboard through the ngrok tunnel.
@@ -30,7 +32,65 @@ func NewDashboardProxy(springBaseURL string) (*DashboardProxy, error) {
 }
 
 func (d *DashboardProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if c := ngrokWarningCookie(r.Host); c != nil {
+		http.SetCookie(w, c)
+	}
 	d.proxy.ServeHTTP(w, r)
+}
+
+// ngrokFreeDomainSuffixes are the base domains of ngrok's free plan, which puts
+// a "You are about to visit…" warning page (ERR_NGROK_6024) in front of browser
+// requests that lack its acknowledgement cookie.
+var ngrokFreeDomainSuffixes = []string{".ngrok-free.dev", ".ngrok-free.app"}
+
+// ngrokWarningCookie re-issues ngrok's warning-acknowledgement cookie from this
+// server (v0.0.107).
+//
+// ngrok's own page sets `abuse_interstitial=<host>` from JavaScript with
+// SameSite=None and a 7-day expiry. Safari does not attach that cookie to
+// fetch() requests or to requests inside an iframe, so the edge swapped the
+// embedded Grafana's scripts and API calls for the warning page and the tab
+// failed with "Grafana has failed to load its application files". The edge
+// only checks the cookie's value (the host name), so a server-set,
+// first-party cookie — the kind Safari sends with every same-site request —
+// with the same name replaces it. A browser's very first visit still sees the
+// warning once, because that request never reaches this server.
+//
+// Returns nil unless the request came in on an ngrok free domain.
+func ngrokWarningCookie(hostport string) *http.Cookie {
+	host := strings.ToLower(hostport)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if !validHostName(host) {
+		return nil
+	}
+	for _, suffix := range ngrokFreeDomainSuffixes {
+		if strings.HasSuffix(host, suffix) && len(host) > len(suffix) {
+			return &http.Cookie{
+				Name:     "abuse_interstitial",
+				Value:    host,
+				Path:     "/",
+				MaxAge:   365 * 24 * 60 * 60,
+				Secure:   true,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			}
+		}
+	}
+	return nil
+}
+
+func validHostName(host string) bool {
+	if host == "" || len(host) > 253 {
+		return false
+	}
+	for _, c := range host {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.') {
+			return false
+		}
+	}
+	return true
 }
 
 // DashboardProxyPaths is the whitelist of Spring paths reachable through the

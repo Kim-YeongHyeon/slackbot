@@ -160,3 +160,80 @@ func TestRegisterDashboardRoutes_GrafanaReachableOthersNot(t *testing.T) {
 		}
 	}
 }
+
+// v0.0.107: Safari 가 ngrok 이 JS 로 심은 경고 통과 쿠키를 fetch·iframe 요청에 붙이지 않아 임베드된 Grafana 가
+// 경고 페이지로 바뀌던 문제 — 서버가 같은 쿠키를 일반 1st-party 쿠키(Lax, Secure, 1년)로 다시 심는다.
+
+func findCookie(rec *httptest.ResponseRecorder, name string) *http.Cookie {
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == name {
+			return c
+		}
+	}
+	return nil
+}
+
+func TestDashboardProxy_ReissuesNgrokWarningCookieOnFreeDomain(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Set-Cookie", "upstream=1; Path=/")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/grafana/public/build/app.js", nil)
+	req.Host = "Some-Name.ngrok-free.dev"
+	rec := httptest.NewRecorder()
+	newTestProxy(t, upstream.URL).ServeHTTP(rec, req)
+
+	c := findCookie(rec, "abuse_interstitial")
+	if c == nil {
+		t.Fatalf("no abuse_interstitial cookie; Set-Cookie=%v", rec.Header().Values("Set-Cookie"))
+	}
+	// ngrok 엣지는 값이 호스트 이름인지만 본다 (소문자)
+	if c.Value != "some-name.ngrok-free.dev" || c.Path != "/" || !c.Secure || !c.HttpOnly ||
+		c.SameSite != http.SameSiteLaxMode || c.MaxAge < 30*24*60*60 {
+		t.Fatalf("cookie = %+v, want value=host Path=/ Secure HttpOnly SameSite=Lax long-lived", c)
+	}
+	if findCookie(rec, "upstream") == nil {
+		t.Fatal("upstream Set-Cookie was dropped")
+	}
+}
+
+func TestNgrokWarningCookie_OnlyForNgrokFreeHosts(t *testing.T) {
+	ok := map[string]string{
+		"abc.ngrok-free.dev":     "abc.ngrok-free.dev",
+		"abc.ngrok-free.app:443": "abc.ngrok-free.app",
+	}
+	for in, want := range ok {
+		if c := ngrokWarningCookie(in); c == nil || c.Value != want {
+			t.Errorf("ngrokWarningCookie(%q) = %+v, want value %q", in, c, want)
+		}
+	}
+	for _, in := range []string{
+		"", "localhost:3000", "127.0.0.1:3000", "example.com",
+		"ngrok-free.dev",                               // 서브도메인 없는 기반 도메인
+		"abc.ngrok-free.dev.attacker.example",          // 접미사 흉내
+		"abc.ngrok.app",                                // 유료 도메인 — 경고 페이지 없음
+		"a b.ngrok-free.dev", "abc.ngrok-free.dev;x=1", // 헤더에 못 넣는 문자
+	} {
+		if c := ngrokWarningCookie(in); c != nil {
+			t.Errorf("ngrokWarningCookie(%q) = %+v, want nil", in, c)
+		}
+	}
+}
+
+func TestDashboardProxy_NoNgrokCookieForInternalHost(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard/", nil)
+	req.Host = "localhost:3000"
+	rec := httptest.NewRecorder()
+	newTestProxy(t, upstream.URL).ServeHTTP(rec, req)
+
+	if c := findCookie(rec, "abuse_interstitial"); c != nil {
+		t.Fatalf("unexpected cookie for internal host: %+v", c)
+	}
+}

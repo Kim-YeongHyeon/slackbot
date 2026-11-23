@@ -25,6 +25,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 대시보드 임베드 탭 | 서버 `.env` 에 적은 같은 출처 화면(예: 같은 서버의 Grafana)을 대시보드 상위 탭 iframe 으로, `/grafana/` 는 로그인 뒤 프록시 — v0.0.104 |
 | 기동 시 프롬프트 점검 | 작업 폴더에 `prompts/` 나 설정한 프롬프트 파일이 없으면 기동을 멈춤(엉뚱한 폴더에서 띄운 봇이 조용히 실패하던 문제) — v0.0.105 |
 | 분류기 시스템 오류 안내 | 분류기(claude CLI)가 결과를 못 내면 "이해하지 못했어요" 대신 "잠시 후 다시 시도해 주세요" + 운영자 태그(`OPS_NOTIFY_USER`) — v0.0.106 |
+| Safari 에서 ngrok 경고 페이지 재등장 방지 | ngrok 무료 도메인으로 들어온 요청에 Go 봇이 경고 통과 쿠키를 일반 쿠키(Lax·Secure·1년)로 다시 심어, Safari 의 iframe·fetch 요청(임베드 Grafana 등)도 통과 — v0.0.107 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -185,6 +186,24 @@ sudo docker run --rm -v "$PWD/rag":/rag -w /rag python:3.12-slim \
 설정(`application.yml` 의 `rag.*`): `RAG_ENABLED`(기본 true), `RAG_BASE_URL`, `RAG_TOP_K`(6), `RAG_SEARCH_TIMEOUT_SECONDS`(20), `RAG_ANSWER_TIMEOUT_SECONDS`(90), `RAG_MODEL`(비면 `claude.model`).
 
 다음 단계: 검색 백엔드를 envector 로 바꾸고, 그다음 hybrid 검색을 붙인다(v0.0.101 이후). 지금은 `backend: local`(이 서버 메모리의 벡터)로 찾는다.
+
+### Safari 에서 임베드 Grafana 가 ngrok 경고 페이지에 막히던 문제 (v0.0.107)
+
+Safari 26 에서 [CI 러너] 탭을 열면 iframe 안에 ngrok "Visit Site" 가 다시 뜨고, 누른 뒤에도 "Grafana has failed to
+load its application files" 가 났다. ngrok 요청 기록(에이전트 인스펙터)으로 확인한 원인:
+- ngrok 무료 플랜은 경고 통과 쿠키 `abuse_interstitial` 이 없는 브라우저 요청을 경고 페이지(ERR_NGROK_6024, 200
+  text/html)로 바꾼다. 쿠키는 "Visit Site" 를 누를 때 ngrok 스크립트가 JS 로 심는다(`SameSite=None`, 7일).
+- Safari 는 그 쿠키를 최상위 문서·스크립트에는 붙였지만 `fetch` 요청과 iframe 안 요청에는 붙이지 않았다.
+  우리 코드의 요청은 v0.0.89 부터 `ngrok-skip-browser-warning` 헤더로 우회하지만, Grafana 가 직접 하는 요청에는
+  헤더를 붙일 수 없어 JS 가 경고 HTML 로 바뀌었다. 401 은 없었다(인증 문제 아님).
+- ngrok 엣지는 쿠키 **값이 호스트 이름인지만** 본다(값이 틀리면 경고).
+
+수정: Go 봇(`DashboardProxy`)이 ngrok 무료 도메인(`*.ngrok-free.dev`, `*.ngrok-free.app`)으로 들어온 요청의 응답에
+같은 이름의 쿠키를 `Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=1년` 으로 다시 심는다. 서버가 심은 1st-party
+쿠키라 Safari 도 같은 사이트의 모든 요청에 붙인다. 도메인은 코드에 없고 요청의 Host 를 쓴다.
+- 부수 효과: 한 번 들어온 브라우저는 7일마다 "Visit Site" 를 다시 누르지 않아도 된다.
+- 한계: 브라우저의 맨 첫 요청은 이 서버에 오기 전에 ngrok 이 막으므로 경고 한 번은 남는다. ngrok 이 공식 문서화한
+  우회(헤더·유료 플랜)가 아니라 쿠키 형식에 기대므로, ngrok 이 형식을 바꾸면 v0.0.106 이전 상태로 돌아간다.
 
 ### 분류기 시스템 오류 안내 (v0.0.106)
 
