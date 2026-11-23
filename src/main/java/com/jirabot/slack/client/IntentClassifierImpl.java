@@ -45,7 +45,8 @@ public class IntentClassifierImpl implements IntentClassifier {
         if (rawText == null || rawText.isBlank()) {
             return IntentResult.unknown(rawText);
         }
-        // STUDY: Haiku CLI 가 간헐적으로 exit≠0/빈출력/파싱실패/타임아웃으로 떨어진다(→ unknown = "명령 못 알아들음").
+        // STUDY: Haiku CLI 가 간헐적으로 exit≠0/빈출력/파싱실패/타임아웃으로 떨어진다. 3회 모두 실패하면
+        //        unknown("이해 못 함")이 아니라 classifier_error 로 돌려 "잠시 후 다시" + 운영자 태그로 답한다(v0.0.106).
         long timeout = props.timeoutSeconds();
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             Attempt a = attemptClassify(rawText, timeout);
@@ -61,8 +62,8 @@ public class IntentClassifierImpl implements IntentClassifier {
                         a.outcome(), attempt, MAX_ATTEMPTS, timeout);
             }
         }
-        log.warn("Haiku intent classify {}회 모두 실패 → unknown", MAX_ATTEMPTS);
-        return IntentResult.unknown(rawText);
+        log.warn("Haiku intent classify {}회 모두 실패 → classifier_error", MAX_ATTEMPTS);
+        return IntentResult.failed(rawText);
     }
 
     private Attempt attemptClassify(String rawText, long timeoutSeconds) {

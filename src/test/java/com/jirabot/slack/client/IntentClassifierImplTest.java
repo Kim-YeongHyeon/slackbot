@@ -80,25 +80,29 @@ class IntentClassifierImplTest {
     }
 
     @Test
-    void allTimeouts_returnsUnknown_afterMaxAttempts() {
+    void allTimeouts_returnsFailure_afterMaxAttempts() {
         when(runner.run(any(), anyString(), any(Duration.class)))
                 .thenReturn(new ProcessRunner.Result(-1, "", "", true));
 
         IntentResult r = classifier.classify("오래 걸리는 입력");
 
-        assertThat(r.intent()).isEqualTo("unknown");
+        // v0.0.106: 결과를 못 낸 것은 "이해 못 함"(unknown)이 아니라 시스템 오류
+        assertThat(r.isFailure()).isTrue();
+        assertThat(r.intent()).isEqualTo(IntentResult.FAILED);
+        assertThat(r.isActionable()).isFalse();
         verify(runner, times(IntentClassifierImpl.MAX_ATTEMPTS))
                 .run(any(List.class), anyString(), any(Duration.class));
     }
 
     @Test
-    void allAttemptsFail_returnsUnknown_afterMaxAttempts() {
+    void allAttemptsFail_returnsFailure_afterMaxAttempts() {
+        // 2026-11-19~23 실발생: 프롬프트 파일을 못 찾아 CLI 가 매번 exit 1
         when(runner.run(any(), anyString(), any(Duration.class)))
-                .thenReturn(new ProcessRunner.Result(1, "", "", false));
+                .thenReturn(new ProcessRunner.Result(1, "", "Error: System prompt file not found", false));
 
         IntentResult r = classifier.classify("뭔가");
 
-        assertThat(r.intent()).isEqualTo("unknown");
+        assertThat(r.isFailure()).isTrue();
         verify(runner, times(IntentClassifierImpl.MAX_ATTEMPTS))
                 .run(any(List.class), anyString(), any(Duration.class));
     }
@@ -107,6 +111,7 @@ class IntentClassifierImplTest {
     void blankInput_skipsCliCall() {
         IntentResult r = classifier.classify("  ");
         assertThat(r.intent()).isEqualTo("unknown");
+        assertThat(r.isFailure()).isFalse();   // 빈 입력은 시스템 오류가 아니다
         verify(runner, org.mockito.Mockito.never())
                 .run(any(List.class), anyString(), any(Duration.class));
     }

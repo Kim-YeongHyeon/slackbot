@@ -18,7 +18,10 @@ import com.jirabot.slack.client.JiraApiClient;
 import com.jirabot.slack.client.SlackNotifier;
 import com.jirabot.slack.client.ThreadActionClassifier;
 import com.jirabot.slack.client.dto.IntentResult;
+import com.jirabot.slack.client.dto.ThreadActionResult;
 import com.jirabot.slack.config.JiraProperties;
+import com.jirabot.slack.entity.IntentFailureEntity;
+import com.jirabot.slack.entity.IssueEntity;
 import com.jirabot.slack.repository.IntentFailureRepository;
 import com.jirabot.slack.repository.IssueRepository;
 import com.jirabot.slack.repository.UserMappingRepository;
@@ -93,7 +96,7 @@ class SlackEventControllerTest {
                 threadActionClassifier, intentFailureRepository,
                 userMappingRepository, slackNotifier,
                 directExecutor, deduplicator, reminderSubscriptionService, bugNotionService,
-                prImportService, ciAlertService, docQaService, "C1,C2");
+                prImportService, ciAlertService, docQaService, "C1,C2", "UOPS");
         mockMvc = standaloneSetup(controller).build();
     }
 
@@ -1432,5 +1435,78 @@ class SlackEventControllerTest {
                 .andExpect(status().isOk());
 
         verify(reminderSubscriptionService).disableAssignDm("U1");
+    }
+
+    // --- 분류기 시스템 오류 안내 (v0.0.106) — "이해 못 함"과 구분하고 운영자를 태그한다 ---
+
+    @Test
+    void classifierFailure_repliesTryLater_tagsOps_andRecordsError() throws Exception {
+        when(intentClassifier.classify(anyString())).thenReturn(IntentResult.failed("x"));
+
+        mockMvc.perform(post("/api/slack/event").contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 지피유 테스트 티켓 만들어줘", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(eq("C1"), any(), msg.capture());
+        assertThat(msg.getValue())
+                .contains("시스템 오류")
+                .contains("잠시 후 다시 시도해 주세요")
+                .contains("<@UOPS> 확인해주세요")
+                .doesNotContain("이해하지 못했어요");
+        ArgumentCaptor<IntentFailureEntity> saved = ArgumentCaptor.forClass(IntentFailureEntity.class);
+        verify(intentFailureRepository).save(saved.capture());
+        assertThat(saved.getValue().getErrorType()).isEqualTo("CLASSIFIER_ERROR");
+        verify(issueCreateService, never()).createFromSlackText(any(), any());
+    }
+
+    @Test
+    void unknownIntent_stillSaysNotUnderstood_withoutTaggingOps() throws Exception {
+        when(intentClassifier.classify(anyString())).thenReturn(IntentResult.unknown("x"));
+
+        mockMvc.perform(post("/api/slack/event").contentType(MediaType.APPLICATION_JSON)
+                        .content(appMentionEvent("<@U0BOT> 아무말 대잔치", freshTs())))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(eq("C1"), any(), msg.capture());
+        assertThat(msg.getValue()).contains("이해하지 못했어요").doesNotContain("<@");
+        ArgumentCaptor<IntentFailureEntity> saved = ArgumentCaptor.forClass(IntentFailureEntity.class);
+        verify(intentFailureRepository).save(saved.capture());
+        // unknown 은 confidence 0 이라 기존대로 LOW_CONFIDENCE 로 남는다 — 시스템 오류(CLASSIFIER_ERROR)가 아니다
+        assertThat(saved.getValue().getErrorType()).isEqualTo("LOW_CONFIDENCE");
+    }
+
+    @Test
+    void threadActionClassifierFailure_repliesTryLaterInThread() throws Exception {
+        IssueEntity parent = mock(IssueEntity.class);
+        when(parent.getIssueKey()).thenReturn("SLAC-1");
+        when(issueRepository.findBySlackChannelAndSlackThreadTs("C1", "1700000000.000100"))
+                .thenReturn(java.util.Optional.of(parent));
+        when(slackNotifier.getThreadMessages(any(), any())).thenReturn(List.of());
+        when(threadActionClassifier.classify(any(), any(), anyString())).thenReturn(ThreadActionResult.failed("x"));
+        String body = """
+                {"type":"event_callback","event":{
+                    "type":"app_mention","user":"U1","text":"<@U0BOT> 이거 내일까지로 바꿔줘",
+                    "channel":"C1","ts":"%s","thread_ts":"1700000000.000100"}}
+                """.formatted(freshTs());
+
+        mockMvc.perform(post("/api/slack/event").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> msg = ArgumentCaptor.forClass(String.class);
+        verify(slackNotifier).postThreadReply(eq("C1"), eq("1700000000.000100"), msg.capture());
+        assertThat(msg.getValue()).contains("잠시 후 다시 시도해 주세요").contains("<@UOPS>")
+                .doesNotContain("이해하지 못했어요");
+        ArgumentCaptor<IntentFailureEntity> saved = ArgumentCaptor.forClass(IntentFailureEntity.class);
+        verify(intentFailureRepository).save(saved.capture());
+        assertThat(saved.getValue().getErrorType()).isEqualTo("CLASSIFIER_ERROR");
+    }
+
+    @Test
+    void systemErrorReply_withoutOpsUser_hasNoMention() {
+        assertThat(SlackEventController.systemErrorReply(null)).contains("잠시 후 다시").doesNotContain("<@");
+        assertThat(SlackEventController.systemErrorReply("  ")).doesNotContain("<@").doesNotContain("확인해주세요");
+        assertThat(SlackEventController.systemErrorReply(" U123 ")).endsWith("<@U123> 확인해주세요.");
     }
 }

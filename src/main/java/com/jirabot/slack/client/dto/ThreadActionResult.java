@@ -21,4 +21,15 @@ public record ThreadActionResult(
     public static ThreadActionResult unknown(String rawInput) {
         return new ThreadActionResult("unknown", 0, Map.of(), rawInput);
     }
+
+    // 분류기가 결과를 내지 못함(프로세스 실패·타임아웃·응답 파싱 실패) — "이해 못 함"(unknown)과 구분한다.
+    public static final String FAILED = IntentResult.FAILED;
+
+    public static ThreadActionResult failed(String rawInput) {
+        return new ThreadActionResult(FAILED, 0, Map.of(), rawInput);
+    }
+
+    public boolean isFailure() {
+        return FAILED.equals(action);
+    }
 }

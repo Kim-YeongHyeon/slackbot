@@ -24,6 +24,7 @@ Slack 채널에서 자연어로 메시지를 보내면 AI가 자동 분류하여
 | 문서 질문 | `@지라 질문 <소스> <질문>` → 미리 조각내 임베딩해 둔 문서에서 찾아 Claude 가 출처와 함께 답변 — v0.0.99 |
 | 대시보드 임베드 탭 | 서버 `.env` 에 적은 같은 출처 화면(예: 같은 서버의 Grafana)을 대시보드 상위 탭 iframe 으로, `/grafana/` 는 로그인 뒤 프록시 — v0.0.104 |
 | 기동 시 프롬프트 점검 | 작업 폴더에 `prompts/` 나 설정한 프롬프트 파일이 없으면 기동을 멈춤(엉뚱한 폴더에서 띄운 봇이 조용히 실패하던 문제) — v0.0.105 |
+| 분류기 시스템 오류 안내 | 분류기(claude CLI)가 결과를 못 내면 "이해하지 못했어요" 대신 "잠시 후 다시 시도해 주세요" + 운영자 태그(`OPS_NOTIFY_USER`) — v0.0.106 |
 | 채널 제한 | 허용된 채널에서만 봇 동작 |
 
 ### 성능/안정성 (v0.0.21)
@@ -184,6 +185,20 @@ sudo docker run --rm -v "$PWD/rag":/rag -w /rag python:3.12-slim \
 설정(`application.yml` 의 `rag.*`): `RAG_ENABLED`(기본 true), `RAG_BASE_URL`, `RAG_TOP_K`(6), `RAG_SEARCH_TIMEOUT_SECONDS`(20), `RAG_ANSWER_TIMEOUT_SECONDS`(90), `RAG_MODEL`(비면 `claude.model`).
 
 다음 단계: 검색 백엔드를 envector 로 바꾸고, 그다음 hybrid 검색을 붙인다(v0.0.101 이후). 지금은 `backend: local`(이 서버 메모리의 벡터)로 찾는다.
+
+### 분류기 시스템 오류 안내 (v0.0.106)
+
+v0.0.105 이전에는 분류기가 결과를 못 내도(CLI 실패·타임아웃·응답 파싱 실패) "이해하지 못했어요"로 답해서, 사용자는
+문장 문제로 생각했고 장애가 4일 동안 드러나지 않았다. 이제 두 경우를 나눈다.
+
+| 경우 | 답 | `intent_failures.error_type` |
+|---|---|---|
+| 분류기가 답했지만 unknown·신뢰도 0.6 미만 | 지금처럼 "이해하지 못했어요" | `LOW_CONFIDENCE` / `UNKNOWN_INTENT` / `UNKNOWN_THREAD_ACTION` |
+| 분류기가 결과를 못 냄(의도 분류는 3회 재시도 후) | ":warning: 지금 요청을 처리하지 못했어요(시스템 오류). 잠시 후 다시 시도해 주세요. `<@운영자>` 확인해주세요." | `CLASSIFIER_ERROR` |
+
+- 의도 분류(`IntentClassifierImpl`)와 스레드 액션 분류(`ThreadActionClassifierImpl`) 둘 다 해당한다.
+- 운영자: `OPS_NOTIFY_USER`(Slack user ID). 비우면 `FEATURE_REQUEST_NOTIFY_USER`(기능 요청 DM 관리자)를 쓰고, 둘 다 비면 태그 없이 안내만 한다.
+  `NOTIFY_MENTION=PLAIN` 은 이슈 알림용이라 이 태그에는 적용하지 않는다.
 
 ### 기동 시 프롬프트 점검 (v0.0.105)
 

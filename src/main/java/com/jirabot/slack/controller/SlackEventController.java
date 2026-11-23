@@ -150,6 +150,8 @@ public class SlackEventController {
     private final CiAlertService ciAlertService;
     private final com.jirabot.slack.rag.DocQaService docQaService;
     private final Set<String> allowedChannels;
+    // 분류기 시스템 오류 때 태그할 운영자 Slack user ID (비우면 태그 없이 안내만).
+    private final String opsNotifyUser;
 
     public SlackEventController(IssueCreateService issueCreateService,
                                 IssueSearchService issueSearchService,
@@ -172,7 +174,9 @@ public class SlackEventController {
                                 PrImportService prImportService,
                                 CiAlertService ciAlertService,
                                 com.jirabot.slack.rag.DocQaService docQaService,
-                                @Value("${slack.allowed-channels:}") String allowedChannelsConfig) {
+                                @Value("${slack.allowed-channels:}") String allowedChannelsConfig,
+                                @Value("${ops.notify-slack-user:}") String opsNotifyUser) {
+        this.opsNotifyUser = opsNotifyUser;
         this.issueCreateService = issueCreateService;
         this.issueSearchService = issueSearchService;
         this.scrumReportService = scrumReportService;
@@ -456,6 +460,13 @@ public class SlackEventController {
             ThreadActionResult action = threadActionClassifier.classify(parentIssue, threadMessages, cleaned);
             log.info("Thread action classified: action={} confidence={}", action.action(), action.confidence());
 
+            if (action.isFailure()) {
+                intentFailureRepository.save(new IntentFailureEntity(
+                        cleaned, CLASSIFIER_ERROR, "thread action classifier failed, parent=" + parentIssue.getIssueKey(),
+                        event.user(), event.channel()));
+                replyInThread(event, threadTs, systemErrorReply(opsNotifyUser));
+                return;
+            }
             if (!action.isActionable()) {
                 intentFailureRepository.save(new IntentFailureEntity(
                         cleaned, "UNKNOWN_THREAD_ACTION",
@@ -1027,6 +1038,19 @@ public class SlackEventController {
         issueCreateService.createFromSlackText(IssueCreateCommand.from(event, cleaned), intent);
     }
 
+    static final String CLASSIFIER_ERROR = "CLASSIFIER_ERROR";
+
+    // STUDY: 분류기 시스템 오류(CLI 실패·타임아웃) 안내. 사용자는 문장을 바꿔 다시 쓰지 않도록 "잠시 후 다시"를,
+    //        운영자는 Slack 멘션(<@ID>)으로 알림을 받는다. notify.mention=PLAIN 정책은 이슈 알림용이라 여기엔 적용하지
+    //        않는다 — 이 멘션은 알림이 목적이다.
+    static String systemErrorReply(String opsUser) {
+        String text = ":warning: 지금 요청을 처리하지 못했어요(시스템 오류). 잠시 후 다시 시도해 주세요.";
+        if (opsUser == null || opsUser.isBlank()) {
+            return text;
+        }
+        return text + " <@" + opsUser.strip() + "> 확인해주세요.";
+    }
+
     // STUDY: 키워드 매칭 실패 시 Haiku로 1차 의도 분류 → intent별 후속 처리.
     //        Haiku 실패/unknown 시 Sonnet 호출하지 않고 안내 메시지만 반환.
     private void handleWithIntent(SlackEventInner event, String cleaned) {
@@ -1035,6 +1059,14 @@ public class SlackEventController {
             log.info("Haiku classified: intent={} confidence={} input='{}'",
                     intent.intent(), intent.confidence(), cleaned);
 
+            if (intent.isFailure()) {
+                intentFailureRepository.save(new IntentFailureEntity(
+                        cleaned, CLASSIFIER_ERROR,
+                        "intent classifier failed on every retry",
+                        event.user(), event.channel()));
+                replyThread(event, systemErrorReply(opsNotifyUser));
+                return;
+            }
             if (!intent.isActionable()) {
                 String errorType = intent.confidence() < IntentResult.CONFIDENCE_THRESHOLD
                         ? "LOW_CONFIDENCE" : "UNKNOWN_INTENT";

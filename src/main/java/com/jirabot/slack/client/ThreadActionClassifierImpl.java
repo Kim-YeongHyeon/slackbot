@@ -49,20 +49,20 @@ public class ThreadActionClassifierImpl implements ThreadActionClassifier {
 
             if (result.timedOut()) {
                 log.warn("Thread action classifier timed out");
-                return ThreadActionResult.unknown(userMessage);
+                return ThreadActionResult.failed(userMessage);
             }
             if (result.exitCode() != 0) {
                 log.warn("Thread action classifier exited with code={}", result.exitCode());
-                return ThreadActionResult.unknown(userMessage);
+                return ThreadActionResult.failed(userMessage);
             }
             if (result.stdout() == null || result.stdout().isBlank()) {
                 log.warn("Thread action classifier returned empty stdout");
-                return ThreadActionResult.unknown(userMessage);
+                return ThreadActionResult.failed(userMessage);
             }
             return parseEnvelope(result.stdout(), userMessage);
         } catch (Exception e) {
             log.warn("Thread action classification failed: {}", e.toString());
-            return ThreadActionResult.unknown(userMessage);
+            return ThreadActionResult.failed(userMessage);
         }
     }
 
@@ -83,17 +83,17 @@ public class ThreadActionClassifierImpl implements ThreadActionClassifier {
         try {
             JsonNode envelope = objectMapper.readTree(stdout);
             if (envelope.path("is_error").asBoolean(false)) {
-                return ThreadActionResult.unknown(rawInput);
+                return ThreadActionResult.failed(rawInput);
             }
             String inner = envelope.path("result").asText("");
             if (inner.isBlank()) {
-                return ThreadActionResult.unknown(rawInput);
+                return ThreadActionResult.failed(rawInput);
             }
             String stripped = stripToJsonObject(inner);
             return objectMapper.readValue(stripped, ThreadActionResult.class);
         } catch (Exception e) {
             log.warn("Thread action JSON parse failed: {}", e.toString());
-            return ThreadActionResult.unknown(rawInput);
+            return ThreadActionResult.failed(rawInput);
         }
     }
 

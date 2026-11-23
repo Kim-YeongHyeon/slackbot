@@ -145,6 +145,11 @@ notify:
 feature-request:
   notify-slack-user: ${FEATURE_REQUEST_NOTIFY_USER:}
 
+# 분류기 시스템 오류(claude CLI 실패·타임아웃) 답장에 태그할 운영자 Slack user ID (비우면 태그 없이 안내만, v0.0.106).
+# STUDY: 중첩 placeholder — OPS_NOTIFY_USER 가 없으면 FEATURE_REQUEST_NOTIFY_USER(같은 관리자)를, 그것도 없으면 빈 값.
+ops:
+  notify-slack-user: ${OPS_NOTIFY_USER:${FEATURE_REQUEST_NOTIFY_USER:}}
+
 # 일일 리마인더 — 사용자별 opt-in 은 Slack 명령 `@봇더지라 리마인더 on` 으로 처리.
 # enabled 는 전역 비상 차단용. 기본 true, 평소 손대지 않는다.
 reminder:
