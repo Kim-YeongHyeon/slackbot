@@ -10,6 +10,15 @@
   // 프레임 밖(직접 열림)이면 아무것도 하지 않는다 — 일반 뷰어에 영향 0.
   if (window.parent === window) return;
 
+  // 이 문서가 몇 번 아티팩트인지 — 서버가 주입 태그의 data-artifact-id 로 알려준다 (v0.0.108).
+  // currentScript 는 스크립트가 처음 실행되는 동안에만 유효하므로 맨 앞에서 읽어 둔다.
+  var selfId = (function () {
+    var s = document.currentScript;
+    var v = s && s.getAttribute('data-artifact-id');
+    return /^\d+$/.test(v || '') ? parseInt(v, 10) : null;
+  })();
+  var VIEW_PATH = /^\/artifacts\/view\/(\d+)\/?$/;
+
   var NS = 'cmt';
   var parentOrigin = null;
   var comments = [];          // 부모가 준 미해결 루트 [{cid, quote, prefix, suffix}]
@@ -274,6 +283,25 @@
     if (hitCid != null) post('highlight-click', { cid: hitCid, y: rangeY(anchored.get(hitCid)) });
   }
 
+  // ===== 다른 아티팩트 링크 (v0.0.108) =====
+  // 시리즈 목차(../44/) 같은 링크를 누르면 iframe 안 문서만 바뀌고 리뷰 페이지는 원래 편의 댓글을 붙인다.
+  // 이동을 막고 리뷰 페이지에 알려 그 편의 리뷰 화면으로 넘어가게 한다. 같은 편·외부 링크는 그대로 둔다.
+  // 버블 단계에서 defaultPrevented 를 확인 — 문서 자체 스크립트가 처리한 클릭은 건드리지 않는다.
+  function onLinkClick(ev) {
+    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    var a = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+    if (!a) return;
+    var url;
+    try { url = new URL(a.href); } catch (_) { return; }
+    if (url.origin !== parentOrigin) return;
+    var m = VIEW_PATH.exec(url.pathname);
+    if (!m) return;
+    var target = parseInt(m[1], 10);
+    if (target === selfId) return;
+    ev.preventDefault();
+    post('open-artifact', { artifactId: target });
+  }
+
   // ===== 리스너 (1회만) =====
   var mouseTimer = null;
   function installListeners() {
@@ -284,6 +312,7 @@
       mouseTimer = setTimeout(captureSelection, 0);   // 브라우저가 선택을 확정한 뒤 읽는다
     });
     document.addEventListener('click', onDocClick);
+    document.addEventListener('click', onLinkClick);
     window.addEventListener('resize', emitStateDebounced);
     if (typeof ResizeObserver !== 'undefined' && document.body) {
       new ResizeObserver(emitStateDebounced).observe(document.body);
@@ -291,7 +320,7 @@
   }
 
   // ===== 라이프사이클: load 시 ready 만 보낸다 =====
-  function announce() { post('ready'); }
+  function announce() { post('ready', { artifactId: selfId }); }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', announce);
   } else {

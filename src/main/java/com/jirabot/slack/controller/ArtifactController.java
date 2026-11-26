@@ -245,7 +245,7 @@ public class ArtifactController {
                         .header("X-Content-Type-Options", "nosniff")
                         .header("X-Sol-Artifact", "embedded")
                         .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
-                        .body(ArtifactEmbedder.inline(id, injectAgent(artifact.getHtml(), agentJs),
+                        .body(ArtifactEmbedder.inline(id, injectAgent(artifact.getHtml(), agentJs, id),
                                 path -> assetRepository.findByArtifactIdAndPath(id, path))))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
@@ -280,7 +280,7 @@ public class ArtifactController {
                             .header("X-Content-Type-Options", "nosniff")
                             .header("X-Frame-Options", "SAMEORIGIN")
                             .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
-                            .body(injectAgent(a.getHtml(), agentJs)))
+                            .body(injectAgent(a.getHtml(), agentJs, id)))
                     .orElseGet(() -> ResponseEntity.status(404)
                             .contentType(new MediaType(MediaType.TEXT_HTML, StandardCharsets.UTF_8))
                             .body("<html><body style='font-family:sans-serif'>"
@@ -325,12 +325,16 @@ public class ArtifactController {
     //        광고차단과 무관하게 항상 동작한다. CSP 는 sandbox 만 걸려 있어 인라인 스크립트가 허용된다.
     // STUDY: toLowerCase().lastIndexOf 는 터키어 로케일 등에서 'I'/'İ' 매핑이 깨진다(로케일 함정) —
     //        CASE_INSENSITIVE 정규식 Matcher 로 마지막 매치 위치를 안전하게 찾는다.
-    static String injectAgent(String html, String agentJs) {
+    // data-artifact-id (v0.0.108): 에이전트가 자기 문서가 몇 번 아티팩트인지 알게 한다. 시리즈 목차(../44/)를
+    // 누르면 리뷰 iframe 안 문서만 다른 아티팩트로 바뀌는데, 리뷰 페이지가 URL 의 id 로 댓글을 붙이고 저장해
+    // 다른 편 댓글이 한 편에 모였다. 에이전트가 ready 에 이 id 를 실어 보내면 리뷰 페이지가 어긋남을 알아챈다.
+    static String injectAgent(String html, String agentJs, long artifactId) {
         // 스크립트 본문에 "</script" 가 있으면 HTML 파서가 거기서 블록을 닫으므로 방어적으로 이스케이프
         // STUDY: replaceAll 의 치환 문자열에서 "\" 는 이스케이프 문자라, 결과에 백슬래시 하나를 넣으려면
         //        Java 리터럴로 "\\\\" 가 필요하다 ("<\\/script" 로 쓰면 "\/"→"/" 가 되어 아무것도 안 바뀐다).
         String safeJs = agentJs.replaceAll("(?i)<(/script)", "<\\\\$1");   // 대소문자 보존, "/" 앞에 "\" 추가
-        String tag = "<script data-sol-comment-agent>" + safeJs + "</script>";
+        // STUDY: id 는 long 이라 숫자만 들어간다 — 속성값에 사용자 문자열을 넣지 않으므로 HTML 이스케이프가 필요 없다.
+        String tag = "<script data-sol-comment-agent data-artifact-id=\"" + artifactId + "\">" + safeJs + "</script>";
         Matcher m = Pattern.compile("</body>", Pattern.CASE_INSENSITIVE).matcher(html);
         int last = -1;
         while (m.find()) {

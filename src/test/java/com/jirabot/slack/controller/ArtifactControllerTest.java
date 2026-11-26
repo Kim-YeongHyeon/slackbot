@@ -123,9 +123,24 @@ class ArtifactControllerTest {
                 .andExpect(header().string("Content-Security-Policy", "sandbox allow-scripts"))
                 .andExpect(result -> assertThat(result.getResponse().getContentAsString())
                         .contains("data:image/png;base64,")
-                        .contains("data-sol-comment-agent")
+                        .contains("data-sol-comment-agent data-artifact-id=\"7\"")
                         .doesNotContain("src=\"images/plot.png\""));
         verify(assetRepository).findByArtifactIdAndPath(7L, "images/plot.png");
+    }
+
+    @Test
+    void agentCarriesItsOwnArtifactId_notAnotherOne() throws Exception {
+        // v0.0.108: 리뷰 페이지는 이 id 로 "iframe 문서가 다른 편으로 바뀌었는지"를 판단한다.
+        // 다른 아티팩트의 id 가 실리면 그 편 댓글이 엉뚱한 문서에 붙는다.
+        when(repository.findById(8L)).thenReturn(Optional.of(saved("series 2", "<html><body>p2</body></html>")));
+
+        for (String path : List.of("/artifacts/view/8/", "/api/artifacts/8/embedded")) {
+            mockMvc.perform(get(path))
+                    .andExpect(status().isOk())
+                    .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                            .contains("data-artifact-id=\"8\"")
+                            .doesNotContain("data-artifact-id=\"7\""));
+        }
     }
 
     @Test
@@ -498,7 +513,7 @@ class ArtifactControllerTest {
                     String out = result.getResponse().getContentAsString();
                     assertThat(out).contains("hi");
                     // v0.0.88: 외부 src 가 아니라 인라인 — 타사 쿠키 차단 브라우저에서도 동작해야 한다
-                    assertThat(out).contains("<script data-sol-comment-agent>");
+                    assertThat(out).contains("<script data-sol-comment-agent data-artifact-id=\"7\">");
                     assertThat(out).doesNotContain("src=\"/artifacts/view/7/" + ArtifactController.AGENT_PATH);
                 });
         // 주입은 새 문자열 생성일 뿐 — DB(엔티티)를 저장하지 않는다 (원문 불변).
@@ -565,15 +580,15 @@ class ArtifactControllerTest {
 
     @Test
     void injectAgent_inlinesScriptBeforeLastBodyClose() {
-        String out = ArtifactController.injectAgent("<html><body>hi</body></html>", "AGENT();");
-        assertThat(out).isEqualTo("<html><body>hi<script data-sol-comment-agent>AGENT();</script></body></html>");
+        String out = ArtifactController.injectAgent("<html><body>hi</body></html>", "AGENT();", 3);
+        assertThat(out).isEqualTo("<html><body>hi<script data-sol-comment-agent data-artifact-id=\"3\">AGENT();</script></body></html>");
         assertThat(countOccurrences(out, "data-sol-comment-agent")).isEqualTo(1);
     }
 
     @Test
     void injectAgent_lastBodyClose_whenMultiple() {
         // 본문 중간(예: 코드 예시)의 </body> 가 아니라 마지막 </body> 앞에 넣는다
-        String out = ArtifactController.injectAgent("<body>a</body><body>b</body>", "X");
+        String out = ArtifactController.injectAgent("<body>a</body><body>b</body>", "X", 3);
         int scriptIdx = out.indexOf("data-sol-comment-agent");
         assertThat(scriptIdx).isGreaterThan(out.indexOf("b"));
         assertThat(countOccurrences(out, "data-sol-comment-agent")).isEqualTo(1);
@@ -581,20 +596,20 @@ class ArtifactControllerTest {
 
     @Test
     void injectAgent_uppercaseBodyTag_matchedCaseInsensitively() {
-        String out = ArtifactController.injectAgent("<HTML><BODY>hi</BODY></HTML>", "X");
-        assertThat(out).contains("<script data-sol-comment-agent>X</script></BODY>");
+        String out = ArtifactController.injectAgent("<HTML><BODY>hi</BODY></HTML>", "X", 3);
+        assertThat(out).contains("<script data-sol-comment-agent data-artifact-id=\"3\">X</script></BODY>");
     }
 
     @Test
     void injectAgent_noBodyTag_appendsAtEnd() {
-        String out = ArtifactController.injectAgent("<div>no body tag</div>", "X");
-        assertThat(out).endsWith("<script data-sol-comment-agent>X</script>");
+        String out = ArtifactController.injectAgent("<div>no body tag</div>", "X", 3);
+        assertThat(out).endsWith("<script data-sol-comment-agent data-artifact-id=\"3\">X</script>");
     }
 
     @Test
     void injectAgent_escapesClosingScriptInsideAgent() {
         // 에이전트 본문의 </script> 가 인라인 블록을 조기 종료시키면 안 된다 (대소문자 무관)
-        String out = ArtifactController.injectAgent("<body></body>", "var s='</SCRIPT>';");
+        String out = ArtifactController.injectAgent("<body></body>", "var s='</SCRIPT>';", 3);
         assertThat(out).contains("var s='<\\/SCRIPT>';");
         assertThat(countOccurrences(out.toLowerCase(), "</script>")).isEqualTo(1);
     }

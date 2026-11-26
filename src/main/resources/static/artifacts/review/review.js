@@ -82,7 +82,15 @@
     if (e.source !== frame.contentWindow || !e.data || e.data.ns !== NS) return;
     var d = e.data;
     if (d.type === 'ready') {
+      // 문서가 다른 아티팩트로 바뀌어 있으면(링크 가로채기를 피한 이동) 이 편 댓글을 보내지 않고 그 편의
+      // 리뷰 화면으로 넘어간다 (v0.0.108). replace — 뒤로가기가 이 어긋난 상태로 돌아오지 않게.
+      if (d.artifactId != null && d.artifactId !== id) {
+        openArtifact(d.artifactId, true);
+        return;
+      }
       sendToFrame('init', { comments: unresolvedRoots() });
+    } else if (d.type === 'open-artifact') {
+      openArtifact(d.artifactId, false);
     } else if (d.type === 'state') {
       docHeight = d.docHeight || 0;
       frame.style.height = docHeight + 'px';
@@ -101,6 +109,19 @@
       setActive(d.cid, true);
     }
   });
+
+  // 다른 아티팩트의 리뷰 화면으로 (v0.0.108) — 댓글은 그 편의 id 로 읽고 저장해야 한다.
+  function openArtifact(target, replace) {
+    if (typeof target !== 'number' || !/^\d+$/.test(String(target)) || target === id) return;
+    if (!replace && hasDraft() && !confirm('작성 중인 댓글이 있어요. 이 페이지를 떠날까요?')) return;
+    var url = '/artifacts/review/index.html?id=' + target;
+    if (replace) location.replace(url); else location.assign(url);
+  }
+  function hasDraft() {
+    return Array.prototype.some.call(rail.querySelectorAll('textarea'), function (ta) {
+      return ta.value.trim() !== '';
+    });
+  }
 
   // ===== 데이터 로드 =====
   function refetch() {
